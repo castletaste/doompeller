@@ -6,6 +6,7 @@
 library;
 
 export 'doom_scene.dart';
+export 'doom_runtime_game.dart';
 export 'doom_sprite_atlas.dart';
 export 'doom_sprite_catalog.dart';
 export 'frame_histogram.dart';

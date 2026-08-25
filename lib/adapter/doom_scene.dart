@@ -226,6 +226,7 @@ final class DoomScene {
     this._geometryBindings = const {},
     this._spriteAtlas,
     this._spriteMaterials = const {},
+    List<int> sectorLights = const <int>[],
   }) : // These are exposed through narrower read-only accessors, so the
        // backing fields stay private.
        // ignore: prefer_initializing_formals
@@ -235,7 +236,8 @@ final class DoomScene {
        // ignore: prefer_initializing_formals
        _ceilingPlanes = ceilingPlanes,
        // ignore: prefer_initializing_formals
-       _wallBands = wallBands;
+       _wallBands = wallBands,
+       _sectorLights = List<int>.of(sectorLights);
 
   /// Assembles a scene from compiled level data.
   factory DoomScene.build(
@@ -314,6 +316,7 @@ final class DoomScene {
     PaletteMaterialCache? materials,
     Set<String> spritePrefixes = const <String>{},
     Set<String> spriteNames = const <String>{},
+    List<int> sectorLights = const <int>[],
     geometry.GeometryOptions spriteAtlasOptions =
         geometry.GeometryOptions.defaults,
   }) {
@@ -440,6 +443,7 @@ final class DoomScene {
       geometryBindings: bindings,
       spriteAtlas: spriteAtlas,
       spriteMaterials: spriteMaterials,
+      sectorLights: sectorLights,
     );
   }
 
@@ -459,6 +463,14 @@ final class DoomScene {
   final Map<int, _GeometryBinding> _geometryBindings;
   final DoomSpriteAtlas? _spriteAtlas;
   final Map<int, PaletteMaterial> _spriteMaterials;
+  final List<int> _sectorLights;
+  final Set<ActorSpriteComponent> _activeActorSprites =
+      <ActorSpriteComponent>{};
+  final Map<String, List<ActorSpriteComponent>> _actorPool =
+      <String, List<ActorSpriteComponent>>{};
+  final Set<PackedFlameSurface> _inactiveActorSurfaces = <PackedFlameSurface>{};
+  final Map<PackedFlameSurface, ActorSpriteComponent> _actorBySurface =
+      <PackedFlameSurface, ActorSpriteComponent>{};
 
   /// Exact source mesh identity used by the compiler's dynamic references.
   PackedFlameSurface surfaceForMesh(int meshIndex) {
@@ -470,16 +482,35 @@ final class DoomScene {
   }
 
   /// Total surfaces, the number that drives per-frame draw cost.
-  int get surfaceCount =>
-      _surfacesByPage.values.fold(0, (sum, list) => sum + list.length);
+  int get surfaceCount => surfaces.length;
 
   /// Every surface, in creation order.
   Iterable<PackedFlameSurface> get surfaces =>
-      _surfacesByPage.values.expand((list) => list);
+      _surfacesByPage.values.expand((list) => list).where(_surfaceIsActive);
+
+  bool _surfaceIsActive(PackedFlameSurface surface) =>
+      !_inactiveActorSurfaces.contains(surface) &&
+      (_actorBySurface[surface]?.active ?? true);
+
+  /// Actor surfaces retained for reuse, active plus pooled.
+  int get actorSurfaceRegistryCount =>
+      _activeActorSprites.length +
+      _actorPool.values.fold<int>(0, (sum, pool) => sum + pool.length);
+
+  int get activeActorSurfaceCount =>
+      _activeActorSprites.where((actor) => actor.active).length;
+
+  int get pooledActorSurfaceCount =>
+      _actorPool.values.fold<int>(0, (sum, pool) => sum + pool.length);
+
+  bool isActorSpriteActive(ActorSpriteComponent actor) => actor.active;
 
   /// Surfaces drawing [page].
-  List<PackedFlameSurface> surfacesForPage(String page) =>
-      List.unmodifiable(_surfacesByPage[page] ?? const []);
+  List<PackedFlameSurface> surfacesForPage(String page) => List.unmodifiable(
+    (_surfacesByPage[page] ?? const <PackedFlameSurface>[]).where(
+      _surfaceIsActive,
+    ),
+  );
 
   /// Moves a floor or ceiling to [height].
   ///
@@ -587,29 +618,150 @@ final class DoomScene {
     return updated;
   }
 
-  /// Adds one upright actor billboard from the bounded supplemental atlas.
-  ActorSpriteComponent addActorSprite(ActorSpriteInstance actor) {
-    final spriteAtlas = _spriteAtlas;
-    if (spriteAtlas == null) {
-      throw StateError(
-        'No supplemental sprite atlas was requested for this scene',
+  /// Rewrites the exact retained plane and near-wall vertices lit by a sector.
+  ///
+  /// Fake-contrast offsets already present on walls are retained. Only dirty
+  /// ranges are marked; no mesh, surface, or GPU buffer is recreated.
+  int updateSectorLight({required int sectorIndex, required int lightLevel}) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('updateSectorLight requires fromCompiledLevel');
+    }
+    if (sectorIndex < 0 || sectorIndex >= _sectorLights.length) {
+      throw RangeError.index(sectorIndex, _sectorLights, 'sectorIndex');
+    }
+    if (lightLevel < 0 || lightLevel > 255) {
+      throw RangeError.range(lightLevel, 0, 255, 'lightLevel');
+    }
+    final int previousLevel = _sectorLights[sectorIndex];
+    if (previousLevel == lightLevel) {
+      return 0;
+    }
+    _sectorLights[sectorIndex] = lightLevel;
+    final double previous = previousLevel / 255.0;
+    final double next = lightLevel / 255.0;
+    var touched = 0;
+
+    void updateRange(
+      int meshIndex,
+      int firstVertex,
+      int vertexCount, {
+      required bool preserveContrast,
+    }) {
+      final mesh = compiled.meshes[meshIndex];
+      for (
+        var vertex = firstVertex;
+        vertex < firstVertex + vertexCount;
+        vertex++
+      ) {
+        final offset =
+            vertex * geometry.DoomVertexAbi.floatsPerVertex +
+            geometry.DoomVertexAbi.colorOffset;
+        final double value = preserveContrast
+            ? (mesh.vertices[offset] - previous + next).clamp(0.0, 1.0)
+            : next;
+        mesh.setVertexLight(vertex, value);
+      }
+      _geometryBindings[meshIndex]!.surface.markVertexRangeDirty(
+        firstVertex,
+        vertexCount,
+      );
+      touched += vertexCount;
+    }
+
+    for (final plane in compiled.floorPlanes) {
+      if (plane.sector != sectorIndex) {
+        continue;
+      }
+      for (final range in plane.ranges) {
+        updateRange(
+          range.meshIndex,
+          range.firstVertex,
+          range.vertexCount,
+          preserveContrast: false,
+        );
+      }
+    }
+    for (final plane in compiled.ceilingPlanes) {
+      if (plane.sector != sectorIndex) {
+        continue;
+      }
+      for (final range in plane.ranges) {
+        updateRange(
+          range.meshIndex,
+          range.firstVertex,
+          range.vertexCount,
+          preserveContrast: false,
+        );
+      }
+    }
+    for (final band in compiled.wallBands) {
+      if (band.frontSector != sectorIndex) {
+        continue;
+      }
+      updateRange(
+        band.meshIndex,
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+        preserveContrast: true,
       );
     }
+    if (touched > 0) {
+      diagnostics.onDynamicUpdate();
+    }
+    return touched;
+  }
+
+  /// Adds one upright actor billboard from the bounded supplemental atlas.
+  ActorSpriteComponent addActorSprite(ActorSpriteInstance actor) {
+    final component = acquireActorSprite(actor);
+    if (component == null) {
+      throw StateError(
+        'No sprite for ${actor.spritePrefix} frame ${actor.frame}',
+      );
+    }
+    return component;
+  }
+
+  /// Acquires an actor billboard, reusing a retained inactive component first.
+  /// Returns null when the requested prefix/frame is not in the bounded atlas.
+  ActorSpriteComponent? acquireActorSprite(ActorSpriteInstance actor) {
+    final spriteAtlas = _spriteAtlas;
+    if (spriteAtlas == null) {
+      return null;
+    }
+    final String prefix = actor.spritePrefix.toUpperCase();
     final selection =
         spriteAtlas.catalog.resolve(
-          prefix: actor.spritePrefix,
+          prefix: prefix,
           frame: actor.frame,
           rotation: 0,
         ) ??
         spriteAtlas.catalog.resolve(
-          prefix: actor.spritePrefix,
+          prefix: prefix,
           frame: actor.frame,
           rotation: 1,
         );
     if (selection == null) {
-      throw StateError(
-        'No sprite for ${actor.spritePrefix} frame ${actor.frame}',
-      );
+      return null;
+    }
+    final pool = _actorPool[prefix];
+    if (pool != null) {
+      for (var index = pool.length - 1; index >= 0; index--) {
+        final candidate = pool[index];
+        if (candidate.width != actor.width ||
+            candidate.height != actor.height) {
+          continue;
+        }
+        pool.removeAt(index);
+        if (pool.isEmpty) {
+          _actorPool.remove(prefix);
+        }
+        candidate.reactivate(actor, selection);
+        _activeActorSprites.add(candidate);
+        _inactiveActorSurfaces.remove(candidate.surface);
+        return candidate;
+      }
     }
     final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
     final material = _spriteMaterials[entry.page]!;
@@ -632,7 +784,7 @@ final class DoomScene {
       material: material,
       kind: DoomSurfaceKind.sprite,
       diagnostics: diagnostics,
-      debugLabel: 'actor:${actor.spritePrefix}',
+      debugLabel: 'actor:$prefix',
     );
     final mesh = Mesh()..addSurface(surface);
     final component = ActorSpriteComponent(
@@ -641,7 +793,7 @@ final class DoomScene {
       surface: surface,
       spriteAtlas: spriteAtlas,
       materialsByPage: _spriteMaterials,
-      spritePrefix: actor.spritePrefix,
+      spritePrefix: prefix,
       frame: actor.frame,
       actorAngle: actor.actorAngle,
       width: actor.width,
@@ -652,11 +804,65 @@ final class DoomScene {
       mirrored: selection.mirrored,
     );
     root.add(component);
+    _activeActorSprites.add(component);
+    _actorBySurface[surface] = component;
     _surfacesByPage.putIfAbsent('sprite:${entry.page}', () => []).add(surface);
     diagnostics
       ..onMeshBuilt()
       ..onComponentBuilt();
     return component;
+  }
+
+  /// Updates an active actor in place. A missing frame returns false without
+  /// leaving the old visual active; callers should release the component.
+  bool updateActorSprite(
+    ActorSpriteComponent component,
+    ActorSpriteInstance actor,
+  ) {
+    if (!component.active ||
+        component.spritePrefix != actor.spritePrefix.toUpperCase()) {
+      return false;
+    }
+    final selection =
+        component.spriteAtlas.catalog.resolve(
+          prefix: component.spritePrefix,
+          frame: actor.frame,
+          rotation: 0,
+        ) ??
+        component.spriteAtlas.catalog.resolve(
+          prefix: component.spritePrefix,
+          frame: actor.frame,
+          rotation: 1,
+        );
+    if (selection == null) {
+      return false;
+    }
+    final bool frameChanged = component.frame != actor.frame;
+    component.updateActor(
+      x: actor.x,
+      y: actor.y,
+      z: actor.z,
+      frame: actor.frame,
+      actorAngle: actor.actorAngle,
+      light: actor.light,
+      fullBright: actor.fullBright,
+    );
+    if (frameChanged) {
+      component.applySelection(selection);
+    }
+    return true;
+  }
+
+  /// Deactivates an actor but retains its surface and GPU buffer for reuse.
+  void releaseActorSprite(ActorSpriteComponent component) {
+    if (!_activeActorSprites.remove(component)) {
+      return;
+    }
+    component.deactivate();
+    _inactiveActorSurfaces.add(component.surface);
+    _actorPool
+        .putIfAbsent(component.spritePrefix, () => <ActorSpriteComponent>[])
+        .add(component);
   }
 
   /// Adds a camera-view-locked first-person weapon frame.
@@ -1363,13 +1569,29 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
 
   String _lumpName;
   bool _mirrored;
+  bool _active = true;
 
   String get lumpName => _lumpName;
   bool get mirrored => _mirrored;
+  bool get active => _active;
 
-  /// Updates the stable actor component in place for a new simulation view.
-  /// Normal Flame removal remains available through `removeFromParent()` when
-  /// the actor dies.
+  void deactivate() => _active = false;
+
+  void reactivate(ActorSpriteInstance actor, DoomSpriteSelection selection) {
+    _active = true;
+    updateActor(
+      x: actor.x,
+      y: actor.y,
+      z: actor.z,
+      frame: actor.frame,
+      actorAngle: actor.actorAngle,
+      light: actor.light,
+      fullBright: actor.fullBright,
+    );
+    applySelection(selection);
+  }
+
+  /// Updates the stable retained actor component for a new simulation view.
   void updateActor({
     required double x,
     required double y,
@@ -1397,23 +1619,8 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
     });
   }
 
-  @override
-  void syncToCamera(CameraComponent3D camera) {
-    super.syncToCamera(camera);
-    final rotation = DoomSpriteCatalog.cameraRotation(
-      actorAngle: actorAngle,
-      actorX: position.x,
-      actorZ: position.z,
-      cameraX: camera.position.x,
-      cameraZ: camera.position.z,
-    );
-    final selection = spriteAtlas.catalog.resolve(
-      prefix: spritePrefix,
-      frame: frame,
-      rotation: rotation,
-    );
-    if (selection == null ||
-        (selection.lumpName == _lumpName && selection.mirrored == _mirrored)) {
+  void applySelection(DoomSpriteSelection selection) {
+    if (selection.lumpName == _lumpName && selection.mirrored == _mirrored) {
       return;
     }
     final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
@@ -1431,6 +1638,43 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
     markAabbDirty();
     _lumpName = selection.lumpName;
     _mirrored = selection.mirrored;
+  }
+
+  @override
+  void update(double dt) {
+    if (!_active) {
+      return;
+    }
+    super.update(dt);
+  }
+
+  @override
+  bool isVisible(CameraComponent3D camera) =>
+      _active && super.isVisible(camera);
+
+  @override
+  void syncToCamera(CameraComponent3D camera) {
+    if (!_active) {
+      return;
+    }
+    super.syncToCamera(camera);
+    final rotation = DoomSpriteCatalog.cameraRotation(
+      actorAngle: actorAngle,
+      actorX: position.x,
+      actorZ: position.z,
+      cameraX: camera.position.x,
+      cameraZ: camera.position.z,
+    );
+    final selection = spriteAtlas.catalog.resolve(
+      prefix: spritePrefix,
+      frame: frame,
+      rotation: rotation,
+    );
+    if (selection == null) {
+      _active = false;
+      return;
+    }
+    applySelection(selection);
   }
 }
 

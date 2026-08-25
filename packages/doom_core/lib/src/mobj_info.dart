@@ -193,4 +193,13 @@ enum MobjType {
   misc68,
   misc69,
   teleportSpot,
+  soulSphere,
+  megaSphere,
+  backpack,
+  invulnerability,
+  berserk,
+  invisibility,
+  radiationSuit,
+  computerMap,
+  lightAmplification,
 }

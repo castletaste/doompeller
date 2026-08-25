@@ -20,6 +20,9 @@ const int _maxStep = 24 * kFracUnit;
 class GameState {
   GameState._(this._runtime, this.config, int seed)
     : _random = DoomRandom(index: seed) {
+    _totalSecrets = _runtime.sectors
+        .where((SectorRuntime sector) => sector.staticData.special == 9)
+        .length;
     _spawnMapThings();
   }
 
@@ -41,6 +44,11 @@ class GameState {
   final Set<int> _foundSecrets = <int>{};
   final Set<int> _activatedOnceLines = <int>{};
   int _secrets = 0;
+  int _killCount = 0;
+  int _totalKills = 0;
+  int _itemCount = 0;
+  int _totalItems = 0;
+  late final int _totalSecrets;
   bool _levelComplete = false;
   bool _secretExit = false;
   int _bob = 0;
@@ -59,6 +67,16 @@ class GameState {
   }
 
   int get secretsFound => _secrets;
+  int get killCount => _killCount;
+  int get totalKills => _totalKills;
+  int get itemCount => _itemCount;
+  int get totalItems => _totalItems;
+  int get totalSecrets => _totalSecrets;
+  int get levelTime => _tic;
+
+  /// Read-only spatial position for renderer/UI consumers. It is derived from
+  /// existing gameplay state and does not add a new word to [hashState].
+  int get playerSectorIndex => _playerMobj.sectorIndex;
   bool get levelComplete => _levelComplete;
   bool get usedSecretExit => _secretExit;
   PlayerView get player => PlayerView(
@@ -96,6 +114,8 @@ class GameState {
         _playerMobj = _add(_playerInfo, thing.x, thing.y, thing.angle, 100);
       } else if (info != null) {
         _add(info, thing.x, thing.y, thing.angle, info.spawnHealth);
+        if ((info.flags & MobjFlags.countKill) != 0) _totalKills++;
+        if ((info.flags & MobjFlags.countItem) != 0) _totalItems++;
       }
     }
     if (_mobjs.where((Mobj m) => identical(m.info, _playerInfo)).isEmpty) {
@@ -812,6 +832,7 @@ class GameState {
     target.target = source;
     if (target.health <= 0) {
       target.health = 0;
+      if ((target.info.flags & MobjFlags.countKill) != 0) _killCount++;
       target.state = MobjState.death;
       target.spriteFrame = 2;
       target.flags |= MobjFlags.corpse;
@@ -878,6 +899,25 @@ class GameState {
           _weapon = Weapon.chaingun;
         case MobjType.megaHealth:
           _health = (_health + 100 > 200) ? 200 : _health + 100;
+        case MobjType.soulSphere:
+          _health = (_health + 100 > 200) ? 200 : _health + 100;
+        case MobjType.megaSphere:
+          _health = 200;
+          _armor = 200;
+        case MobjType.backpack:
+          _bullets += 10;
+          _shells += 4;
+        case MobjType.berserk:
+          if (_health < 100) _health = 100;
+          _weapon = Weapon.fist;
+        case MobjType.invulnerability ||
+            MobjType.invisibility ||
+            MobjType.radiationSuit ||
+            MobjType.computerMap ||
+            MobjType.lightAmplification:
+          // Their timed/UI effects are outside the current E1M1 runtime
+          // subset, but they are still collectable special artifacts.
+          break;
         case MobjType.misc0:
           if (_armor < 100) _armor = 100;
         case MobjType.misc2:
@@ -897,6 +937,7 @@ class GameState {
         default:
           _health = (_health + 10 > 100) ? 100 : _health + 10;
       }
+      if ((m.info.flags & MobjFlags.countItem) != 0) _itemCount++;
       m.removed = true;
     }
   }
@@ -1206,7 +1247,7 @@ const MobjInfo _clipInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'CLIP',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _shotgunInfo = MobjInfo(
   id: MobjType.shotgun,
@@ -1220,7 +1261,7 @@ const MobjInfo _shotgunInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'SHOT',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _chaingunInfo = MobjInfo(
   id: MobjType.chaingun,
@@ -1234,7 +1275,7 @@ const MobjInfo _chaingunInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'MGUN',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _healthInfo = MobjInfo(
   id: MobjType.misc1,
@@ -1248,7 +1289,7 @@ const MobjInfo _healthInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'STIM',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _armorInfo = MobjInfo(
   id: MobjType.misc0,
@@ -1262,7 +1303,7 @@ const MobjInfo _armorInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'ARM1',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _blueKeyInfo = MobjInfo(
   id: MobjType.misc2,
@@ -1276,7 +1317,7 @@ const MobjInfo _blueKeyInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'BKEY',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _yellowKeyInfo = MobjInfo(
   id: MobjType.misc3,
@@ -1290,7 +1331,7 @@ const MobjInfo _yellowKeyInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'YKEY',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _redKeyInfo = MobjInfo(
   id: MobjType.misc4,
@@ -1304,7 +1345,7 @@ const MobjInfo _redKeyInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'RKEY',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _healthBonusInfo = MobjInfo(
   id: MobjType.misc10,
@@ -1332,7 +1373,7 @@ const MobjInfo _medikitInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'MEDI',
-  flags: MobjFlags.special | MobjFlags.countItem,
+  flags: MobjFlags.special,
 );
 const MobjInfo _armorBonusInfo = MobjInfo(
   id: MobjType.misc11,
@@ -1360,6 +1401,132 @@ const MobjInfo _shellsInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'SHEL',
+  flags: MobjFlags.special,
+);
+const MobjInfo _soulSphereInfo = MobjInfo(
+  id: MobjType.soulSphere,
+  doomEdNum: 2013,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'SOUL',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _megaSphereInfo = MobjInfo(
+  id: MobjType.megaSphere,
+  doomEdNum: 83,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'MEGA',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _backpackInfo = MobjInfo(
+  id: MobjType.backpack,
+  doomEdNum: 8,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'BPAK',
+  flags: MobjFlags.special,
+);
+const MobjInfo _invulnerabilityInfo = MobjInfo(
+  id: MobjType.invulnerability,
+  doomEdNum: 2022,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PINV',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _berserkInfo = MobjInfo(
+  id: MobjType.berserk,
+  doomEdNum: 2023,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PSTR',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _invisibilityInfo = MobjInfo(
+  id: MobjType.invisibility,
+  doomEdNum: 2024,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PINS',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _radiationSuitInfo = MobjInfo(
+  id: MobjType.radiationSuit,
+  doomEdNum: 2025,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'SUIT',
+  flags: MobjFlags.special,
+);
+const MobjInfo _computerMapInfo = MobjInfo(
+  id: MobjType.computerMap,
+  doomEdNum: 2026,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PMAP',
+  flags: MobjFlags.special | MobjFlags.countItem,
+);
+const MobjInfo _lightAmplificationInfo = MobjInfo(
+  id: MobjType.lightAmplification,
+  doomEdNum: 2045,
+  spawnHealth: 1,
+  radius: 20,
+  height: 16,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PVIS',
   flags: MobjFlags.special | MobjFlags.countItem,
 );
 const MobjInfo _barrelInfo = MobjInfo(
@@ -1392,6 +1559,15 @@ MobjInfo? _infoForEdNum(int n) => switch (n) {
   2012 => _medikitInfo,
   2015 => _armorBonusInfo,
   2008 => _shellsInfo,
+  2013 => _soulSphereInfo,
+  83 => _megaSphereInfo,
+  8 => _backpackInfo,
+  2022 => _invulnerabilityInfo,
+  2023 => _berserkInfo,
+  2024 => _invisibilityInfo,
+  2025 => _radiationSuitInfo,
+  2026 => _computerMapInfo,
+  2045 => _lightAmplificationInfo,
   2035 => _barrelInfo,
   _ => null,
 };

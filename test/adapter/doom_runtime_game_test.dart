@@ -128,6 +128,39 @@ void main() {
     expect(runtime.gameState.tic, pausedAt);
   });
 
+  test(
+    'Tab toggles the UI-only automap and leaves replay identity unchanged',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      final before = runtime.gameState.hashState();
+
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.tab,
+          logicalKey: LogicalKeyboardKey.tab,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.tab},
+      );
+      expect(runtime.automap.value.isOpen, isTrue);
+
+      for (var i = 0; i < 100; i++) {
+        runtime.zoomAutomap(inwards: i.isEven);
+      }
+      expect(runtime.gameState.hashState(), before);
+
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.tab,
+          logicalKey: LogicalKeyboardKey.tab,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.tab},
+      );
+      expect(runtime.automap.value.isOpen, isFalse);
+    },
+  );
+
   test('focus loss clears held W and Ctrl before the next TicCmd', () async {
     final runtime = DoomRuntimeGame(await fixtureLevel());
     runtime.onKeyEvent(

@@ -2,11 +2,13 @@ import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_app_controller.dart';
+import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_hud.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<PreparedDoomLevel> fixtureLevel() async {
@@ -31,6 +33,20 @@ final class FakeRuntime implements DoomRuntimeView {
   @override
   ValueListenable<DoomHudSnapshot> get hud => notifier;
 
+  final ValueNotifier<DoomAutomapSnapshot> automapNotifier = ValueNotifier(
+    const DoomAutomapSnapshot(
+      isOpen: false,
+      zoom: DoomAutomapState.initialZoom,
+      playerX: 0,
+      playerY: 0,
+      playerAngle: 0,
+      visitedLines: <int>{},
+    ),
+  );
+
+  @override
+  ValueListenable<DoomAutomapSnapshot> get automap => automapNotifier;
+
   int clearInputCalls = 0;
 
   @override
@@ -52,12 +68,24 @@ final class FakeRuntime implements DoomRuntimeView {
       shells: old.shells,
       weapon: old.weapon,
       keys: old.keys,
+      kills: old.kills,
+      totalKills: old.totalKills,
+      items: old.items,
+      totalItems: old.totalItems,
       secrets: old.secrets,
+      totalSecrets: old.totalSecrets,
+      levelTime: old.levelTime,
       paused: !old.paused,
       levelComplete: old.levelComplete,
       diagnostics: old.diagnostics,
     );
   }
+
+  @override
+  void toggleAutomap() {}
+
+  @override
+  void zoomAutomap({required bool inwards}) {}
 }
 
 Widget testSurface(BuildContext context, DoomRuntimeView runtime) =>
@@ -174,6 +202,97 @@ void main() {
     await tester.tap(find.byKey(const Key('overlay-action')));
     await tester.pump();
     expect(find.byKey(const Key('pause-overlay')), findsNothing);
+  });
+
+  testWidgets('intermission shows final percentages and time after skip', (
+    tester,
+  ) async {
+    final level = await fixtureLevel();
+    final runtime = FakeRuntime();
+    runtime.notifier.value = const DoomHudSnapshot(
+      health: 87,
+      armor: 25,
+      bullets: 30,
+      shells: 8,
+      weapon: core.Weapon.shotgun,
+      keys: <core.Key>{},
+      kills: 3,
+      totalKills: 4,
+      items: 2,
+      totalItems: 5,
+      secrets: 1,
+      totalSecrets: 2,
+      levelTime: 105 * core.kTicRate,
+      paused: false,
+      levelComplete: true,
+      diagnostics: DoomFrameDiagnosticsSnapshot(),
+    );
+    final controller = DoomAppController(
+      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      DoomApp(
+        controller: controller,
+        autoStart: false,
+        runtimeFactory: (_) => runtime,
+        gameSurfaceBuilder: testSurface,
+      ),
+    );
+
+    expect(find.byKey(const Key('completion-overlay')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('intermission-skip')));
+    await tester.pump();
+    expect(find.text('75%'), findsOneWidget);
+    expect(find.text('40%'), findsOneWidget);
+    expect(find.text('50%'), findsOneWidget);
+    expect(find.text('1:45'), findsOneWidget);
+  });
+
+  testWidgets('intermission treats empty totals as 100 percent', (
+    tester,
+  ) async {
+    final level = await fixtureLevel();
+    final runtime = FakeRuntime();
+    runtime.notifier.value = const DoomHudSnapshot(
+      health: 100,
+      armor: 0,
+      bullets: 50,
+      shells: 0,
+      weapon: core.Weapon.pistol,
+      keys: <core.Key>{},
+      kills: 0,
+      totalKills: 0,
+      items: 0,
+      totalItems: 0,
+      secrets: 0,
+      totalSecrets: 0,
+      levelTime: 0,
+      paused: false,
+      levelComplete: true,
+      diagnostics: DoomFrameDiagnosticsSnapshot(),
+    );
+    final controller = DoomAppController(
+      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      DoomApp(
+        controller: controller,
+        autoStart: false,
+        runtimeFactory: (_) => runtime,
+        gameSurfaceBuilder: testSurface,
+      ),
+    );
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+    for (final String row in <String>['kills', 'items', 'secrets']) {
+      expect(tester.widget<Text>(find.byKey(Key('tally-$row'))).data, '100%');
+    }
+    expect(find.text('0:00'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('focus loss clears runtime input', (tester) async {

@@ -33,6 +33,11 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# A pure-Dart package run through `flutter test` drops a build/ directory next
+# to its pubspec. Those are throwaway harness assets, never sources.
+packages/*/build/
+packages/*/coverage/
+
 # Symbolication related
 app.*.symbols
 

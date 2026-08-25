@@ -153,9 +153,11 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    // The fixture now spawns its full enemy/pickup roster, so actor identity,
-    // positions and deterministic AI consumption deliberately change this pin.
-    expect(a.hashState(), 0xa67d3e40);
+    // The count-item parity correction changes flags on fixture types
+    // 2001/2007/2008/2011/2018. Actor flags are hashed, so that change
+    // deliberately moves this pin; the fixture contains neither a backpack
+    // nor a radiation suit.
+    expect(a.hashState(), 0xc69f4dc0);
   });
 
   test(

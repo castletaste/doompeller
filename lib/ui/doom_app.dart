@@ -2,11 +2,14 @@ import 'package:doom_core/doom_core.dart' as core;
 import 'package:flame/game.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../adapter/adapter.dart';
 import '../game/doom_app_controller.dart';
+import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
 import '../game/level_preparer.dart';
+import 'doom_automap.dart';
 
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
@@ -267,99 +270,107 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     }
     return ValueListenableBuilder<DoomHudSnapshot>(
       valueListenable: _runtime.hud,
-      builder: (context, hud, _) => LayoutBuilder(
-        builder: (context, constraints) {
-          final bool narrow = constraints.maxWidth < 620;
-          return ColoredBox(
-            color: Colors.black,
-            child: Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                Listener(
-                  key: const Key('game-input-surface'),
-                  behavior: HitTestBehavior.opaque,
-                  onPointerDown: (event) {
-                    _gameFocusNode.requestFocus();
-                    if ((event.buttons & kPrimaryMouseButton) != 0) {
-                      _runtime.setPointerAttack(true);
-                    }
-                  },
-                  onPointerMove: (event) {
-                    if ((event.buttons & kPrimaryMouseButton) != 0) {
-                      _runtime.addPointerYaw(event.delta.dx);
-                    }
-                  },
-                  onPointerUp: (_) => _runtime.setPointerAttack(false),
-                  onPointerCancel: (_) => _runtime.setPointerAttack(false),
-                  child: _buildGameSurface(context),
-                ),
-                Positioned(
-                  top: 10,
-                  left: 10,
-                  child: _ContentBadge(
-                    synthetic: widget.synthetic,
-                    setupMessage: widget.setupMessage,
+      builder: (context, hud, _) => ValueListenableBuilder<DoomAutomapSnapshot>(
+        valueListenable: _runtime.automap,
+        builder: (context, automap, _) => LayoutBuilder(
+          builder: (context, constraints) {
+            final bool narrow = constraints.maxWidth < 620;
+            return ColoredBox(
+              color: Colors.black,
+              child: Stack(
+                fit: StackFit.expand,
+                children: <Widget>[
+                  Listener(
+                    key: const Key('game-input-surface'),
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: (event) {
+                      _gameFocusNode.requestFocus();
+                      if ((event.buttons & kPrimaryMouseButton) != 0) {
+                        _runtime.setPointerAttack(true);
+                      }
+                    },
+                    onPointerMove: (event) {
+                      if ((event.buttons & kPrimaryMouseButton) != 0) {
+                        _runtime.addPointerYaw(event.delta.dx);
+                      }
+                    },
+                    onPointerUp: (_) => _runtime.setPointerAttack(false),
+                    onPointerCancel: (_) => _runtime.setPointerAttack(false),
+                    child: _buildGameSurface(context),
                   ),
-                ),
-                if (_showControls)
-                  Positioned(
-                    top: 10,
-                    right: 10,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        _ControlsHint(
-                          narrow: narrow,
-                          onHide: () => setState(() => _showControls = false),
-                        ),
-                        _PauseButton(onPressed: _runtime.togglePause),
-                      ],
+                  if (automap.isOpen)
+                    DoomAutomapOverlay(
+                      map: widget.level.map,
+                      snapshot: automap,
                     ),
-                  )
-                else
                   Positioned(
                     top: 10,
-                    right: 10,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        IconButton(
-                          key: const Key('show-controls'),
-                          tooltip: 'Show controls',
-                          onPressed: () => setState(() => _showControls = true),
-                          icon: const Icon(
-                            Icons.keyboard_alt_outlined,
-                            size: 18,
+                    left: 10,
+                    child: _ContentBadge(
+                      synthetic: widget.synthetic,
+                      setupMessage: widget.setupMessage,
+                    ),
+                  ),
+                  if (_showControls)
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          _ControlsHint(
+                            narrow: narrow,
+                            onHide: () => setState(() => _showControls = false),
                           ),
-                        ),
-                        _PauseButton(onPressed: _runtime.togglePause),
-                      ],
+                          _PauseButton(onPressed: _runtime.togglePause),
+                        ],
+                      ),
+                    )
+                  else
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          IconButton(
+                            key: const Key('show-controls'),
+                            tooltip: 'Show controls',
+                            onPressed: () =>
+                                setState(() => _showControls = true),
+                            icon: const Icon(
+                              Icons.keyboard_alt_outlined,
+                              size: 18,
+                            ),
+                          ),
+                          _PauseButton(onPressed: _runtime.togglePause),
+                        ],
+                      ),
                     ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: DoomStatusBar(hud: hud, synthetic: widget.synthetic),
                   ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: DoomStatusBar(hud: hud, synthetic: widget.synthetic),
-                ),
-                if (hud.paused)
-                  _ModalOverlay(
-                    key: const Key('pause-overlay'),
-                    title: 'PAUSED',
-                    subtitle: 'Press Esc to resume',
-                    onPressed: _runtime.togglePause,
-                    buttonLabel: 'RESUME',
-                  ),
-                if (hud.levelComplete)
-                  const _ModalOverlay(
-                    key: Key('completion-overlay'),
-                    title: 'LEVEL COMPLETE',
-                    subtitle: 'The 35 Hz simulation is stopped.',
-                  ),
-              ],
-            ),
-          );
-        },
+                  if (hud.paused)
+                    _ModalOverlay(
+                      key: const Key('pause-overlay'),
+                      title: 'PAUSED',
+                      subtitle: 'Press Esc to resume',
+                      onPressed: _runtime.togglePause,
+                      buttonLabel: 'RESUME',
+                    ),
+                  if (hud.levelComplete)
+                    _IntermissionOverlay(
+                      key: const Key('completion-overlay'),
+                      hud: hud,
+                    ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -556,6 +567,185 @@ final class _StatusValue extends StatelessWidget {
         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
       ),
     ],
+  );
+}
+
+final class _IntermissionOverlay extends StatefulWidget {
+  const _IntermissionOverlay({super.key, required this.hud});
+
+  final DoomHudSnapshot hud;
+
+  @override
+  State<_IntermissionOverlay> createState() => _IntermissionOverlayState();
+}
+
+final class _IntermissionOverlayState extends State<_IntermissionOverlay>
+    with SingleTickerProviderStateMixin {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'Intermission tally');
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  )..forward();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _finishTally() {
+    if (_controller.value < 1) _controller.value = 1;
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    focusNode: _focusNode,
+    autofocus: true,
+    onKeyEvent: (_, KeyEvent event) {
+      if (event is KeyDownEvent) {
+        _finishTally();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    },
+    child: GestureDetector(
+      key: const Key('intermission-skip'),
+      behavior: HitTestBehavior.opaque,
+      onTap: _finishTally,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.9),
+        child: Center(
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              final double progress = _controller.value;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Text(
+                    'LEVEL COMPLETE',
+                    style: TextStyle(
+                      color: Color(0xFFC8B45A),
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _TallyRow(
+                    label: 'KILLS',
+                    value: _animatedPercent(
+                      widget.hud.kills,
+                      widget.hud.totalKills,
+                      progress,
+                      const Interval(0, 0.35),
+                    ),
+                  ),
+                  _TallyRow(
+                    label: 'ITEMS',
+                    value: _animatedPercent(
+                      widget.hud.items,
+                      widget.hud.totalItems,
+                      progress,
+                      const Interval(0.25, 0.6),
+                    ),
+                  ),
+                  _TallyRow(
+                    label: 'SECRETS',
+                    value: _animatedPercent(
+                      widget.hud.secrets,
+                      widget.hud.totalSecrets,
+                      progress,
+                      const Interval(0.5, 0.85),
+                    ),
+                  ),
+                  _TallyRow(
+                    label: 'TIME',
+                    value: _animatedTime(
+                      widget.hud.levelTime,
+                      progress,
+                      const Interval(0.75, 1),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'CLICK OR PRESS ANY KEY TO FINISH TALLY',
+                    style: TextStyle(color: Colors.white54, fontSize: 10),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+
+  static String _animatedPercent(
+    int count,
+    int total,
+    double progress,
+    Interval interval,
+  ) {
+    final int target = total == 0
+        ? 100
+        : ((count * 100) ~/ total).clamp(0, 100);
+    final double rowProgress = interval.transform(progress);
+    return '${(target * rowProgress).round()}%';
+  }
+
+  static String _animatedTime(
+    int levelTime,
+    double progress,
+    Interval interval,
+  ) {
+    final int seconds = levelTime ~/ core.kTicRate;
+    final int shown = (seconds * interval.transform(progress)).round();
+    final int minutes = shown ~/ 60;
+    final int remainder = shown % 60;
+    return '$minutes:${remainder.toString().padLeft(2, '0')}';
+  }
+}
+
+final class _TallyRow extends StatelessWidget {
+  const _TallyRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 260,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: <Widget>[
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 18),
+          ),
+          Text(
+            value,
+            key: Key('tally-${label.toLowerCase()}'),
+            style: const TextStyle(
+              color: Color(0xFFC8B45A),
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    ),
   );
 }
 

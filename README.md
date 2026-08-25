@@ -28,6 +28,28 @@ If a configured path is unreadable, invalid, not an IWAD, or lacks E1M1, the
 app shows an error. It will not silently switch content; the synthetic fallback
 requires an explicit button press.
 
+## Headless WAD report
+
+Before opening the app, inspect a WAD and compile its map geometry without a
+GUI or a macOS build. The command reads the selected WAD into memory only; it
+does not extract or write any Doom content. With no path it reports the clean
+synthetic fixture, so it is safe to use in CI.
+
+```sh
+/Users/savva/fvm/versions/stable/bin/dart run tool/wad_report.dart \
+  --map E1M1 .local/doom/DOOM.WAD
+
+# Or use DOOM_WAD_PATH; --json is suitable for CI artifact parsing.
+DOOM_WAD_PATH=.local/doom/DOOM.WAD \
+  /Users/savva/fvm/versions/stable/bin/dart run tool/wad_report.dart \
+  --json
+```
+
+The report includes container and map counts, resolved and missing texture/
+flat names, geometry gaps and fallbacks, atlas/surface vertex budgets, and
+parse/compile timings. `READY`, `READY WITH FALLBACKS`, and `PROBLEMS` are the
+final verdicts; `PROBLEMS` exits non-zero.
+
 ## Controls
 
 - `W`/`S` or up/down: move forward/back

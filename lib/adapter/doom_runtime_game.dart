@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
 
 import '../game/doom_hud.dart';
+import '../game/doom_automap.dart';
 import '../game/doom_input.dart';
 import '../game/level_preparer.dart';
 import 'doom_scene.dart';
@@ -69,6 +70,7 @@ final class DoomRuntimeGame extends FlameGame3D
        _packedSpritePrefixes = Set<String>.unmodifiable(packedSpritePrefixes),
        _previousPlayer = level.game.player,
        _currentPlayer = level.game.player,
+       _automap = DoomAutomapState(level.map, level.game.player),
        _sectorFloors = <double>[
          for (final sector in level.game.sectors)
            fixedToDouble(sector.floorHeight),
@@ -78,6 +80,10 @@ final class DoomRuntimeGame extends FlameGame3D
            fixedToDouble(sector.ceilingHeight),
        ],
        super(camera: camera) {
+    _automap.updatePlayer(
+      level.game.player,
+      sectorIndex: level.game.playerSectorIndex,
+    );
     _syncActors();
     _syncWeapon(force: true);
     _syncCamera(0);
@@ -98,6 +104,7 @@ final class DoomRuntimeGame extends FlameGame3D
   final ValueNotifier<DoomHudSnapshot> _hud = ValueNotifier<DoomHudSnapshot>(
     const DoomHudSnapshot.initial(),
   );
+  final DoomAutomapState _automap;
 
   PlayerView _previousPlayer;
   PlayerView _currentPlayer;
@@ -108,6 +115,9 @@ final class DoomRuntimeGame extends FlameGame3D
 
   @override
   ValueListenable<DoomHudSnapshot> get hud => _hud;
+
+  @override
+  ValueListenable<DoomAutomapSnapshot> get automap => _automap;
 
   bool get isPaused => _paused;
   int get actorComponentCount => _actors.length;
@@ -184,6 +194,10 @@ final class DoomRuntimeGame extends FlameGame3D
     _previousPlayer = _currentPlayer;
     gameState.runTic(command);
     _currentPlayer = gameState.player;
+    _automap.updatePlayer(
+      _currentPlayer,
+      sectorIndex: gameState.playerSectorIndex,
+    );
     _consumeSectorJournal();
     _syncActors();
     _syncWeapon();
@@ -194,6 +208,7 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   void _consumeSectorJournal() {
+    final Set<int> automapHeightChanges = <int>{};
     for (final change in gameState.consumeChangeJournal()) {
       switch (change.kind) {
         case PlaneKind.floor:
@@ -205,6 +220,7 @@ final class DoomRuntimeGame extends FlameGame3D
             isCeiling: false,
           );
           _updateWalls(change.sector);
+          automapHeightChanges.add(change.sector);
         case PlaneKind.ceiling:
           final double height = fixedToDouble(change.value);
           _sectorCeilings[change.sector] = height;
@@ -214,12 +230,20 @@ final class DoomRuntimeGame extends FlameGame3D
             isCeiling: true,
           );
           _updateWalls(change.sector);
+          automapHeightChanges.add(change.sector);
         case PlaneKind.light:
           scene.updateSectorLight(
             sectorIndex: change.sector,
             lightLevel: change.value,
           );
       }
+    }
+    for (final sector in automapHeightChanges) {
+      _automap.updateSectorHeights(
+        sectorIndex: sector,
+        floorHeight: _sectorFloors[sector],
+        ceilingHeight: _sectorCeilings[sector],
+      );
     }
   }
 
@@ -378,7 +402,13 @@ final class DoomRuntimeGame extends FlameGame3D
       shells: player.ammo.shells,
       weapon: player.weapon,
       keys: player.keys,
+      kills: gameState.killCount,
+      totalKills: gameState.totalKills,
+      items: gameState.itemCount,
+      totalItems: gameState.totalItems,
       secrets: gameState.secretsFound,
+      totalSecrets: gameState.totalSecrets,
+      levelTime: gameState.levelTime,
       paused: _paused,
       levelComplete: gameState.levelComplete,
       diagnostics: DoomFrameDiagnosticsSnapshot(
@@ -410,12 +440,20 @@ final class DoomRuntimeGame extends FlameGame3D
   void togglePause() => input.triggerPause();
 
   @override
+  void toggleAutomap() => _automap.toggle();
+
+  @override
+  void zoomAutomap({required bool inwards}) =>
+      inwards ? _automap.zoomIn() : _automap.zoomOut();
+
+  @override
   void clearInput() => input.clear();
 
   @override
   void onRemove() {
     input.clear();
     _hud.dispose();
+    _automap.dispose();
     super.onRemove();
   }
 
@@ -457,6 +495,21 @@ final class DoomRuntimeGame extends FlameGame3D
       }
       if (key == LogicalKeyboardKey.escape) {
         input.triggerPause();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.tab) {
+        toggleAutomap();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.equal ||
+          key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd) {
+        zoomAutomap(inwards: true);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.minus ||
+          key == LogicalKeyboardKey.numpadSubtract) {
+        zoomAutomap(inwards: false);
         return KeyEventResult.handled;
       }
       final int? slot = switch (key) {

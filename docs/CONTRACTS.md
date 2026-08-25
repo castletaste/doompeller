@@ -141,6 +141,36 @@ class GameState {
 }
 ```
 
+### doom_core M4/M5 supported special subset
+
+The core classifies specials by their explicit map-format values in
+`doom_core/src/specials.dart`, never by tag alone. Implemented use/cross paths:
+
+| Category | values | current behaviour |
+|---|---|---|
+| normal door | 1, 31 | tag-0 uses the used line's back sector; tagged lines target matching sectors; 1 opens, waits 150 tics, then closes; 31 stays open |
+| locked door | 26/32 blue, 27/34 yellow, 28/33 red | requires collected key, otherwise leaves the line inactive; wait-close for 26/27/28, stay-open for 32/33/34 |
+| switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; switch texture mutation is adapter/HUD work |
+| lifts | 10, 21, 62, 88, 120..123 | sector floor descends to lowest neighbour, waits 35 tics, then returns |
+| floors | 5 walk, 24 gun | tagged sectors raise to eight below the lowest neighbouring ceiling or by 24 units |
+| exit | 11, 51 | records public `levelComplete`; 51 also records `usedSecretExit` |
+| sector effects | 1..5, 7..9, 11..13, 17 | deterministic flicker/strobe/glow journals light deltas; 5/7/11 damage at 32-tic cadence; 9 increments one-time secret count |
+
+The implementation does **not** claim demo compatibility, crusher behaviour,
+switch texture state, generalized Boom specials, teleporters, or a complete
+commercial-E1M1 audit. Those need separate work and runtime verification with
+the developer-local WAD, never a committed asset.
+
+`GameState.changeJournal` retains ordered floor, ceiling, and light records
+until `consumeChangeJournal()` is called. This prevents a renderer that misses
+one 35 Hz tic from silently losing an earlier plane update; consuming returns
+an immutable snapshot and clears the pending records.
+
+The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
+`0xa3dcd1b9` for seed 7 and its documented twenty-command stream. Spawn order
+is intentionally part of deterministic identity and therefore part of the
+hash; actor hashing itself sorts by stable actor id.
+
 ## lib/adapter public API
 
 ```dart

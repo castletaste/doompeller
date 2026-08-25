@@ -39,7 +39,7 @@ abstract final class DoomFixtures {
   static int hash() => fnv1a64(pwadBytes());
 
   /// Patch lumps referenced by PNAMES, in index order.
-  static const List<String> patchNames = <String>['PAT1', 'PAT2', 'PAT3', 'PAT4'];
+  static const List<String> patchNames = <String>['PAT1', 'PAT2', 'PAT3', 'PAT4', 'SKYPAN'];
 
   /// Flat lumps inside F_START/F_END.
   static const List<String> flatNames = <String>['FLOOR0', 'CEIL0', 'FLAT1', kSkyFlatName];
@@ -48,7 +48,7 @@ abstract final class DoomFixtures {
   static const List<String> spriteNames = <String>['TESTA0', 'TESTB0'];
 
   /// Texture names declared in TEXTURE1, in declaration order.
-  static const List<String> texture1Names = <String>['WALL1', 'WALL2', 'WALL3'];
+  static const List<String> texture1Names = <String>['WALL1', 'WALL2', 'WALL3', 'SKY1'];
 
   /// Texture names declared in TEXTURE2.
   static const List<String> texture2Names = <String>['WALLOVR'];
@@ -98,28 +98,32 @@ abstract final class DoomFixtures {
 
   /// WALL1 is a single patch, WALL2 tiles two patches side by side and WALL3
   /// uses the patch with transparent gaps, so compositing, seams and masking
-  /// are all represented.
+  /// are all represented. SKY1 is a generated 256x128 panorama with explicit
+  /// 16-pixel hue bands and columns, making yaw and seam errors easy to see.
   static Uint8List _texture1Lump() => _buildTextureLump(<_FixtureTexture>[
-        const _FixtureTexture('WALL1', 64, 128, <List<int>>[
-          <int>[0, 0, 0],
-        ]),
-        const _FixtureTexture('WALL2', 128, 128, <List<int>>[
-          <int>[0, 0, 0],
-          <int>[64, 0, 1],
-        ]),
-        const _FixtureTexture('WALL3', 64, 128, <List<int>>[
-          <int>[0, 0, 2],
-        ]),
-      ]);
+    const _FixtureTexture('WALL1', 64, 128, <List<int>>[
+      <int>[0, 0, 0],
+    ]),
+    const _FixtureTexture('WALL2', 128, 128, <List<int>>[
+      <int>[0, 0, 0],
+      <int>[64, 0, 1],
+    ]),
+    const _FixtureTexture('WALL3', 64, 128, <List<int>>[
+      <int>[0, 0, 2],
+    ]),
+    const _FixtureTexture('SKY1', 256, 128, <List<int>>[
+      <int>[0, 0, 4],
+    ]),
+  ]);
 
   /// WALLOVR places patches past both edges of the canvas so the compositor's
   /// clipping is exercised.
   static Uint8List _texture2Lump() => _buildTextureLump(<_FixtureTexture>[
-        const _FixtureTexture('WALLOVR', 96, 64, <List<int>>[
-          <int>[-16, 0, 3],
-          <int>[48, 0, 3],
-        ]),
-      ]);
+    const _FixtureTexture('WALLOVR', 96, 64, <List<int>>[
+      <int>[-16, 0, 3],
+      <int>[48, 0, 3],
+    ]),
+  ]);
 
   static Uint8List _buildTextureLump(List<_FixtureTexture> textures) {
     var size = 4 + textures.length * 4;
@@ -280,8 +284,9 @@ Uint8List buildFixtureColormap() {
 /// Builds the named fixture patch.
 ///
 /// PAT1 and PAT2 are opaque wall patches with different patterns, PAT3 is a
-/// grate with transparent gaps and irregular column starts, and PAT4 is a small
-/// tile used to test compositing that overhangs the texture canvas.
+/// grate with transparent gaps and irregular column starts, PAT4 is a small
+/// tile used to test compositing that overhangs the texture canvas, and SKYPAN
+/// is a generated opaque panorama with visibly distinct bands and columns.
 PatchImage buildFixturePatch(String name) {
   switch (name) {
     case 'PAT1':
@@ -303,6 +308,17 @@ PatchImage buildFixturePatch(String name) {
         // Grate: transparent where both axes fall inside a hole.
         final bool hole = (x % 16) > 3 && (y % 16) > 3;
         return hole ? -1 : 0x30 + ((x + y) & 7);
+      });
+    case 'SKYPAN':
+      return _generatePatch(256, 128, 0, 0, (int x, int y) {
+        // Each 16x16 tile changes both hue and brightness. The repeated
+        // tile boundaries make horizontal bands, vertical columns and the
+        // panorama seam visible without using any external artwork.
+        final int band = y >> 4;
+        final int column = x >> 4;
+        final int hue = (column * 2 + band * 3) & 15;
+        final int level = ((y & 15) + ((x & 15) >> 2) + band) & 15;
+        return hue * 16 + level;
       });
     default:
       return _generatePatch(64, 64, 32, 32, (int x, int y) {

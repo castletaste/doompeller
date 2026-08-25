@@ -36,7 +36,7 @@ void main() {
       isEmpty,
       reason: 'no sector should need the loop fallback',
     );
-    expect(report.geometryHash, 0x1b8377ef);
+    expect(report.geometryHash, 0x4441e32f);
   });
 
   test('fixture compile is deterministic', () {

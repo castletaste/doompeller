@@ -5,12 +5,14 @@ import 'package:test/test.dart';
 
 /// Wraps [lumps] into a set that already contains the mandatory palettes.
 WadSet setWith(List<LumpSource> lumps) => WadSet(<WadFile>[
-      WadFile.parse(buildWad(<LumpSource>[
-        LumpSource('PLAYPAL', buildFixturePlaypal()),
-        LumpSource('COLORMAP', buildFixtureColormap()),
-        ...lumps,
-      ])),
-    ]);
+  WadFile.parse(
+    buildWad(<LumpSource>[
+      LumpSource('PLAYPAL', buildFixturePlaypal()),
+      LumpSource('COLORMAP', buildFixtureColormap()),
+      ...lumps,
+    ]),
+  ),
+]);
 
 /// A patch with a known pattern and a transparent gap in the middle column.
 PatchImage sample() {
@@ -117,10 +119,7 @@ void main() {
     });
 
     test('rejects a truncated patch header', () {
-      expect(
-        () => decodeDoomPatch(Uint8List(4)),
-        throwsA(isA<DoomFormatFailure>()),
-      );
+      expect(() => decodeDoomPatch(Uint8List(4)), throwsA(isA<DoomFormatFailure>()));
     });
 
     test('rejects zero and negative dimensions', () {
@@ -147,9 +146,15 @@ void main() {
     test('honours maxCompositePixels', () {
       final PatchImage big = PatchImage.empty(64, 64);
       expect(
-        () => decodeDoomPatch(encodeDoomPatch(big), limits: const DoomLimits(maxCompositePixels: 16)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxCompositePixels')),
+        () =>
+            decodeDoomPatch(encodeDoomPatch(big), limits: const DoomLimits(maxCompositePixels: 16)),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxCompositePixels',
+          ),
+        ),
       );
     });
   });
@@ -179,8 +184,8 @@ void main() {
 
     test('reads the texture directory in declaration order', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.textureNames, <String>['WALL1', 'WALL2', 'WALL3', 'WALLOVR']);
-      expect(res.patchNames, <String>['PAT1', 'PAT2', 'PAT3', 'PAT4']);
+      expect(res.textureNames, <String>['WALL1', 'WALL2', 'WALL3', 'SKY1', 'WALLOVR']);
+      expect(res.patchNames, <String>['PAT1', 'PAT2', 'PAT3', 'PAT4', 'SKYPAN']);
 
       final TextureDef wall2 = res.textureDef('WALL2')!;
       expect(wall2.width, 128);
@@ -188,6 +193,11 @@ void main() {
       expect(wall2.patches.length, 2);
       expect(wall2.patches[1].originX, 64);
       expect(wall2.patches[1].patchIndex, 1);
+
+      final TextureDef sky = res.textureDef('SKY1')!;
+      expect(sky.width, 256);
+      expect(sky.height, 128);
+      expect(sky.patches.single.patchIndex, 4);
     });
 
     test('texture lookup is case insensitive and handles the no-texture name', () {
@@ -210,6 +220,19 @@ void main() {
       expect(composed.height, 128);
       expect(composed.indices, source.indices);
       expect(composed.isFullyOpaque, isTrue);
+    });
+
+    test('generated sky panorama is opaque and has diagnostic bands and columns', () {
+      final WadResources res = WadResources.load(DoomFixtures.wadSet());
+      final PatchImage composed = res.composite('SKY1')!;
+      final PatchImage source = buildFixturePatch('SKYPAN');
+      expect(composed.width, 256);
+      expect(composed.height, 128);
+      expect(composed.isFullyOpaque, isTrue);
+      expect(composed.indices, source.indices);
+      expect(composed.indexAt(0, 0), isNot(composed.indexAt(16, 0)));
+      expect(composed.indexAt(0, 0), isNot(composed.indexAt(0, 16)));
+      expect(composed.indexAt(0, 0), isNot(composed.indexAt(240, 112)));
     });
 
     test('two-patch texture places each patch at its origin', () {
@@ -261,16 +284,26 @@ void main() {
           DoomFixtures.wadSet(),
           limits: const DoomLimits(maxCompositePixels: 64),
         ),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxCompositePixels')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxCompositePixels',
+          ),
+        ),
       );
     });
 
     test('honours maxTextures', () {
       expect(
         () => WadResources.load(DoomFixtures.wadSet(), limits: const DoomLimits(maxTextures: 2)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxTextures')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxTextures',
+          ),
+        ),
       );
     });
 
@@ -280,16 +313,26 @@ void main() {
           DoomFixtures.wadSet(),
           limits: const DoomLimits(maxPatchesPerTexture: 1),
         ),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxPatchesPerTexture')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxPatchesPerTexture',
+          ),
+        ),
       );
     });
 
     test('honours maxPatchNames', () {
       expect(
         () => WadResources.load(DoomFixtures.wadSet(), limits: const DoomLimits(maxPatchNames: 2)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxPatchNames')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxPatchNames',
+          ),
+        ),
       );
     });
 
@@ -308,12 +351,16 @@ void main() {
       view.setInt16(8 + 22 + 4, 3, Endian.little);
 
       expect(
-        () => WadResources.load(setWith(<LumpSource>[
-          LumpSource('PNAMES', pnames),
-          LumpSource('TEXTURE1', texture),
-        ])),
-        throwsA(isA<DoomFormatFailure>()
-            .having((DoomFormatFailure f) => f.message, 'message', contains('PNAMES'))),
+        () => WadResources.load(
+          setWith(<LumpSource>[LumpSource('PNAMES', pnames), LumpSource('TEXTURE1', texture)]),
+        ),
+        throwsA(
+          isA<DoomFormatFailure>().having(
+            (DoomFormatFailure f) => f.message,
+            'message',
+            contains('PNAMES'),
+          ),
+        ),
       );
     });
   });

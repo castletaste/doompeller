@@ -33,13 +33,13 @@ void main() {
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      expect(DoomFixtures.hash(), 0x1dd9e797ea82fb19);
+      expect(DoomFixtures.hash(), 0x9f56ae6a3ddc5085);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(wad.length, 32);
+      expect(wad.length, 33);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -57,9 +57,7 @@ void main() {
         'HELP1',
       ];
       final WadFile wad = DoomFixtures.wad();
-      final Set<String> names = <String>{
-        for (final LumpEntry entry in wad.lumps) entry.name,
-      };
+      final Set<String> names = <String>{for (final LumpEntry entry in wad.lumps) entry.name};
       for (final String name in forbidden) {
         expect(names, isNot(contains(name)));
       }
@@ -76,7 +74,7 @@ void main() {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
       expect(res.playpal.length, 14);
       expect(res.colormap.length, 34);
-      expect(res.textureNames.length, 4);
+      expect(res.textureNames.length, 5);
       expect(res.flatNames.length, 4);
       expect(res.spriteNames.length, 2);
       for (final String name in res.textureNames) {
@@ -92,6 +90,7 @@ void main() {
         expect(res.patchAt(i), isNotNull, reason: res.patchNames[i]);
       }
       expect(res.patchByName('PAT1'), isNotNull);
+      expect(res.patchByName('SKYPAN'), isNotNull);
       expect(res.patchAt(-1), isNull);
       expect(res.patchAt(999), isNull);
     });
@@ -123,9 +122,7 @@ void main() {
     });
 
     test('every sector is referenced by at least one sidedef', () {
-      final Set<int> used = <int>{
-        for (final Sidedef side in map.sidedefs) side.sector,
-      };
+      final Set<int> used = <int>{for (final Sidedef side in map.sidedefs) side.sector};
       expect(used.length, map.sectors.length);
     });
 

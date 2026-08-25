@@ -28,9 +28,14 @@ abstract final class LineSpecial {
   static const int liftBlazeDownWaitUpSwitch = 121;
   static const int liftBlazeDownWaitUpOnce = 122;
   static const int liftBlazeDownWaitUpRepeat = 123;
-  // Completion.
-  static const int exit = 11;
-  static const int secretExit = 51;
+  // Completion. 11/51 are S1 (front-side use once); 52/124 are W1
+  // (player walk once). Keep the old aliases for source compatibility.
+  static const int exitSwitchOnce = 11;
+  static const int secretExitSwitchOnce = 51;
+  static const int exitWalkOnce = 52;
+  static const int secretExitWalkOnce = 124;
+  static const int exit = exitSwitchOnce;
+  static const int secretExit = secretExitSwitchOnce;
 }
 
 abstract final class SectorSpecial {

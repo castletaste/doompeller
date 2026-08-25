@@ -39,6 +39,7 @@ class GameState {
   final Set<Weapon> _ownedWeapons = <Weapon>{Weapon.fist, Weapon.pistol};
   final Set<Key> _keys = <Key>{};
   final Set<int> _foundSecrets = <int>{};
+  final Set<int> _activatedOnceLines = <int>{};
   int _secrets = 0;
   bool _levelComplete = false;
   bool _secretExit = false;
@@ -326,20 +327,26 @@ class GameState {
   }
 
   void _crossSpecials(int oldX, int oldY, int newX, int newY) {
-    for (final Linedef line in _runtime.map.linedefs) {
+    for (
+      int lineIndex = 0;
+      lineIndex < _runtime.map.linedefs.length;
+      lineIndex++
+    ) {
+      final Linedef line = _runtime.map.linedefs[lineIndex];
       if (line.special == 0) continue;
       final MapVertex a = _runtime.map.vertices[line.v1];
       final MapVertex b = _runtime.map.vertices[line.v2];
-      if (!_segmentsIntersect(
-        oldX,
-        oldY,
-        newX,
-        newY,
-        toFixed(a.x),
-        toFixed(a.y),
-        toFixed(b.x),
-        toFixed(b.y),
-      )) {
+      if (!_lineCrossed(oldX, oldY, newX, newY, line) ||
+          !_segmentsIntersect(
+            oldX,
+            oldY,
+            newX,
+            newY,
+            toFixed(a.x),
+            toFixed(a.y),
+            toFixed(b.x),
+            toFixed(b.y),
+          )) {
         continue;
       }
       if (_isWalkLiftSpecial(line.special)) {
@@ -347,6 +354,13 @@ class GameState {
       }
       if (_isWalkFloorSpecial(line.special)) {
         _activateFloor(line);
+      }
+      if (line.special == LineSpecial.exitWalkOnce ||
+          line.special == LineSpecial.secretExitWalkOnce) {
+        _completeExit(
+          lineIndex,
+          secret: line.special == LineSpecial.secretExitWalkOnce,
+        );
       }
     }
   }
@@ -358,6 +372,7 @@ class GameState {
     final int rayY =
         _playerMobj.y + fixedMul(range, Trig.sin(_playerMobj.angle));
     Linedef? selected;
+    int selectedIndex = -1;
     int selectedDistance = 0x7fffffffffffffff;
     for (int i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef line = _runtime.map.linedefs[i];
@@ -379,17 +394,37 @@ class GameState {
       if (distance < selectedDistance) {
         selectedDistance = distance;
         selected = line;
+        selectedIndex = i;
       }
     }
     if (selected == null) return;
     if (!_isUseSpecial(selected.special)) return;
     if (_isDoorSpecial(selected.special)) _tryActivateDoor(selected);
     if (_isUseLiftSpecial(selected.special)) _activateLift(selected);
-    if (selected.special == LineSpecial.exit ||
-        selected.special == LineSpecial.secretExit) {
-      _levelComplete = true;
-      _secretExit = selected.special == LineSpecial.secretExit;
+    if (selected.special == LineSpecial.exitSwitchOnce ||
+        selected.special == LineSpecial.secretExitSwitchOnce) {
+      if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
+      _completeExit(
+        selectedIndex,
+        secret: selected.special == LineSpecial.secretExitSwitchOnce,
+      );
     }
+  }
+
+  bool _isOnFrontSide(Linedef line, int x, int y) {
+    final MapVertex a = _runtime.map.vertices[line.v1];
+    final MapVertex b = _runtime.map.vertices[line.v2];
+    final int cross =
+        toFixed(b.x - a.x) * (y - toFixed(a.y)) -
+        toFixed(b.y - a.y) * (x - toFixed(a.x));
+    return cross <= 0;
+  }
+
+  void _completeExit(int lineIndex, {required bool secret}) {
+    if (_levelComplete) return;
+    if (!_activatedOnceLines.add(lineIndex)) return;
+    _levelComplete = true;
+    _secretExit = secret;
   }
 
   void _shootSpecialLine() {
@@ -712,9 +747,10 @@ class GameState {
   }
 
   bool _hasSight(Mobj a, Mobj b) {
-    // Bounded crossed-line test: reject blocked portals / solid walls.
-    int checks = 0;
-    for (int i = 0; i < _runtime.map.linedefs.length && checks++ < 256; i++) {
+    // Map loading already bounds the linedef count. Sight must scan the whole
+    // bounded set: a safety cap that returns true would turn large maps into a
+    // fail-open wallhack.
+    for (int i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef l = _runtime.map.linedefs[i];
       if (_segmentsIntersect(
         a.x,
@@ -777,11 +813,13 @@ class GameState {
     if (target.health <= 0) {
       target.health = 0;
       target.state = MobjState.death;
+      target.spriteFrame = 2;
       target.flags |= MobjFlags.corpse;
       target.flags &= ~MobjFlags.shootable;
       if (target.info.id == MobjType.barrel) _explodeBarrel(target, source);
     } else if (_random.chance(target.info.painChance)) {
       target.state = MobjState.pain;
+      target.spriteFrame = 1;
     }
   }
 
@@ -886,6 +924,11 @@ class GameState {
 
     add(_tic);
     add(_random.index);
+    add(config.skill.index);
+    add(config.maxCatchUpTics);
+    add(config.monsters ? 1 : 0);
+    add(_nextId);
+    add(_useHeld ? 1 : 0);
     add(_health);
     add(_armor);
     add(_bullets);
@@ -900,6 +943,9 @@ class GameState {
     add(_secrets);
     add(_levelComplete ? 1 : 0);
     add(_secretExit ? 1 : 0);
+    for (int i = 0; i < _runtime.map.linedefs.length; i++) {
+      add(_activatedOnceLines.contains(i) ? 1 : 0);
+    }
     for (final SectorRuntime s in _runtime.sectors) {
       add(s.floorHeight);
       add(s.ceilingHeight);
@@ -921,12 +967,16 @@ class GameState {
       add(m.angle);
       add(m.health);
       add(m.state.index);
+      add(m.flags);
+      add(m.spriteFrame);
       add(m.momX);
       add(m.momY);
       add(m.momZ);
       add(m.sectorIndex);
       add(m.floorZ);
       add(m.ceilingZ);
+      add(m.dropOffZ);
+      add(m.stateTics);
       add(m.reactionTime);
       add(m.threshold);
       add(m.moveDir);
@@ -935,6 +985,10 @@ class GameState {
       add(m.owner?.id ?? 0);
       add(m.removed ? 1 : 0);
     }
+    // _bob is a pure function of already-hashed tic and player momentum.
+    // _changes is an output journal: consuming it cannot affect simulation
+    // state or future tics, so including it would make replay hashes depend on
+    // renderer polling rather than seed + TicCmd stream.
     return h;
   }
 }
@@ -1067,8 +1121,8 @@ bool _isWalkFloorSpecial(int special) => special == 5;
 bool _isUseSpecial(int special) =>
     _isDoorSpecial(special) ||
     _isUseLiftSpecial(special) ||
-    special == LineSpecial.exit ||
-    special == LineSpecial.secretExit;
+    special == LineSpecial.exitSwitchOnce ||
+    special == LineSpecial.secretExitSwitchOnce;
 
 const MobjInfo _playerInfo = MobjInfo(
   id: MobjType.player,

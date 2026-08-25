@@ -307,7 +307,7 @@ void main() {
       },
     );
 
-    test('BLOCKMAP and linear fallback choose same deterministic state', () {
+    test('null, valid and incomplete BLOCKMAP collision are equivalent', () {
       final MapData bare = testMap();
       final Blockmap blocks = Blockmap(
         originX: 0,
@@ -319,6 +319,29 @@ void main() {
         ],
       );
       final MapData mapped = testMap(blockmap: blocks);
+      final MapData incomplete = testMap(
+        blockmap: Blockmap(
+          originX: 0,
+          originY: 0,
+          columns: 1,
+          rows: 1,
+          // Valid but unrelated bottom edge; east wall line 1 is omitted.
+          cells: <Uint16List>[
+            Uint16List.fromList(<int>[0]),
+          ],
+        ),
+      );
+      final MapData outOfRange = testMap(
+        blockmap: Blockmap(
+          originX: 1000,
+          originY: 1000,
+          columns: 1,
+          rows: 1,
+          cells: <Uint16List>[
+            Uint16List.fromList(<int>[0, 1, 2, 3]),
+          ],
+        ),
+      );
       final GameState a = GameState.start(
         bare,
         const GameConfig(monsters: false),
@@ -327,11 +350,24 @@ void main() {
         mapped,
         const GameConfig(monsters: false),
       );
+      final GameState c = GameState.start(
+        incomplete,
+        const GameConfig(monsters: false),
+      );
+      final GameState d = GameState.start(
+        outOfRange,
+        const GameConfig(monsters: false),
+      );
       for (int i = 0; i < 10; i++) {
         a.runTic(const TicCmd(forwardMove: 14));
         b.runTic(const TicCmd(forwardMove: 14));
+        c.runTic(const TicCmd(forwardMove: 14));
+        d.runTic(const TicCmd(forwardMove: 14));
       }
       expect(a.hashState(), b.hashState());
+      expect(a.hashState(), c.hashState());
+      expect(a.hashState(), d.hashState());
+      expect(c.player.x, lessThan(toFixed(128)));
     });
   });
 
@@ -581,22 +617,134 @@ void main() {
       expect(allowed.sectors.elementAt(1).hasMover, isTrue);
     });
 
-    test('damage secret light journal and exit are public state', () {
+    test('switch-use normal exit 11 completes only from the front side', () {
+      final GameState front = GameState.start(
+        testMap(
+          sectors: twoSectors(),
+          sides: twoSides(),
+          lines: <Linedef>[portal(special: LineSpecial.exitSwitchOnce)],
+        ),
+        const GameConfig(monsters: false),
+      );
+      front.runTic(const TicCmd(buttons: Buttons.use));
+      expect(front.levelComplete, isTrue);
+      expect(front.usedSecretExit, isFalse);
+
+      final GameState back = GameState.start(
+        testMap(
+          sectors: twoSectors(),
+          sides: twoSides(),
+          lines: <Linedef>[portal(special: LineSpecial.exitSwitchOnce)],
+          things: const <Thing>[
+            Thing(x: 160, y: 64, angle: 180, type: 1, flags: _allSkills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+      );
+      back.runTic(const TicCmd(buttons: Buttons.use));
+      expect(back.levelComplete, isFalse);
+    });
+
+    test('switch-use secret exit 51 records secret intent', () {
+      final GameState game = GameState.start(
+        testMap(
+          sectors: twoSectors(),
+          sides: twoSides(),
+          lines: <Linedef>[portal(special: LineSpecial.secretExitSwitchOnce)],
+        ),
+        const GameConfig(monsters: false),
+      );
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      expect(game.levelComplete, isTrue);
+      expect(game.usedSecretExit, isTrue);
+    });
+
+    test('crossing switch exits 11 and 51 does not complete', () {
+      for (final int special in <int>[
+        LineSpecial.exitSwitchOnce,
+        LineSpecial.secretExitSwitchOnce,
+      ]) {
+        final GameState game = GameState.start(
+          testMap(
+            sectors: twoSectors(),
+            sides: twoSides(),
+            lines: <Linedef>[portal(special: special)],
+          ),
+          const GameConfig(monsters: false),
+        );
+        for (int i = 0; i < 20; i++) {
+          game.runTic(const TicCmd(forwardMove: 10));
+        }
+        expect(game.levelComplete, isFalse, reason: 'special $special');
+      }
+    });
+
+    test(
+      'walk-once exits 52 and 124 complete in either crossing direction',
+      () {
+        final GameState normal = GameState.start(
+          testMap(
+            sectors: twoSectors(),
+            sides: twoSides(),
+            lines: <Linedef>[portal(special: LineSpecial.exitWalkOnce)],
+          ),
+          const GameConfig(monsters: false),
+        );
+        for (int i = 0; i < 20; i++) {
+          normal.runTic(const TicCmd(forwardMove: 10));
+        }
+        expect(normal.levelComplete, isTrue);
+        expect(normal.usedSecretExit, isFalse);
+
+        final GameState secret = GameState.start(
+          testMap(
+            sectors: twoSectors(),
+            sides: twoSides(),
+            lines: <Linedef>[portal(special: LineSpecial.secretExitWalkOnce)],
+            things: const <Thing>[
+              Thing(x: 160, y: 64, angle: 180, type: 1, flags: _allSkills),
+            ],
+          ),
+          const GameConfig(monsters: false),
+        );
+        for (int i = 0; i < 20; i++) {
+          secret.runTic(const TicCmd(forwardMove: 10));
+        }
+        expect(secret.levelComplete, isTrue);
+        expect(secret.usedSecretExit, isTrue);
+      },
+    );
+
+    test('using an unrelated or walk-only line does not exit', () {
+      for (final int special in <int>[0, LineSpecial.exitWalkOnce]) {
+        final GameState game = GameState.start(
+          testMap(
+            sectors: twoSectors(),
+            sides: twoSides(),
+            lines: <Linedef>[portal(special: special)],
+          ),
+          const GameConfig(monsters: false),
+        );
+        game.runTic(const TicCmd(buttons: Buttons.use));
+        expect(game.levelComplete, isFalse, reason: 'special $special');
+      }
+    });
+
+    test('secret sector and completion remain independently public', () {
       final MapData map = testMap(
         sectors: twoSectors(backSpecial: SectorSpecial.secret),
         sides: twoSides(),
-        lines: <Linedef>[portal(special: LineSpecial.exit)],
+        lines: <Linedef>[portal(special: LineSpecial.exitWalkOnce)],
       );
       final GameState game = GameState.start(
         map,
         const GameConfig(monsters: false),
       );
-      game.runTic(const TicCmd(buttons: Buttons.use));
       for (int i = 0; i < 20; i++) {
         game.runTic(const TicCmd(forwardMove: 10));
       }
       expect(game.levelComplete, isTrue);
-      expect(game.secretsFound, greaterThanOrEqualTo(0));
+      expect(game.secretsFound, 1);
     });
   });
 }

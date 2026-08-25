@@ -151,6 +151,13 @@ void main() {
         game.mobjs.firstWhere((MobjView m) => m.sprite == 'POSS').health,
         0,
       );
+      final MobjView corpse = game.mobjs.firstWhere(
+        (MobjView m) => m.sprite == 'POSS',
+      );
+      expect(corpse.flags & 0x100000, isNot(0)); // corpse flag
+      expect(corpse.frame, 2);
+      // Pins the observable corpse flags/frame together with its stable id.
+      expect(game.hashState(), 0x44a9e574);
     });
 
     test('hitscan is occluded by a one-sided wall', () {
@@ -170,6 +177,46 @@ void main() {
           .firstWhere((MobjView m) => m.sprite == 'POSS')
           .health;
       expect(after, before);
+    });
+
+    test('hitscan sees a blocker after linedef index 256', () {
+      final List<Linedef> lines = <Linedef>[
+        for (int i = 0; i < 257; i++)
+          const Linedef(
+            v1: 0,
+            v2: 1,
+            flags: 0,
+            special: 0,
+            tag: 0,
+            rightSidedef: 0,
+            leftSidedef: kNoSidedef,
+          ),
+        const Linedef(
+          v1: 1,
+          v2: 2,
+          flags: LinedefFlags.blocking,
+          special: 0,
+          tag: 0,
+          rightSidedef: 0,
+          leftSidedef: kNoSidedef,
+        ),
+      ];
+      final GameState game = GameState.start(
+        testMap(
+          lines: lines,
+          things: const <Thing>[
+            Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 160, y: 64, angle: 180, type: 3004, flags: _skills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+        seed: 3,
+      );
+      game.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(
+        game.mobjs.firstWhere((MobjView m) => m.sprite == 'POSS').health,
+        20,
+      );
     });
 
     test('line of sight follows a changing door opening', () {

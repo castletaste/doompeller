@@ -2,6 +2,8 @@ import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
 
+import 'specials_test.dart' show portal, testMap, twoSectors, twoSides;
+
 MapData fixture() => MapData.load(DoomFixtures.wadSet(), 'MAP01');
 
 void main() {
@@ -151,7 +153,7 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    expect(a.hashState(), 0xa3dcd1b9);
+    expect(a.hashState(), 0x06ef86df);
   });
 
   test(
@@ -189,5 +191,75 @@ void main() {
       many.advanceMicros(1000, b.runTic, const TicCmd(forwardMove: 1));
     }
     expect((a.tic, a.hashState()), (35, b.hashState()));
+  });
+
+  test('use-button latch is part of future-affecting replay state', () {
+    final GameState held = GameState.start(
+      testMap(),
+      const GameConfig(monsters: false),
+    );
+    final GameState released = GameState.start(
+      testMap(),
+      const GameConfig(monsters: false),
+    );
+    held.runTic(const TicCmd(buttons: Buttons.use));
+    released.runTic(TicCmd.empty);
+    expect(held.hashState(), isNot(released.hashState()));
+  });
+
+  test('consuming pending sector journal does not alter replay hash', () {
+    final MapData map = testMap(
+      sectors: twoSectors(backCeiling: 32),
+      sides: twoSides(),
+      lines: <Linedef>[portal(special: LineSpecial.doorOpenStay)],
+    );
+    final GameState pending = GameState.start(
+      map,
+      const GameConfig(monsters: false),
+    );
+    final GameState consumed = GameState.start(
+      map,
+      const GameConfig(monsters: false),
+    );
+    for (final GameState game in <GameState>[pending, consumed]) {
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      game.runTic(TicCmd.empty);
+    }
+    expect(pending.changeJournal, isNotEmpty);
+    expect(consumed.consumeChangeJournal(), isNotEmpty);
+    expect(pending.hashState(), consumed.hashState());
+  });
+
+  test('next actor id affects hash after a no-op pickup is removed', () {
+    final GameState base = GameState.start(
+      testMap(),
+      const GameConfig(monsters: false),
+    );
+    final GameState allocated = GameState.start(
+      testMap(
+        things: const <Thing>[
+          Thing(
+            x: 64,
+            y: 64,
+            angle: 0,
+            type: 1,
+            flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+          ),
+          Thing(
+            x: 64,
+            y: 64,
+            angle: 0,
+            type: 2011,
+            flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+          ),
+        ],
+      ),
+      const GameConfig(monsters: false),
+    );
+    base.runTic(TicCmd.empty);
+    allocated.runTic(TicCmd.empty);
+    expect(base.player.health, allocated.player.health);
+    expect(base.mobjs.length, allocated.mobjs.length);
+    expect(base.hashState(), isNot(allocated.hashState()));
   });
 }

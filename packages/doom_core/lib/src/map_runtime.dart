@@ -89,6 +89,14 @@ class MapRuntime {
       }
       return;
     }
+    if (blockmap.columns <= 0 ||
+        blockmap.rows <= 0 ||
+        blockmap.cells.length != blockmap.columns * blockmap.rows) {
+      for (int i = 0; i < map.linedefs.length; i++) {
+        yield i;
+      }
+      return;
+    }
     final int minX = fixedToInt(x - radius);
     final int maxX = fixedToInt(x + radius);
     final int minY = fixedToInt(y - radius);
@@ -107,11 +115,20 @@ class MapRuntime {
         final cells = blockmap.cellAt(cx, cy);
         if (cells == null) continue;
         for (final int line in cells) {
+          if (line < 0 || line >= map.linedefs.length) continue;
           if (seen.add(line)) {
             yield line;
           }
         }
       }
+    }
+    // A non-null BLOCKMAP is advisory ordering, never collision authority.
+    // It cannot prove that an omitted line is irrelevant: a syntactically
+    // valid cell may still contain one unrelated line while omitting a wall.
+    // Union with the loader-bounded canonical list for fail-closed correctness.
+    // A future canonical spatial index may replace this O(n) safety union.
+    for (int i = 0; i < map.linedefs.length; i++) {
+      if (seen.add(i)) yield i;
     }
   }
 

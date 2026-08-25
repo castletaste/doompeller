@@ -153,7 +153,8 @@ The core classifies specials by their explicit map-format values in
 | switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; switch texture mutation is adapter/HUD work |
 | lifts | 10, 21, 62, 88, 120..123 | sector floor descends to lowest neighbour, waits 35 tics, then returns |
 | floors | 5 walk, 24 gun | tagged sectors raise to eight below the lowest neighbouring ceiling or by 24 units |
-| exit | 11, 51 | records public `levelComplete`; 51 also records `usedSecretExit` |
+| switch exit (S1) | 11 normal, 51 secret | front-side player use, once; records `levelComplete` and secret-trigger intent |
+| walk exit (W1) | 52 normal, 124 secret | player crossing in either direction, once; records the same completion state |
 | sector effects | 1..5, 7..9, 11..13, 17 | deterministic flicker/strobe/glow journals light deltas; 5/7/11 damage at 32-tic cadence; 9 increments one-time secret count |
 
 The implementation does **not** claim demo compatibility, crusher behaviour,
@@ -161,13 +162,24 @@ switch texture state, generalized Boom specials, teleporters, or a complete
 commercial-E1M1 audit. Those need separate work and runtime verification with
 the developer-local WAD, never a committed asset.
 
+Collision treats a loaded `BLOCKMAP` as advisory candidate ordering, not as
+authority: candidates are unioned with the loader-bounded canonical linedef
+list. This intentionally favors fail-closed E1M1 correctness over broadphase
+speed until a separately validated pure-Dart spatial index replaces the union.
+
 `GameState.changeJournal` retains ordered floor, ceiling, and light records
 until `consumeChangeJournal()` is called. This prevents a renderer that misses
 one 35 Hz tic from silently losing an earlier plane update; consuming returns
 an immutable snapshot and clears the pending records.
+The pending journal is deliberately excluded from `hashState()`: consuming
+renderer output cannot affect a future simulation tic, and hashing it would
+make replay identity depend on renderer polling. Player bob is likewise
+excluded because it is derived renderer output from the hashed tic and
+momentum. Future-affecting input latch, actor-id allocator, activated one-shot
+lines, mutable actor flags/frame, and mover/actor state are hashed.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xa3dcd1b9` for seed 7 and its documented twenty-command stream. Spawn order
+`0x06ef86df` for seed 7 and its documented twenty-command stream. Spawn order
 is intentionally part of deterministic identity and therefore part of the
 hash; actor hashing itself sorts by stable actor id.
 

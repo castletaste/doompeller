@@ -96,8 +96,8 @@ void main() {
     var vertex = range.firstVertex;
     while (vertex < range.firstVertex + range.vertexCount &&
         vertices[vertex * DoomVertexAbi.floatsPerVertex +
-                DoomVertexAbi.texCoordOffset]
-            .abs() >
+                    DoomVertexAbi.texCoordOffset]
+                .abs() >
             1e-9) {
       vertex++;
     }
@@ -112,7 +112,7 @@ void main() {
     expect(resolved, closeTo(left, 1e-9));
   });
 
-  test('a sky ceiling is emitted full bright', () {
+  test('F_SKY1 sentinel is not emitted as a sector plane', () {
     final MapBuilder b = MapBuilder('SKY');
     final int s = b.sector(ceilingFlat: kSkyFlatName);
     b.solidLoop(<int>[0, 0, 256, 0, 256, 256, 0, 256], s);
@@ -120,13 +120,10 @@ void main() {
       b.build(),
       testTextures(),
     );
-    final PackedMesh sky = level.meshes.firstWhere(
-      (PackedMesh m) => m.kind == SurfaceKind.sky,
-    );
+    expect(level.ceilingPlanes, isEmpty);
     expect(
-      sky.vertices[16],
-      1.0,
-      reason: 'vanilla never darkens the sky with distance',
+      level.meshes.any((PackedMesh m) => m.kind == SurfaceKind.sky),
+      isFalse,
     );
   });
 

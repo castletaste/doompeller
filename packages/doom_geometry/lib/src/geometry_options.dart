@@ -19,6 +19,7 @@ class GeometryOptions {
     this.atlasPageSize = 2048,
     this.spriteGutter = 1,
     this.fakeContrast = true,
+    this.skyTextureName = 'SKY1',
   });
 
   static const GeometryOptions defaults = GeometryOptions();
@@ -80,6 +81,9 @@ class GeometryOptions {
   /// for east/west ones.
   final bool fakeContrast;
 
+  /// Classic camera-centred sky texture packed when a sector uses F_SKY1.
+  final String skyTextureName;
+
   GeometryOptions copyWith({
     bool? bspFirst,
     bool? validateAgainstLoops,
@@ -92,6 +96,7 @@ class GeometryOptions {
     int? atlasPageSize,
     int? spriteGutter,
     bool? fakeContrast,
+    String? skyTextureName,
   }) {
     return GeometryOptions(
       bspFirst: bspFirst ?? this.bspFirst,
@@ -106,6 +111,7 @@ class GeometryOptions {
       atlasPageSize: atlasPageSize ?? this.atlasPageSize,
       spriteGutter: spriteGutter ?? this.spriteGutter,
       fakeContrast: fakeContrast ?? this.fakeContrast,
+      skyTextureName: skyTextureName ?? this.skyTextureName,
     );
   }
 }

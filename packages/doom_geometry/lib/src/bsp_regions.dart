@@ -67,7 +67,7 @@ class BspRegion {
   final int segCount;
 
   int get vertexCount => xy.length >> 1;
-  bool get isEmpty => xy.length < 6;
+  bool get isEmpty => xy.length < 6 || area <= 0;
   double get area => polygonArea(xy, vertexCount);
 }
 
@@ -142,7 +142,8 @@ class BspRegionBuilder {
   BspRegionSet build(CheckBudget budget) {
     final int subsectorCount = map.subsectors.length;
     _regions = List<BspRegion?>.filled(subsectorCount, null);
-    _sectorOfSubsector = Int32List(subsectorCount)..fillRange(0, subsectorCount, -1);
+    _sectorOfSubsector = Int32List(subsectorCount)
+      ..fillRange(0, subsectorCount, -1);
     for (var i = 0; i < subsectorCount; i++) {
       _sectorOfSubsector[i] = _resolveSector(i);
     }
@@ -217,8 +218,12 @@ class BspRegionBuilder {
         continue;
       }
       final Linedef line = map.linedefs[seg.linedef];
-      final int sideIndex = seg.side == 0 ? line.rightSidedef : line.leftSidedef;
-      if (sideIndex == kNoSidedef || sideIndex < 0 || sideIndex >= map.sidedefs.length) {
+      final int sideIndex = seg.side == 0
+          ? line.rightSidedef
+          : line.leftSidedef;
+      if (sideIndex == kNoSidedef ||
+          sideIndex < 0 ||
+          sideIndex >= map.sidedefs.length) {
         continue;
       }
       return map.sidedefs[sideIndex].sector;
@@ -329,7 +334,12 @@ class BspRegionBuilder {
   }
 
   /// Finishes a leaf: clips by the subsector's own segs and records the region.
-  bool _emitLeaf(int subsector, PolyBuffer poly, int depth, CheckBudget budget) {
+  bool _emitLeaf(
+    int subsector,
+    PolyBuffer poly,
+    int depth,
+    CheckBudget budget,
+  ) {
     if (subsector < 0 || subsector >= map.subsectors.length) {
       return true;
     }
@@ -440,10 +450,8 @@ class BspRegionBuilder {
           line.v2 < map.vertices.length) {
         // side 1 means the seg runs against the linedef's direction, so the
         // half-plane to keep is the other one.
-        final MapVertex a =
-            map.vertices[seg.side == 0 ? line.v1 : line.v2];
-        final MapVertex b =
-            map.vertices[seg.side == 0 ? line.v2 : line.v1];
+        final MapVertex a = map.vertices[seg.side == 0 ? line.v1 : line.v2];
+        final MapVertex b = map.vertices[seg.side == 0 ? line.v2 : line.v1];
         if (a.x != b.x || a.y != b.y) {
           return _ClipLine(
             a.x.toDouble(),

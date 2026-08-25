@@ -158,8 +158,18 @@ void main() {
     test('detects crossing triangles whose centroids miss each other', () {
       final SectorMesh2D bad = SectorMesh2D(
         Float64List.fromList(<double>[
-          162, 131, 51, 134, 21, 62,
-          -19, 100, -88, 45, 61, 89,
+          162,
+          131,
+          51,
+          134,
+          21,
+          62,
+          -19,
+          100,
+          -88,
+          45,
+          61,
+          89,
         ]),
         Uint32List.fromList(<int>[0, 1, 2, 3, 4, 5]),
       );
@@ -259,8 +269,11 @@ void main() {
       final Loop bowtie = Loop(
         Float64List.fromList(<double>[0, 0, 5, 5, 0, 5, 3, 0]),
       );
-      final TriangulationResult result =
-          EarClipper().triangulate(bowtie, const <Loop>[], CheckBudget(10000));
+      final TriangulationResult result = EarClipper().triangulate(
+        bowtie,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
       expect(result.isComplete, isFalse);
       expect(result.triangleCount, 0);
     });
@@ -272,8 +285,9 @@ void main() {
       final Loop touching = Loop(
         Float64List.fromList(<double>[0, 2, 2, 2, 2, 4, 0, 4]),
       );
-      final TriangulationResult result = EarClipper()
-          .triangulate(outer, <Loop>[touching], CheckBudget(10000));
+      final TriangulationResult result = EarClipper().triangulate(outer, <Loop>[
+        touching,
+      ], CheckBudget(10000));
       expect(result.isComplete, isFalse);
     });
 
@@ -287,13 +301,107 @@ void main() {
       final Loop nested = Loop(
         Float64List.fromList(<double>[4, 4, 6, 4, 6, 6, 4, 6]),
       );
-      final TriangulationResult result = EarClipper()
-          .triangulate(outer, <Loop>[hole, nested], CheckBudget(10000));
+      final TriangulationResult result = EarClipper().triangulate(outer, <Loop>[
+        hole,
+        nested,
+      ], CheckBudget(10000));
       expect(result.isComplete, isFalse);
+    });
+
+    test('adjacent collinear backtracking is rejected', () {
+      final Loop ring = Loop(
+        Float64List.fromList(<double>[0, 0, 10, 0, 5, 0, 0, 10]),
+      );
+      final TriangulationResult result = EarClipper().triangulate(
+        ring,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
+      expect(result.isComplete, isFalse);
+      expect(result.triangleCount, 0);
+    });
+
+    test('consecutive duplicate ring vertex is rejected', () {
+      final Loop ring = Loop(
+        Float64List.fromList(<double>[0, 0, 10, 0, 10, 0, 0, 10]),
+      );
+      final TriangulationResult result = EarClipper().triangulate(
+        ring,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
+      expect(result.isComplete, isFalse);
+      expect(result.triangleCount, 0);
+    });
+
+    test('straight-through collinear subdivision remains valid', () {
+      final Loop ring = Loop(
+        Float64List.fromList(<double>[0, 0, 5, 0, 10, 0, 10, 10, 0, 10]),
+      );
+      final TriangulationResult result = EarClipper().triangulate(
+        ring,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
+      expect(result.isComplete, isTrue);
+      expect(result.area, closeTo(100, 1e-9));
     });
   });
 
   group('atlas', () {
+    test('all-sky no-texture map is valid with zero atlas pages', () {
+      final MapBuilder b = MapBuilder('SKYEMPTY');
+      final int s = b.sector(
+        floorFlat: kSkyFlatName,
+        ceilingFlat: kSkyFlatName,
+      );
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s, middle: '-');
+      final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+        b.build(),
+        MapTextureSource(),
+        options: const GeometryOptions(limits: DoomLimits(maxAtlasPixels: 0)),
+      );
+      expect(level.atlas.pageCount, 0);
+      expect(level.meshes, isEmpty);
+      expect(level.floorPlanes, isEmpty);
+      expect(level.ceilingPlanes, isEmpty);
+      expect(level.wallBands, isEmpty);
+      expect(level.skyTextureEntry, isNull);
+    });
+
+    test('configured SKY1 is packed and exposed without sky planes', () {
+      final MapBuilder b = MapBuilder('SKYPACKED');
+      final int s = b.sector(
+        floorFlat: kSkyFlatName,
+        ceilingFlat: kSkyFlatName,
+      );
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s, middle: '-');
+      final Uint8List pixels = Uint8List(64 * 128);
+      final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+        b.build(),
+        MapTextureSource(
+          composites: <String, PatchImage>{
+            'SKY1': PatchImage(
+              width: 64,
+              height: 128,
+              leftOffset: 0,
+              topOffset: 0,
+              indices: pixels,
+              coverage: Uint8List.fromList(
+                List<int>.filled(pixels.length, 255),
+              ),
+            ),
+          },
+        ),
+      );
+      expect(level.atlas.pageCount, 1);
+      expect(level.skyTextureName, 'SKY1');
+      expect(level.skyTextureEntry?.name, 'SKY1');
+      expect(level.meshes, isEmpty, reason: 'F_SKY1 is not a world plane');
+      expect(level.floorPlanes, isEmpty);
+      expect(level.ceilingPlanes, isEmpty);
+    });
+
     test('packs flats and wall textures and reports their sub-rects', () {
       final AtlasBuilder builder =
           AtlasBuilder(testTextures(), GeometryOptions.defaults)
@@ -346,9 +454,7 @@ void main() {
         () => DoomGeometryCompiler.compileWithTextures(
           b.build(),
           testTextures(),
-          options: const GeometryOptions(
-            limits: DoomLimits(maxAtlasPixels: 0),
-          ),
+          options: const GeometryOptions(limits: DoomLimits(maxAtlasPixels: 0)),
         ),
         throwsA(isA<DoomLimitFailure>()),
       );
@@ -430,9 +536,7 @@ void main() {
         () => DoomGeometryCompiler.compileWithTextures(
           b.build(),
           testTextures(),
-          options: const GeometryOptions(
-            limits: DoomLimits(maxTriangles: 1),
-          ),
+          options: const GeometryOptions(limits: DoomLimits(maxTriangles: 1)),
         ),
         throwsA(isA<DoomLimitFailure>()),
       );
@@ -475,7 +579,7 @@ void main() {
       }
     });
 
-    test('meshes are grouped by atlas page and surface kind', () {
+    test('F_SKY1 leaves an opening instead of emitting a sky plane', () {
       final MapBuilder b = MapBuilder('SKY');
       final int ground = b.sector(ceilingFlat: 'F_SKY1');
       b.solidLoop(<int>[0, 0, 256, 0, 256, 256, 0, 256], ground);
@@ -493,9 +597,9 @@ void main() {
       expect(combos.length, lessThanOrEqualTo(level.meshes.length));
       expect(
         level.meshes.any((PackedMesh m) => m.kind == SurfaceKind.sky),
-        isTrue,
-        reason: 'an F_SKY1 ceiling must land in the sky bucket',
+        isFalse,
       );
+      expect(level.ceilingPlanes, isEmpty);
       expect(
         level.meshes.any((PackedMesh m) => m.kind == SurfaceKind.opaque),
         isTrue,
@@ -506,10 +610,22 @@ void main() {
 
   test('convex repaired boundary retains a midpoint on every side', () {
     final Float64List boundary = Float64List.fromList(<double>[
-      0, 0, 5, 0, 10, 0,
-      10, 5, 10, 10,
-      5, 10, 0, 10,
-      0, 5,
+      0,
+      0,
+      5,
+      0,
+      10,
+      0,
+      10,
+      5,
+      10,
+      10,
+      5,
+      10,
+      0,
+      10,
+      0,
+      5,
     ]);
     final TriangulationResult result = triangulateConvexBoundary(boundary);
     expect(result.triangleCount, 8);
@@ -518,6 +634,15 @@ void main() {
     for (var i = 0; i < 8; i++) {
       expect(used, contains(i), reason: 'boundary vertex $i was dropped');
     }
+  });
+
+  test('degenerate convex boundary fails safely', () {
+    final TriangulationResult result = triangulateConvexBoundary(
+      Float64List.fromList(<double>[0, 0, 1, 0, 2, 0]),
+    );
+    expect(result.isComplete, isFalse);
+    expect(result.triangleCount, 0);
+    expect(result.degenerateCount, greaterThan(0));
   });
 
   group('determinism', () {

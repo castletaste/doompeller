@@ -24,6 +24,7 @@ class CompiledLevel {
     required this.ceilingPlanes,
     required this.wallBands,
     required this.report,
+    required this.skyTextureName,
   });
 
   final List<PackedMesh> meshes;
@@ -37,6 +38,13 @@ class CompiledLevel {
   final List<WallBandRef> wallBands;
 
   final GeometryReport report;
+
+  /// Packed classic sky texture for the renderer-owned camera-centred cube.
+  /// Null when the source does not provide the configured texture.
+  final String? skyTextureName;
+
+  AtlasEntry? get skyTextureEntry =>
+      skyTextureName == null ? null : atlas.entry(skyTextureName!);
 
   int get triangleCount {
     var total = 0;
@@ -322,10 +330,14 @@ class _Compiler {
     final WallSet walls = WallBuilder(map, textures, options).build();
 
     var triangleEstimate = 0;
-    for (final SectorMesh2D mesh in chosen) {
-      triangleEstimate += mesh.triangleCount * 2; // floor plus ceiling
+    for (var s = 0; s < chosen.length; s++) {
+      final Sector sector = map.sectors[s];
+      final int planeCount =
+          (sector.floorIsSky ? 0 : 1) + (sector.ceilingIsSky ? 0 : 1);
+      triangleEstimate += chosen[s].triangleCount * planeCount;
     }
-    triangleEstimate += walls.quads.length * 2;
+    triangleEstimate +=
+        walls.quads.where((WallQuad quad) => quad.hasTexture).length * 2;
     DoomLimits.check(
       triangleEstimate,
       options.limits.maxTriangles,
@@ -334,7 +346,10 @@ class _Compiler {
 
     // 5. Atlas.
     final AtlasBuilder atlasBuilder = AtlasBuilder(textures, options);
+    var usesSky = false;
     for (var s = 0; s < sectorCount; s++) {
+      usesSky =
+          usesSky || map.sectors[s].floorIsSky || map.sectors[s].ceilingIsSky;
       atlasBuilder
         ..addFlat(map.sectors[s].floorFlat)
         ..addFlat(map.sectors[s].ceilingFlat);
@@ -342,13 +357,32 @@ class _Compiler {
     for (var i = 0; i < walls.quads.length; i++) {
       atlasBuilder.addWallTexture(walls.quads[i].texture);
     }
+    if (usesSky) {
+      atlasBuilder.addWallTexture(options.skyTextureName);
+    }
     final IndexedAtlas atlas = atlasBuilder.build();
-    if (atlas.pageCount == 0 || atlas.overflowed.isNotEmpty) {
+    if (atlas.overflowed.isNotEmpty) {
       throw DoomLimitFailure(
         'maxAtlasPixels: atlas overflowed for ${atlas.overflowed.join(', ')}',
         limitName: 'maxAtlasPixels',
         limit: options.limits.maxAtlasPixels,
       );
+    }
+    final Set<String> missingTextures = <String>{...walls.missingTextures};
+    for (var s = 0; s < sectorCount; s++) {
+      if (chosen[s].triangleCount == 0) {
+        continue;
+      }
+      final Sector sector = map.sectors[s];
+      if (!sector.floorIsSky && atlas.entry(sector.floorFlat) == null) {
+        missingTextures.add(sector.floorFlat);
+      }
+      if (!sector.ceilingIsSky && atlas.entry(sector.ceilingFlat) == null) {
+        missingTextures.add(sector.ceilingFlat);
+      }
+    }
+    if (atlas.pageCount == 0 && missingTextures.isNotEmpty) {
+      throw DoomMissingLumpFailure(missingTextures.first);
     }
 
     // 6. Pack.
@@ -376,7 +410,7 @@ class _Compiler {
       bspFirst: options.bspFirst,
       validated: options.validateAgainstLoops,
       budgetExhausted: budget.exhausted,
-      missingTextures: walls.missingTextures.toList()..sort(),
+      missingTextures: missingTextures.toList()..sort(),
       geometryHash: _hash(meshes),
       compileMicroseconds: clock.elapsedMicroseconds,
       repairedTJunctionVertices: repairedVertices,
@@ -390,6 +424,9 @@ class _Compiler {
       ceilingPlanes: ceilings,
       wallBands: bands,
       report: report,
+      skyTextureName: atlas.entry(options.skyTextureName) == null
+          ? null
+          : options.skyTextureName,
     );
   }
 
@@ -426,8 +463,15 @@ class _Compiler {
       // boundary corner: every repaired boundary edge becomes one real
       // triangle, even when all four sides contain collinear inserted points.
       final int base = verts[sector].length ~/ 2;
-      final TriangulationResult triangulation =
-          triangulateConvexBoundary(region.xy);
+      final TriangulationResult triangulation = triangulateConvexBoundary(
+        region.xy,
+        epsilon: options.epsilon * options.epsilon,
+      );
+      if (!triangulation.isComplete || triangulation.triangleCount == 0) {
+        emptyPerSector[sector]++;
+        budget.spend();
+        continue;
+      }
       verts[sector].addAll(triangulation.vertices);
       for (final int index in triangulation.indices) {
         tris[sector].add(base + index);
@@ -471,29 +515,31 @@ class _Compiler {
       }
       final Sector sector = map.sectors[s];
       final double light = sector.lightLevel / 255.0;
-      final SectorPlaneRef? floor = _packPlane(
-        mesh: mesh,
-        sector: s,
-        height: sector.floorHeight.toDouble(),
-        flatName: sector.floorFlat,
-        isSky: sector.floorIsSky,
-        isCeiling: false,
-        atlas: atlas,
-        light: light,
-      );
+      final SectorPlaneRef? floor = sector.floorIsSky
+          ? null
+          : _packPlane(
+              mesh: mesh,
+              sector: s,
+              height: sector.floorHeight.toDouble(),
+              flatName: sector.floorFlat,
+              isCeiling: false,
+              atlas: atlas,
+              light: light,
+            );
       if (floor != null) {
         floors.add(floor);
       }
-      final SectorPlaneRef? ceiling = _packPlane(
-        mesh: mesh,
-        sector: s,
-        height: sector.ceilingHeight.toDouble(),
-        flatName: sector.ceilingFlat,
-        isSky: sector.ceilingIsSky,
-        isCeiling: true,
-        atlas: atlas,
-        light: light,
-      );
+      final SectorPlaneRef? ceiling = sector.ceilingIsSky
+          ? null
+          : _packPlane(
+              mesh: mesh,
+              sector: s,
+              height: sector.ceilingHeight.toDouble(),
+              flatName: sector.ceilingFlat,
+              isCeiling: true,
+              atlas: atlas,
+              light: light,
+            );
       if (ceiling != null) {
         ceilings.add(ceiling);
       }
@@ -505,13 +551,12 @@ class _Compiler {
     required int sector,
     required double height,
     required String flatName,
-    required bool isSky,
     required bool isCeiling,
     required IndexedAtlas atlas,
     required double light,
   }) {
     final AtlasEntry? entry = atlas.entry(flatName);
-    final SurfaceKind kind = isSky ? SurfaceKind.sky : SurfaceKind.opaque;
+    const SurfaceKind kind = SurfaceKind.opaque;
     final int page = entry?.page ?? 0;
     final int vertexCount = mesh.vertexCount;
     if (vertexCount == 0) {
@@ -567,7 +612,7 @@ class _Compiler {
       uvMode: DoomVertexAbi.uvModeRepeat,
       // Sky is drawn at full brightness; vanilla never darkens it with
       // distance the way it darkens walls and floors.
-      fullBright: isSky,
+      fullBright: false,
     );
     return SectorPlaneRef(
       sector: sector,
@@ -585,7 +630,7 @@ class _Compiler {
 
     for (var i = 0; i < walls.quads.length; i++) {
       final WallQuad quad = walls.quads[i];
-      if (quad.x1 == quad.x2 && quad.y1 == quad.y2) {
+      if (!quad.hasTexture || (quad.x1 == quad.x2 && quad.y1 == quad.y2)) {
         continue;
       }
       final AtlasEntry? entry = atlas.entry(quad.texture);

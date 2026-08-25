@@ -122,10 +122,22 @@ class TriangulationResult {
 /// A centre fan gives every boundary edge its own non-degenerate triangle, so
 /// even a rectangle with inserted midpoints on all four sides retains every
 /// repair vertex in the emitted index buffer.
-TriangulationResult triangulateConvexBoundary(Float64List boundary) {
+TriangulationResult triangulateConvexBoundary(
+  Float64List boundary, {
+  double epsilon = 1e-9,
+}) {
   final int n = boundary.length ~/ 2;
   if (n < 3) {
     return TriangulationResult.empty;
+  }
+  if (signedArea2(boundary, n).abs() <= epsilon) {
+    return TriangulationResult(
+      vertices: Float64List.fromList(boundary),
+      indices: Uint32List(0),
+      degenerateCount: 1,
+      budgetExhausted: false,
+      unresolvedVertices: n,
+    );
   }
   final Float64List vertices = Float64List((n + 1) * 2);
   vertices.setRange(0, boundary.length, boundary);
@@ -244,6 +256,26 @@ class EarClipper {
   bool _isSimpleRing(Loop ring, CheckBudget budget, double epsilon) {
     if (ring.length < 3) {
       return false;
+    }
+    final double epsilonSq = epsilon * epsilon;
+    for (var i = 0; i < ring.length; i++) {
+      final int previous = (i - 1 + ring.length) % ring.length;
+      final int next = (i + 1) % ring.length;
+      final double inX = ring.x(i) - ring.x(previous);
+      final double inY = ring.y(i) - ring.y(previous);
+      final double outX = ring.x(next) - ring.x(i);
+      final double outY = ring.y(next) - ring.y(i);
+      if (inX * inX + inY * inY <= epsilonSq ||
+          outX * outX + outY * outY <= epsilonSq) {
+        return false;
+      }
+      final double cross = inX * outY - inY * outX;
+      final double dot = inX * outX + inY * outY;
+      // A straight-through subdivision is valid. Reversing along the same
+      // line overlaps the adjacent edge beyond their shared endpoint.
+      if (cross.abs() <= epsilon && dot < 0) {
+        return false;
+      }
     }
     for (var i = 0; i < ring.length; i++) {
       final int i2 = (i + 1) % ring.length;

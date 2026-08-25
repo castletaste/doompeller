@@ -276,6 +276,10 @@ seen from above, so floors keep a +Y normal and ceilings are emitted reversed.
   `textureHeight`, `yOffset`, `atlasV0`, `atlasV1`) so a moving wall re-pegs
   its texture without a rebuild.
 - `GeometryReport` adds `repairedTJunctionVertices` and `repairedRegions`.
+- `GeometryOptions.skyTextureName` selects the classic camera-centred sky
+  texture (`SKY1` by default). `CompiledLevel.skyTextureName` and
+  `skyTextureEntry` expose it when present. `F_SKY1` is a sentinel opening and
+  emits no floor or ceiling plane; the renderer owns the sky cube geometry.
 
 ### Atlas tiling scheme
 

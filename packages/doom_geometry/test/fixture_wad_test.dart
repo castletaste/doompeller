@@ -24,13 +24,19 @@ void main() {
     expect(report.totalTriangles, greaterThan(0));
 
     // The headline M2 number: total area disagreement across the level.
-    expect(report.totalAreaDelta, lessThan(1.0),
-        reason: 'BSP and oracle must agree on covered area');
+    expect(
+      report.totalAreaDelta,
+      lessThan(1.0),
+      reason: 'BSP and oracle must agree on covered area',
+    );
     expect(report.tJunctionCount, 0);
     expect(report.degenerateTriangleCount, 0);
-    expect(report.fallbackSectors, isEmpty,
-        reason: 'no sector should need the loop fallback');
-    expect(report.geometryHash, 0x2d4cb614);
+    expect(
+      report.fallbackSectors,
+      isEmpty,
+      reason: 'no sector should need the loop fallback',
+    );
+    expect(report.geometryHash, 0x1b8377ef);
   });
 
   test('fixture compile is deterministic', () {

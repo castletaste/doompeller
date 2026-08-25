@@ -65,9 +65,8 @@ final class FakeGpuBuffer implements GpuBuffer {
   int get writeCount => writeRanges.length;
 
   /// Bytes written after the initial vertex and index uploads.
-  int get dynamicBytes => writeRanges
-      .skip(2)
-      .fold(0, (sum, range) => sum + range.$2);
+  int get dynamicBytes =>
+      writeRanges.skip(2).fold(0, (sum, range) => sum + range.$2);
 
   @override
   void write(ByteData data, {int destinationOffsetInBytes = 0}) {

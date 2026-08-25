@@ -51,6 +51,13 @@ float texelCenter(float index, float size) {
 }
 
 void main() {
+  // Keep vertexNormal live through shader optimization so flame_3d's reflected
+  // vertex descriptor retains the pinned floats 9..11. Geometry never emits a
+  // NaN normal, so this guard has no visual effect on valid content.
+  if (any(isnan(fragNormal))) {
+    discard;
+  }
+
   float fullBright = fragParams.x;
   float lightRowOverride = fragParams.y;
   float uvMode = fragParams.z;

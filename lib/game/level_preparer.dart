@@ -1,6 +1,5 @@
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_geometry/doom_geometry.dart';
-import 'package:doom_wad/doom_wad.dart';
 
 import 'content_source.dart';
 import 'level_load_coordinator.dart';

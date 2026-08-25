@@ -20,7 +20,7 @@
 /// | floats | flame_3d meaning | Doompeller meaning                          |
 /// |--------|------------------|---------------------------------------------|
 /// | 12..15 | joints           | atlas rect (u0, v0, u1, v1)                 |
-/// | 16..19 | weights          | (fullBright, lightRow, uvMode, unused)      |
+/// | 16..19 | weights          | (fullBright, lightRow, uvMode, depthLayer)  |
 ///
 /// This is what lets one [PackedFlameSurface] draw an entire atlas page: each
 /// vertex carries its own sub-rectangle and sampling mode, so wall, flat and
@@ -70,7 +70,11 @@ abstract final class DoomVertexAbi {
   /// Normalized atlas rectangle (u0, v0, u1, v1) for this vertex's texture.
   static const int atlasRectOffset = jointsOffset;
 
-  /// (fullBright, lightRowOverride, uvMode, unused).
+  /// (fullBright, lightRowOverride, uvMode, depthLayer).
+  ///
+  /// The depth-layer clip-space convention is live-verified on the current
+  /// macOS Impeller Metal target. A non-Metal backend's post-main Z remap is a
+  /// separate QA item and is not claimed by this adapter verification.
   static const int paramsOffset = weightsOffset;
 
   /// Sector light level, 0..1, stored in the color record's red channel.
@@ -95,7 +99,7 @@ abstract final class DoomVertexAbi {
 
   /// flame_3d 0.3.0 binds index buffers as uint16 only, so one surface can
   /// address at most 65536 vertices.
-  static const int maxVerticesPerSurface = 65536;
+  static const int maxVerticesPerSurface = 65535;
 
   /// First float belonging to [vertexIndex].
   static int floatOffsetOf(int vertexIndex) => vertexIndex * floatsPerVertex;
@@ -139,6 +143,7 @@ abstract final class DoomVertexAbi {
     double uvMode = uvModeRepeat,
     bool fullBright = false,
     double lightRowOverride = lightRowAutomatic,
+    double depthLayer = 0,
   }) {
     final offset = floatOffsetOf(vertexIndex);
     target[offset] = x;
@@ -160,7 +165,7 @@ abstract final class DoomVertexAbi {
     target[offset + 16] = fullBright ? 1 : 0;
     target[offset + 17] = lightRowOverride;
     target[offset + 18] = uvMode;
-    target[offset + 19] = 0;
+    target[offset + 19] = depthLayer;
   }
 
   /// Writes the exact float record flame_3d's [Vertex] would produce.

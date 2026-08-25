@@ -168,7 +168,7 @@ final class PaletteMaterial extends Material {
 final class PaletteMaterialCache {
   PaletteMaterialCache();
 
-  final Map<(String, bool), PaletteMaterial> _materials = {};
+  final Map<(String, bool, PaletteTextures), PaletteMaterial> _materials = {};
 
   /// Distinct materials currently held.
   int get length => _materials.length;
@@ -183,13 +183,20 @@ final class PaletteMaterialCache {
     required bool alphaCutout,
     int paletteIndex = DoomPaletteVariant.normal,
   }) => _materials.putIfAbsent(
-    (atlasKey, alphaCutout),
+    (atlasKey, alphaCutout, textures),
     () => PaletteMaterial(
       textures: textures,
       alphaCutout: alphaCutout,
       paletteIndex: paletteIndex,
     ),
   );
+
+  /// Starts publishing another scene through this cache.
+  ///
+  /// A cache is bounded to one published scene. Old surfaces retain their
+  /// material objects, but a same-named page in the new level can never reuse
+  /// bindings to the previous level's atlas or palette textures.
+  void beginScene() => _materials.clear();
 
   /// Switches every live material to [paletteIndex].
   ///

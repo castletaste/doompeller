@@ -10,11 +10,7 @@ void main() {
     packer.addPrimitive(
       page: 0,
       kind: geometry.SurfaceKind.opaque,
-      positions: Float64List.fromList(<double>[
-        1, 2, 3,
-        4, 2, 3,
-        1, 2, 6,
-      ]),
+      positions: Float64List.fromList(<double>[1, 2, 3, 4, 2, 3, 1, 2, 6]),
       uvs: Float64List.fromList(<double>[0, 0.25, 1, 0.25, 0, 1]),
       indices: <int>[0, 1, 2],
       normalX: 0,
@@ -28,37 +24,69 @@ void main() {
     );
     final geometry.PackedMesh mesh = packer.finish().single;
 
-    expect(geometry.DoomVertexAbi.floatsPerVertex,
-        adapter.DoomVertexAbi.floatsPerVertex);
-    expect(geometry.DoomVertexAbi.positionOffset,
-        adapter.DoomVertexAbi.positionOffset);
-    expect(geometry.DoomVertexAbi.texCoordOffset,
-        adapter.DoomVertexAbi.texCoordOffset);
-    expect(geometry.DoomVertexAbi.colorOffset,
-        adapter.DoomVertexAbi.colorOffset);
-    expect(geometry.DoomVertexAbi.normalOffset,
-        adapter.DoomVertexAbi.normalOffset);
-    expect(geometry.DoomVertexAbi.atlasRectOffset,
-        adapter.DoomVertexAbi.atlasRectOffset);
-    expect(geometry.DoomVertexAbi.paramsOffset,
-        adapter.DoomVertexAbi.paramsOffset);
-
     expect(
-      mesh.vertices.sublist(0, 20),
-      <double>[
-        1, 2, 3,
-        0, 0.25,
-        0.5, 1, 1, 1,
-        0, 1, 0,
-        0.1875, 0.25, 0.21875, 0.5,
-        0, -1, geometry.DoomVertexAbi.uvModeRepeat, 0,
-      ],
+      geometry.DoomVertexAbi.floatsPerVertex,
+      adapter.DoomVertexAbi.floatsPerVertex,
     );
+    expect(
+      geometry.DoomVertexAbi.positionOffset,
+      adapter.DoomVertexAbi.positionOffset,
+    );
+    expect(
+      geometry.DoomVertexAbi.texCoordOffset,
+      adapter.DoomVertexAbi.texCoordOffset,
+    );
+    expect(
+      geometry.DoomVertexAbi.colorOffset,
+      adapter.DoomVertexAbi.colorOffset,
+    );
+    expect(
+      geometry.DoomVertexAbi.normalOffset,
+      adapter.DoomVertexAbi.normalOffset,
+    );
+    expect(
+      geometry.DoomVertexAbi.atlasRectOffset,
+      adapter.DoomVertexAbi.atlasRectOffset,
+    );
+    expect(
+      geometry.DoomVertexAbi.paramsOffset,
+      adapter.DoomVertexAbi.paramsOffset,
+    );
+
+    final expected = adapter.DoomVertexAbi.allocate(1);
+    adapter.DoomVertexAbi.writeVertex(
+      expected,
+      0,
+      x: 1,
+      y: 2,
+      z: 3,
+      u: 0,
+      v: 0.25,
+      ny: 1,
+      light: 0.5,
+      atlasLeft: 0.1875,
+      atlasTop: 0.25,
+      atlasRight: 0.21875,
+      atlasBottom: 0.5,
+      uvMode: geometry.DoomVertexAbi.uvModeRepeat,
+    );
+    for (
+      var field = 0;
+      field < adapter.DoomVertexAbi.floatsPerVertex;
+      field++
+    ) {
+      expect(
+        mesh.vertices[field],
+        expected[field],
+        reason: 'geometry and adapter disagree at float field $field',
+      );
+    }
 
     // CPU oracle for the shader's mix(atlasMin, atlasMax, fract(localUv)).
     final double localU = mesh.vertices[geometry.DoomVertexAbi.texCoordOffset];
     final int rect = geometry.DoomVertexAbi.atlasRectOffset;
-    final double resolvedU = mesh.vertices[rect] +
+    final double resolvedU =
+        mesh.vertices[rect] +
         (mesh.vertices[rect + 2] - mesh.vertices[rect]) *
             (localU - localU.floorToDouble());
     expect(resolvedU, 0.1875);

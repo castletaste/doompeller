@@ -129,7 +129,8 @@ void main() {
     });
 
     test('a snapshot does not move with later counting', () {
-      final diagnostics = RenderDiagnostics()..onSurfaceCreated(triangleCount: 1);
+      final diagnostics = RenderDiagnostics()
+        ..onSurfaceCreated(triangleCount: 1);
       final snapshot = diagnostics.snapshot();
       diagnostics.onSurfaceCreated(triangleCount: 1);
       expect(snapshot.surfacesCreated, 1);
@@ -141,7 +142,10 @@ void main() {
         ..onSurfaceCreated(triangleCount: 4)
         ..onGpuBufferCreated(bytes: 64)
         ..reset();
-      expect(diagnostics.snapshot().toJson().values.every((v) => v == 0), isTrue);
+      expect(
+        diagnostics.snapshot().toJson().values.every((v) => v == 0),
+        isTrue,
+      );
     });
 
     test('exposes counters as JSON for a diagnostics overlay', () {

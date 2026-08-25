@@ -120,15 +120,20 @@ void main() {
       expect(buffer[o + DoomVertexAbi.lightOffset], closeTo(0.75, 1e-6));
       expect(buffer[o + DoomVertexAbi.alphaOffset], 1);
       expect(buffer.sublist(o + 9, o + 12), [0, 0, 1]);
-      expect(
-        buffer.sublist(o + 12, o + 16).map((v) => (v * 10).round()),
-        [1, 2, 3, 4],
-      );
+      expect(buffer.sublist(o + 12, o + 16).map((v) => (v * 10).round()), [
+        1,
+        2,
+        3,
+        4,
+      ]);
       expect(buffer[o + 16], 1, reason: 'fullBright');
       expect(buffer[o + 18], DoomVertexAbi.uvModeClamp);
 
       // The untouched vertex 0 must stay zeroed.
-      expect(buffer.sublist(0, DoomVertexAbi.floatsPerVertex).every((v) => v == 0), isTrue);
+      expect(
+        buffer.sublist(0, DoomVertexAbi.floatsPerVertex).every((v) => v == 0),
+        isTrue,
+      );
     });
 
     test('setY, setV and setLight touch one float each', () {
@@ -142,11 +147,19 @@ void main() {
 
       DoomVertexAbi.setV(buffer, 0, 0.25);
       expect(DoomVertexAbi.getV(buffer, 0), 0.25);
-      expect(buffer[DoomVertexAbi.texCoordOffset], 4, reason: 'u must not move');
+      expect(
+        buffer[DoomVertexAbi.texCoordOffset],
+        4,
+        reason: 'u must not move',
+      );
 
       DoomVertexAbi.setLight(buffer, 0, 0.5);
       expect(DoomVertexAbi.getLight(buffer, 0), 0.5);
-      expect(buffer[DoomVertexAbi.alphaOffset], 1, reason: 'alpha must not move');
+      expect(
+        buffer[DoomVertexAbi.alphaOffset],
+        1,
+        reason: 'alpha must not move',
+      );
     });
 
     test('validation rejects partial records and stale indices', () {
@@ -171,6 +184,15 @@ void main() {
           3,
         ),
         throwsArgumentError,
+      );
+    });
+
+    test('pins the geometry producer boundary at 65535 vertices', () {
+      final atLimit = DoomVertexAbi.allocate(65535);
+      DoomVertexAbi.validateVertexBuffer(atLimit);
+      expect(
+        () => DoomVertexAbi.validateVertexBuffer(DoomVertexAbi.allocate(65536)),
+        throwsRangeError,
       );
     });
   });

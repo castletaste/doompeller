@@ -12,10 +12,7 @@ void main() {
 
   setUp(() => backend = FakeGpuBackend());
 
-  PackedFlameSurface buildQuad({
-    RenderDiagnostics? diagnostics,
-    double y = 0,
-  }) {
+  PackedFlameSurface buildQuad({RenderDiagnostics? diagnostics, double y = 0}) {
     final vertices = DoomVertexAbi.allocate(4);
     DoomVertexAbi.writeVertex(vertices, 0, x: 0, y: y, z: 0, u: 0, v: 0);
     DoomVertexAbi.writeVertex(vertices, 1, x: 8, y: y, z: 0, u: 1, v: 0);
@@ -133,7 +130,7 @@ void main() {
       );
     });
 
-    test('coalesces many writes in a tic into one upload', () {
+    test('coalesces adjacent writes but preserves disjoint dirty ranges', () {
       final diagnostics = RenderDiagnostics();
       final surface = buildQuad(diagnostics: diagnostics);
       surface.resource;
@@ -144,12 +141,20 @@ void main() {
       surface.setVertexHeights(const [3], 2);
       surface.setVertexHeights(const [1], 3);
       expect(surface.hasPendingUpload, isTrue);
-      expect(fake.writeCount, baseline, reason: 'nothing uploads before a draw');
+      expect(
+        fake.writeCount,
+        baseline,
+        reason: 'nothing uploads before a draw',
+      );
 
       surface.resource;
-      expect(fake.writeCount, baseline + 1);
+      expect(fake.writeCount, baseline + 2);
       expect(diagnostics.dynamicUpdates, 3);
-      expect(diagnostics.dynamicUploads, 1);
+      expect(diagnostics.dynamicUploads, 2);
+      expect(fake.writeRanges.sublist(baseline), <(int, int)>[
+        (0, 2 * DoomVertexAbi.bytesPerVertex),
+        (DoomVertexAbi.byteOffsetOf(3), DoomVertexAbi.bytesPerVertex),
+      ]);
     });
 
     test('an unchanged height costs nothing', () {
@@ -169,13 +174,10 @@ void main() {
       surface.resource;
       final original = surface.packedVertices;
 
-      surface.updateVertices(
-        (vertices) {
-          DoomVertexAbi.setV(vertices, 2, 0.5);
-          surface.markVertexDirty(2);
-        },
-        bounds: Aabb3.minMax(Vector3(0, -4, 0), Vector3(8, 4, 8)),
-      );
+      surface.updateVertices((vertices) {
+        DoomVertexAbi.setV(vertices, 2, 0.5);
+        surface.markVertexDirty(2);
+      }, bounds: Aabb3.minMax(Vector3(0, -4, 0), Vector3(8, 4, 8)));
 
       expect(identical(surface.packedVertices, original), isTrue);
       expect(DoomVertexAbi.getV(surface.packedVertices, 2), 0.5);
@@ -186,11 +188,23 @@ void main() {
     test('rejects out-of-range vertex indices', () {
       final surface = buildQuad();
       expect(() => surface.markVertexDirty(4), throwsRangeError);
+      expect(() => surface.markVertexRangeDirty(3, 2), throwsRangeError);
       expect(() => surface.setVertexHeights(const [9], 1), throwsRangeError);
       expect(
         () => surface.setVertexHeights(const [0], double.nan),
         throwsArgumentError,
       );
+    });
+
+    test('markVertexRangeDirty uploads one exact contiguous range', () {
+      final surface = buildQuad();
+      surface.resource;
+      surface.markVertexRangeDirty(1, 2);
+      surface.resource;
+      expect(backend.buffers.single.writeRanges.last, (
+        DoomVertexAbi.byteOffsetOf(1),
+        2 * DoomVertexAbi.bytesPerVertex,
+      ));
     });
 
     test('flushPendingUpload is a no-op before the first draw', () {

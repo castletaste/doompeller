@@ -1,5 +1,8 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:doom_geometry/doom_geometry.dart' as geometry;
+import 'package:doom_wad/doom_wad.dart' as wad;
 import 'package:flame_3d/camera.dart';
 import 'package:flame_3d/components.dart';
 import 'package:flame_3d/game.dart';
@@ -9,6 +12,8 @@ import 'packed_surface.dart';
 import 'palette_material.dart';
 import 'palette_textures.dart';
 import 'render_diagnostics.dart';
+import 'doom_sprite_atlas.dart';
+import 'doom_sprite_catalog.dart';
 import 'vertex_abi.dart';
 
 /// One packed, GPU-ready mesh handed to the adapter.
@@ -109,10 +114,8 @@ final class SceneBounds {
     maxZ: maxZ,
   );
 
-  Aabb3 toAabb3() => Aabb3.minMax(
-    Vector3(minX, minY, minZ),
-    Vector3(maxX, maxY, maxZ),
-  );
+  Aabb3 toAabb3() =>
+      Aabb3.minMax(Vector3(minX, minY, minZ), Vector3(maxX, maxY, maxZ));
 }
 
 /// A sector plane whose height changes at runtime.
@@ -219,6 +222,10 @@ final class DoomScene {
     required List<SectorPlaneRef> ceilingPlanes,
     required List<WallBandRef> wallBands,
     required this.materials,
+    this._compiledLevel,
+    this._geometryBindings = const {},
+    this._spriteAtlas,
+    this._spriteMaterials = const {},
   }) : // These are exposed through narrower read-only accessors, so the
        // backing fields stay private.
        // ignore: prefer_initializing_formals
@@ -238,6 +245,7 @@ final class DoomScene {
   }) {
     final counters = diagnostics ?? RenderDiagnostics();
     final materialCache = materials ?? PaletteMaterialCache();
+    materialCache.beginScene();
     final root = DoomSceneRoot();
     final surfacesByPage = <String, List<PackedFlameSurface>>{};
 
@@ -294,6 +302,147 @@ final class DoomScene {
     );
   }
 
+  /// Builds directly from the pure-Dart compiler's production objects.
+  ///
+  /// Geometry already batches by atlas page and kind. Each [PackedMesh] stays
+  /// one [PackedFlameSurface], retaining the compiler's vertex buffer by
+  /// identity so its mesh-indexed dynamic references remain exact.
+  factory DoomScene.fromCompiledLevel(
+    geometry.CompiledLevel level,
+    wad.WadResources resources, {
+    RenderDiagnostics? diagnostics,
+    PaletteMaterialCache? materials,
+    Set<String> spritePrefixes = const <String>{},
+    Set<String> spriteNames = const <String>{},
+    geometry.GeometryOptions spriteAtlasOptions =
+        geometry.GeometryOptions.defaults,
+  }) {
+    final counters = diagnostics ?? RenderDiagnostics();
+    final materialCache = materials ?? PaletteMaterialCache();
+    materialCache.beginScene();
+    final root = DoomSceneRoot();
+    final surfacesByPage = <String, List<PackedFlameSurface>>{};
+    final bindings = <int, _GeometryBinding>{};
+    final pageTextures = <int, PaletteTextures>{};
+    final spriteMaterials = <int, PaletteMaterial>{};
+
+    for (final page in level.atlas.pages) {
+      if (page.index < 0 || page.index >= level.atlas.pages.length) {
+        throw StateError('Atlas page has invalid index ${page.index}');
+      }
+      pageTextures[page.index] = PaletteTextures(
+        PaletteTextureData.fromDoomResources(page: page, resources: resources),
+        diagnostics: counters,
+      );
+    }
+
+    final spriteAtlas = spritePrefixes.isEmpty && spriteNames.isEmpty
+        ? null
+        : DoomSpriteAtlas.build(
+            resources,
+            requiredPrefixes: spritePrefixes,
+            requiredNames: spriteNames,
+            options: spriteAtlasOptions,
+          );
+    if (spriteAtlas != null) {
+      for (final page in spriteAtlas.atlas.pages) {
+        final textures = PaletteTextures(
+          PaletteTextureData.fromDoomResources(
+            page: page,
+            resources: resources,
+          ),
+          diagnostics: counters,
+        );
+        spriteMaterials[page.index] = materialCache.resolve(
+          atlasKey: 'sprite:${page.index}',
+          textures: textures,
+          alphaCutout: true,
+        );
+      }
+    }
+
+    for (var meshIndex = 0; meshIndex < level.meshes.length; meshIndex++) {
+      final source = level.meshes[meshIndex];
+      final textures = pageTextures[source.atlasPage];
+      if (textures == null) {
+        throw StateError(
+          'PackedMesh $meshIndex references missing atlas page '
+          '${source.atlasPage}',
+        );
+      }
+      final kind = _fromGeometryKind(source.kind);
+      final material = materialCache.resolve(
+        atlasKey: 'geometry:${source.atlasPage}',
+        textures: textures,
+        alphaCutout: _needsCutout(kind),
+      );
+      final surface = PackedFlameSurface(
+        vertices: source.vertices,
+        indices: source.indices,
+        bounds: _boundsOf(source.vertices),
+        material: material,
+        kind: kind,
+        diagnostics: counters,
+        debugLabel: 'mesh:$meshIndex/page:${source.atlasPage}/${kind.name}',
+      );
+      final flameMesh = Mesh()..addSurface(surface);
+      final component = _componentFor(kind, flameMesh);
+      counters
+        ..onMeshBuilt()
+        ..onComponentBuilt();
+      root.add(component);
+      bindings[meshIndex] = _GeometryBinding(
+        surface: surface,
+        mesh: flameMesh,
+        component: component,
+      );
+      surfacesByPage
+          .putIfAbsent('geometry:${source.atlasPage}', () => [])
+          .add(surface);
+    }
+
+    final skyEntry = level.skyTextureEntry;
+    if (skyEntry != null) {
+      final textures = pageTextures[skyEntry.page];
+      if (textures == null) {
+        throw StateError('Sky references missing atlas page ${skyEntry.page}');
+      }
+      final material = materialCache.resolve(
+        atlasKey: 'geometry:${skyEntry.page}',
+        textures: textures,
+        alphaCutout: false,
+      );
+      final surface = _buildSkySurface(
+        entry: skyEntry,
+        pageSize: level.atlas.pageSize,
+        material: material,
+        diagnostics: counters,
+      );
+      final skyMesh = Mesh()..addSurface(surface);
+      root.add(SkyMeshComponent(mesh: skyMesh));
+      counters
+        ..onMeshBuilt()
+        ..onComponentBuilt();
+      surfacesByPage
+          .putIfAbsent('geometry:${skyEntry.page}', () => [])
+          .add(surface);
+    }
+
+    return DoomScene._(
+      root: root,
+      diagnostics: counters,
+      surfacesByPage: surfacesByPage,
+      floorPlanes: const [],
+      ceilingPlanes: const [],
+      wallBands: const [],
+      materials: materialCache,
+      compiledLevel: level,
+      geometryBindings: bindings,
+      spriteAtlas: spriteAtlas,
+      spriteMaterials: spriteMaterials,
+    );
+  }
+
   /// Mount this under a World3D to render the level.
   final DoomSceneRoot root;
 
@@ -306,6 +455,19 @@ final class DoomScene {
   final List<SectorPlaneRef> _floorPlanes;
   final List<SectorPlaneRef> _ceilingPlanes;
   final List<WallBandRef> _wallBands;
+  final geometry.CompiledLevel? _compiledLevel;
+  final Map<int, _GeometryBinding> _geometryBindings;
+  final DoomSpriteAtlas? _spriteAtlas;
+  final Map<int, PaletteMaterial> _spriteMaterials;
+
+  /// Exact source mesh identity used by the compiler's dynamic references.
+  PackedFlameSurface surfaceForMesh(int meshIndex) {
+    final binding = _geometryBindings[meshIndex];
+    if (binding == null) {
+      throw RangeError.index(meshIndex, _geometryBindings, 'meshIndex');
+    }
+    return binding.surface;
+  }
 
   /// Total surfaces, the number that drives per-frame draw cost.
   int get surfaceCount =>
@@ -329,6 +491,38 @@ final class DoomScene {
     required double height,
     required bool isCeiling,
   }) {
+    final compiled = _compiledLevel;
+    if (compiled != null) {
+      final planes = isCeiling ? compiled.ceilingPlanes : compiled.floorPlanes;
+      geometry.SectorPlaneRef? target;
+      for (final plane in planes) {
+        if (plane.sector == sectorIndex) {
+          target = plane;
+          break;
+        }
+      }
+      if (target == null || target.height == height) {
+        return false;
+      }
+      if (!height.isFinite) {
+        throw ArgumentError.value(height, 'height', 'must be finite');
+      }
+      if (isCeiling) {
+        compiled.setCeilingHeight(sectorIndex, height);
+      } else {
+        compiled.setFloorHeight(sectorIndex, height);
+      }
+      for (final range in target.ranges) {
+        final binding = _geometryBindings[range.meshIndex]!;
+        binding.surface
+          ..markVertexRangeDirty(range.firstVertex, range.vertexCount)
+          ..expandBoundsY(height);
+        binding.markBoundsDirty();
+      }
+      diagnostics.onDynamicUpdate();
+      return true;
+    }
+
     final planes = isCeiling ? _ceilingPlanes : _floorPlanes;
     var changed = false;
     for (final plane in planes) {
@@ -348,6 +542,178 @@ final class DoomScene {
       }
     }
     return changed;
+  }
+
+  /// Recomputes every wall quad touching [sectorIndex] through geometry's
+  /// pegging oracle, then marks only each referenced four-vertex quad dirty.
+  int updateWallsForSector({
+    required int sectorIndex,
+    required double floorHeight,
+    required double ceilingHeight,
+    required List<double> sectorFloors,
+    required List<double> sectorCeilings,
+  }) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('updateWallsForSector requires fromCompiledLevel');
+    }
+    final affected = <geometry.WallBandRef>[
+      for (final band in compiled.wallBands)
+        if (band.frontSector == sectorIndex || band.backSector == sectorIndex)
+          band,
+    ];
+    if (affected.isEmpty) {
+      return 0;
+    }
+    final updated = compiled.updateWallsForSector(
+      sectorIndex,
+      floorHeight,
+      ceilingHeight,
+      sectorFloors,
+      sectorCeilings,
+    );
+    for (final band in affected) {
+      final binding = _geometryBindings[band.meshIndex]!;
+      binding.surface
+        ..markVertexRangeDirty(
+          band.firstVertex,
+          geometry.WallBandRef.verticesPerQuad,
+        )
+        ..expandBoundsY(band.bottom)
+        ..expandBoundsY(band.top);
+      binding.markBoundsDirty();
+    }
+    diagnostics.onDynamicUpdate();
+    return updated;
+  }
+
+  /// Adds one upright actor billboard from the bounded supplemental atlas.
+  ActorSpriteComponent addActorSprite(ActorSpriteInstance actor) {
+    final spriteAtlas = _spriteAtlas;
+    if (spriteAtlas == null) {
+      throw StateError(
+        'No supplemental sprite atlas was requested for this scene',
+      );
+    }
+    final selection =
+        spriteAtlas.catalog.resolve(
+          prefix: actor.spritePrefix,
+          frame: actor.frame,
+          rotation: 0,
+        ) ??
+        spriteAtlas.catalog.resolve(
+          prefix: actor.spritePrefix,
+          frame: actor.frame,
+          rotation: 1,
+        );
+    if (selection == null) {
+      throw StateError(
+        'No sprite for ${actor.spritePrefix} frame ${actor.frame}',
+      );
+    }
+    final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
+    final material = _spriteMaterials[entry.page]!;
+    final quad = _actorSpriteQuad(
+      entry,
+      width: actor.width,
+      height: actor.height,
+    );
+    final vertices = _spriteQuad(
+      quad: quad,
+      entry: entry,
+      pageSize: spriteAtlas.atlas.pageSize,
+      light: actor.light,
+      fullBright: actor.fullBright,
+    );
+    final surface = PackedFlameSurface(
+      vertices: vertices,
+      indices: Uint16List.fromList(const [0, 1, 2, 0, 2, 3]),
+      bounds: quad.bounds,
+      material: material,
+      kind: DoomSurfaceKind.sprite,
+      diagnostics: diagnostics,
+      debugLabel: 'actor:${actor.spritePrefix}',
+    );
+    final mesh = Mesh()..addSurface(surface);
+    final component = ActorSpriteComponent(
+      mesh: mesh,
+      position: Vector3(actor.x, actor.y, actor.z),
+      surface: surface,
+      spriteAtlas: spriteAtlas,
+      materialsByPage: _spriteMaterials,
+      spritePrefix: actor.spritePrefix,
+      frame: actor.frame,
+      actorAngle: actor.actorAngle,
+      width: actor.width,
+      height: actor.height,
+      light: actor.light,
+      fullBright: actor.fullBright,
+      lumpName: selection.lumpName,
+      mirrored: selection.mirrored,
+    );
+    root.add(component);
+    _surfacesByPage.putIfAbsent('sprite:${entry.page}', () => []).add(surface);
+    diagnostics
+      ..onMeshBuilt()
+      ..onComponentBuilt();
+    return component;
+  }
+
+  /// Adds a camera-view-locked first-person weapon frame.
+  ViewLockedWeaponSpriteComponent addWeaponSprite(WeaponSpriteInstance weapon) {
+    final spriteAtlas = _spriteAtlas;
+    if (spriteAtlas == null) {
+      throw StateError(
+        'No supplemental sprite atlas was requested for this scene',
+      );
+    }
+    final selection = spriteAtlas.catalog.exact(weapon.lumpName);
+    if (selection == null) {
+      throw StateError('Weapon sprite ${weapon.lumpName} is not packed');
+    }
+    final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
+    final quad = _weaponSpriteQuad(
+      entry,
+      viewAnchorX: weapon.viewAnchorX,
+      viewAnchorY: weapon.viewAnchorY,
+      pixelScaleX: weapon.pixelScaleX,
+      pixelScaleY: weapon.pixelScaleY,
+    );
+    final vertices = _spriteQuad(
+      quad: quad,
+      entry: entry,
+      pageSize: spriteAtlas.atlas.pageSize,
+      light: 1,
+      fullBright: true,
+      depthLayer: -1,
+    );
+    final surface = PackedFlameSurface(
+      vertices: vertices,
+      indices: Uint16List.fromList(const [0, 1, 2, 0, 2, 3]),
+      bounds: quad.bounds,
+      material: _spriteMaterials[entry.page]!,
+      kind: DoomSurfaceKind.weapon,
+      diagnostics: diagnostics,
+      debugLabel: 'weapon:${weapon.lumpName}',
+    );
+    final mesh = Mesh()..addSurface(surface);
+    final component = ViewLockedWeaponSpriteComponent(
+      mesh: mesh,
+      surface: surface,
+      spriteAtlas: spriteAtlas,
+      materialsByPage: _spriteMaterials,
+      lumpName: selection.lumpName,
+      viewAnchorX: weapon.viewAnchorX,
+      viewAnchorY: weapon.viewAnchorY,
+      pixelScaleX: weapon.pixelScaleX,
+      pixelScaleY: weapon.pixelScaleY,
+    );
+    root.add(component);
+    _surfacesByPage.putIfAbsent('sprite:${entry.page}', () => []).add(surface);
+    diagnostics
+      ..onMeshBuilt()
+      ..onComponentBuilt();
+    return component;
   }
 
   /// Resizes a wall band, as a door or lift does.
@@ -371,18 +737,15 @@ final class DoomScene {
       final bounds = band.bounds.withHeights(bottomHeight, topHeight).toAabb3();
       for (final surface in _surfacesByPage[band.atlasPage] ?? const []) {
         var surfaceChanged = false;
-        surface.updateVertices(
-          (vertices) {
-            surfaceChanged = _writeBand(
-              vertices,
-              surface,
-              band,
-              topHeight,
-              bottomHeight,
-            );
-          },
-          bounds: bounds,
-        );
+        surface.updateVertices((vertices) {
+          surfaceChanged = _writeBand(
+            vertices,
+            surface,
+            band,
+            topHeight,
+            bottomHeight,
+          );
+        }, bounds: bounds);
         changed = changed || surfaceChanged;
       }
     }
@@ -480,8 +843,9 @@ final class DoomScene {
 
   static Component3D _componentFor(DoomSurfaceKind kind, Mesh mesh) =>
       switch (kind) {
-        DoomSurfaceKind.sky ||
-        DoomSurfaceKind.weapon => CameraLockedMeshComponent(mesh: mesh),
+        DoomSurfaceKind.sky => SkyMeshComponent(mesh: mesh),
+        DoomSurfaceKind.weapon => ViewLockedWeaponComponent(mesh: mesh),
+        DoomSurfaceKind.sprite => YawBillboardMeshComponent(mesh: mesh),
         _ => MeshComponent(mesh: mesh),
       };
 
@@ -564,16 +928,320 @@ final class _MergedBatch {
       bounds = bounds.union(mesh.bounds);
     }
 
-    return _MergedBatch(
-      vertices: vertices,
-      indices: indices,
-      bounds: bounds,
-    );
+    return _MergedBatch(vertices: vertices, indices: indices, bounds: bounds);
   }
 
   final Float32List vertices;
   final Uint16List indices;
   final SceneBounds bounds;
+}
+
+DoomSurfaceKind _fromGeometryKind(geometry.SurfaceKind kind) => switch (kind) {
+  geometry.SurfaceKind.opaque => DoomSurfaceKind.opaque,
+  geometry.SurfaceKind.masked => DoomSurfaceKind.masked,
+  geometry.SurfaceKind.sky => DoomSurfaceKind.sky,
+};
+
+Aabb3 _boundsOf(Float32List vertices) {
+  var minX = double.infinity;
+  var minY = double.infinity;
+  var minZ = double.infinity;
+  var maxX = double.negativeInfinity;
+  var maxY = double.negativeInfinity;
+  var maxZ = double.negativeInfinity;
+  final count = DoomVertexAbi.vertexCountOf(vertices);
+  for (var vertex = 0; vertex < count; vertex++) {
+    final offset = DoomVertexAbi.floatOffsetOf(vertex);
+    final x = vertices[offset];
+    final y = vertices[offset + 1];
+    final z = vertices[offset + 2];
+    minX = math.min(minX, x);
+    minY = math.min(minY, y);
+    minZ = math.min(minZ, z);
+    maxX = math.max(maxX, x);
+    maxY = math.max(maxY, y);
+    maxZ = math.max(maxZ, z);
+  }
+  return Aabb3.minMax(Vector3(minX, minY, minZ), Vector3(maxX, maxY, maxZ));
+}
+
+Float32List _spriteQuad({
+  required _SpriteQuad quad,
+  required geometry.AtlasEntry entry,
+  required int pageSize,
+  required double light,
+  required bool fullBright,
+  double depthLayer = 0,
+}) {
+  final vertices = DoomVertexAbi.allocate(4);
+  final u0 = entry.u0(pageSize);
+  final v0 = entry.v0(pageSize);
+  final u1 = entry.u1(pageSize);
+  final v1 = entry.v1(pageSize);
+  void write(int index, double x, double y, double u, double v) {
+    DoomVertexAbi.writeVertex(
+      vertices,
+      index,
+      x: x,
+      y: y,
+      z: 0,
+      u: u,
+      v: v,
+      nz: 1,
+      light: light,
+      atlasLeft: u0,
+      atlasTop: v0,
+      atlasRight: u1,
+      atlasBottom: v1,
+      uvMode: DoomVertexAbi.uvModeClamp,
+      fullBright: fullBright,
+      depthLayer: depthLayer,
+    );
+  }
+
+  write(0, quad.left, quad.bottom, 0, 1);
+  write(1, quad.right, quad.bottom, 1, 1);
+  write(2, quad.right, quad.top, 1, 0);
+  write(3, quad.left, quad.top, 0, 0);
+  return vertices;
+}
+
+void _setSpriteSelection(
+  PackedFlameSurface surface,
+  geometry.AtlasEntry entry,
+  int pageSize, {
+  required bool mirrored,
+  _SpriteQuad? quad,
+}) {
+  final u0 = entry.u0(pageSize);
+  final v0 = entry.v0(pageSize);
+  final u1 = entry.u1(pageSize);
+  final v1 = entry.v1(pageSize);
+  surface.updateVertices((vertices) {
+    if (quad != null) {
+      _writeSpriteQuadPositions(vertices, quad);
+    }
+    for (var vertex = 0; vertex < 4; vertex++) {
+      final offset = DoomVertexAbi.floatOffsetOf(vertex);
+      vertices[offset + DoomVertexAbi.atlasRectOffset] = u0;
+      vertices[offset + DoomVertexAbi.atlasRectOffset + 1] = v0;
+      vertices[offset + DoomVertexAbi.atlasRectOffset + 2] = u1;
+      vertices[offset + DoomVertexAbi.atlasRectOffset + 3] = v1;
+    }
+    final leftU = mirrored ? 1.0 : 0.0;
+    final rightU = mirrored ? 0.0 : 1.0;
+    vertices[DoomVertexAbi.texCoordOffset] = leftU;
+    vertices[DoomVertexAbi.floatOffsetOf(1) + DoomVertexAbi.texCoordOffset] =
+        rightU;
+    vertices[DoomVertexAbi.floatOffsetOf(2) + DoomVertexAbi.texCoordOffset] =
+        rightU;
+    vertices[DoomVertexAbi.floatOffsetOf(3) + DoomVertexAbi.texCoordOffset] =
+        leftU;
+    surface.markVertexRangeDirty(0, 4);
+  });
+}
+
+void _writeSpriteQuadPositions(Float32List vertices, _SpriteQuad quad) {
+  final points = <(double, double)>[
+    (quad.left, quad.bottom),
+    (quad.right, quad.bottom),
+    (quad.right, quad.top),
+    (quad.left, quad.top),
+  ];
+  for (var vertex = 0; vertex < 4; vertex++) {
+    final offset = DoomVertexAbi.floatOffsetOf(vertex);
+    vertices[offset] = points[vertex].$1;
+    vertices[offset + 1] = points[vertex].$2;
+  }
+}
+
+_SpriteQuad _actorSpriteQuad(
+  geometry.AtlasEntry entry, {
+  double? width,
+  double? height,
+}) {
+  final scaleX = width == null ? 1.0 : width / entry.width;
+  final scaleY = height == null ? 1.0 : height / entry.height;
+  return _SpriteQuad(
+    left: -entry.leftOffset * scaleX,
+    right: (entry.width - entry.leftOffset) * scaleX,
+    bottom: (entry.topOffset - entry.height) * scaleY,
+    top: entry.topOffset * scaleY,
+  );
+}
+
+_SpriteQuad _weaponSpriteQuad(
+  geometry.AtlasEntry entry, {
+  required double viewAnchorX,
+  required double viewAnchorY,
+  required double pixelScaleX,
+  required double pixelScaleY,
+}) => _SpriteQuad(
+  left: viewAnchorX - entry.leftOffset * pixelScaleX,
+  right: viewAnchorX + (entry.width - entry.leftOffset) * pixelScaleX,
+  bottom: viewAnchorY + (entry.topOffset - entry.height) * pixelScaleY,
+  top: viewAnchorY + entry.topOffset * pixelScaleY,
+);
+
+final class _SpriteQuad {
+  const _SpriteQuad({
+    required this.left,
+    required this.right,
+    required this.bottom,
+    required this.top,
+  });
+
+  final double left;
+  final double right;
+  final double bottom;
+  final double top;
+
+  Aabb3 get bounds =>
+      Aabb3.minMax(Vector3(left, bottom, 0), Vector3(right, top, 0));
+}
+
+PackedFlameSurface _buildSkySurface({
+  required geometry.AtlasEntry entry,
+  required int pageSize,
+  required Material material,
+  required RenderDiagnostics diagnostics,
+}) {
+  const extent = 500.0;
+  final vertices = DoomVertexAbi.allocate(24);
+  final indices = Uint16List(36);
+  final u0 = entry.u0(pageSize);
+  final v0 = entry.v0(pageSize);
+  final u1 = entry.u1(pageSize);
+  final v1 = entry.v1(pageSize);
+  var vertexCursor = 0;
+  var indexCursor = 0;
+
+  void face(
+    List<(double, double, double)> corners,
+    (double, double, double) normal,
+    double localU0,
+    double localU1,
+  ) {
+    final localUvs = <(double, double)>[
+      (localU0, 1),
+      (localU1, 1),
+      (localU1, 0),
+      (localU0, 0),
+    ];
+    for (var i = 0; i < 4; i++) {
+      final point = corners[i];
+      final uv = localUvs[i];
+      DoomVertexAbi.writeVertex(
+        vertices,
+        vertexCursor + i,
+        x: point.$1,
+        y: point.$2,
+        z: point.$3,
+        u: uv.$1,
+        v: uv.$2,
+        nx: normal.$1,
+        ny: normal.$2,
+        nz: normal.$3,
+        atlasLeft: u0,
+        atlasTop: v0,
+        atlasRight: u1,
+        atlasBottom: v1,
+        // The four vertical faces consume one continuous panorama. Clamp is
+        // essential: repeat would turn U=1 into U=0 and add another seam.
+        // Top/bottom use the stable full-width mapping documented below.
+        uvMode: DoomVertexAbi.uvModeClamp,
+        fullBright: true,
+        depthLayer: 1,
+      );
+    }
+    indices.setRange(indexCursor, indexCursor + 6, <int>[
+      vertexCursor,
+      vertexCursor + 1,
+      vertexCursor + 2,
+      vertexCursor,
+      vertexCursor + 2,
+      vertexCursor + 3,
+    ]);
+    vertexCursor += 4;
+    indexCursor += 6;
+  }
+
+  face(
+    const [
+      (-extent, -extent, -extent),
+      (extent, -extent, -extent),
+      (extent, extent, -extent),
+      (-extent, extent, -extent),
+    ],
+    (0, 0, 1),
+    0,
+    0.25,
+  );
+  face(
+    const [
+      (extent, -extent, extent),
+      (-extent, -extent, extent),
+      (-extent, extent, extent),
+      (extent, extent, extent),
+    ],
+    (0, 0, -1),
+    0.5,
+    0.75,
+  );
+  face(
+    const [
+      (-extent, -extent, extent),
+      (-extent, -extent, -extent),
+      (-extent, extent, -extent),
+      (-extent, extent, extent),
+    ],
+    (1, 0, 0),
+    0.75,
+    1,
+  );
+  face(
+    const [
+      (extent, -extent, -extent),
+      (extent, -extent, extent),
+      (extent, extent, extent),
+      (extent, extent, -extent),
+    ],
+    (-1, 0, 0),
+    0.25,
+    0.5,
+  );
+  face(
+    const [
+      (-extent, extent, -extent),
+      (extent, extent, -extent),
+      (extent, extent, extent),
+      (-extent, extent, extent),
+    ],
+    (0, -1, 0),
+    0,
+    1,
+  );
+  face(
+    const [
+      (-extent, -extent, extent),
+      (extent, -extent, extent),
+      (extent, -extent, -extent),
+      (-extent, -extent, -extent),
+    ],
+    (0, 1, 0),
+    0,
+    1,
+  );
+
+  return PackedFlameSurface(
+    vertices: vertices,
+    indices: indices,
+    bounds: Aabb3.minMax(Vector3.all(-extent), Vector3.all(extent)),
+    material: material,
+    kind: DoomSurfaceKind.sky,
+    diagnostics: diagnostics,
+    debugLabel: 'sky:${entry.name}',
+  );
 }
 
 /// A mesh that translates with the camera but does not rotate with it.
@@ -583,7 +1251,7 @@ final class _MergedBatch {
 /// position while keeping world orientation gives the sky its parallax-free
 /// look without a separate render pass, which matters because flame_3d applies
 /// blend and depth state per pass, not per object.
-final class CameraLockedMeshComponent extends MeshComponent {
+class CameraLockedMeshComponent extends MeshComponent {
   CameraLockedMeshComponent({required super.mesh});
 
   @override
@@ -591,14 +1259,301 @@ final class CameraLockedMeshComponent extends MeshComponent {
     super.update(dt);
     final camera = CameraComponent3D.currentCamera;
     if (camera != null) {
-      position.setFrom(camera.position);
+      syncToCamera(camera);
     }
+  }
+
+  void syncToCamera(CameraComponent3D camera) {
+    position.setFrom(camera.position);
   }
 
   /// Always drawn: a camera-locked mesh surrounds the view, so frustum culling
   /// it is both wrong and wasted work.
   @override
   bool isVisible(CameraComponent3D camera) => true;
+}
+
+/// Camera-centred sky with world-fixed orientation.
+///
+/// Only translation follows the camera, so yaw and pitch move the view across
+/// the texture. The cube is emitted far behind world geometry and uses normal
+/// depth testing, so it fills clear pixels without overwriting nearer world
+/// fragments.
+final class SkyMeshComponent extends CameraLockedMeshComponent {
+  SkyMeshComponent({required super.mesh});
+}
+
+/// Weapon geometry locked to the camera's actual look basis.
+///
+/// CameraComponent3D renders from position/target/up; its `rotation` field is
+/// not authoritative. Deriving the quaternion from forward/right/up keeps the
+/// weapon stable through yaw and pitch even when `target` changes directly.
+class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
+  ViewLockedWeaponComponent({required super.mesh, this.weaponDistance = 0.04});
+
+  final double weaponDistance;
+
+  @override
+  void syncToCamera(CameraComponent3D camera) {
+    final forward = camera.forward.normalized();
+    final right = forward.cross(camera.up)..normalize();
+    final up = right.cross(forward)..normalize();
+    position.setFrom(camera.position + forward * weaponDistance);
+    rotation.setFrom(
+      Quaternion.fromRotation(Matrix3.columns(right, up, -forward))
+        ..normalize(),
+    );
+  }
+}
+
+/// Upright actor sprite that rotates only around world Y.
+class YawBillboardMeshComponent extends MeshComponent {
+  YawBillboardMeshComponent({required super.mesh, super.position});
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final camera = CameraComponent3D.currentCamera;
+    if (camera != null) {
+      syncToCamera(camera);
+    }
+  }
+
+  void syncToCamera(CameraComponent3D camera) {
+    final dx = camera.position.x - position.x;
+    final dz = camera.position.z - position.z;
+    if (dx == 0 && dz == 0) {
+      return;
+    }
+    rotation.setFrom(
+      Quaternion.axisAngle(Vector3(0, 1, 0), math.atan2(dx, dz)),
+    );
+  }
+}
+
+/// Actor billboard that also selects classic view rotations in-place.
+final class ActorSpriteComponent extends YawBillboardMeshComponent {
+  ActorSpriteComponent({
+    required super.mesh,
+    required super.position,
+    required this.surface,
+    required this.spriteAtlas,
+    required this.materialsByPage,
+    required this.spritePrefix,
+    required this.frame,
+    required this.actorAngle,
+    required this.width,
+    required this.height,
+    required this.light,
+    required this.fullBright,
+    required this._lumpName,
+    required this._mirrored,
+  });
+
+  final PackedFlameSurface surface;
+  final DoomSpriteAtlas spriteAtlas;
+  final Map<int, PaletteMaterial> materialsByPage;
+  final String spritePrefix;
+  double actorAngle;
+  int frame;
+  final double? width;
+  final double? height;
+  double light;
+  bool fullBright;
+
+  String _lumpName;
+  bool _mirrored;
+
+  String get lumpName => _lumpName;
+  bool get mirrored => _mirrored;
+
+  /// Updates the stable actor component in place for a new simulation view.
+  /// Normal Flame removal remains available through `removeFromParent()` when
+  /// the actor dies.
+  void updateActor({
+    required double x,
+    required double y,
+    required double z,
+    required int frame,
+    required double actorAngle,
+    required double light,
+    required bool fullBright,
+  }) {
+    position.setValues(x, y, z);
+    this.frame = frame;
+    this.actorAngle = actorAngle;
+    if (this.light == light && this.fullBright == fullBright) {
+      return;
+    }
+    this.light = light;
+    this.fullBright = fullBright;
+    surface.updateVertices((vertices) {
+      for (var vertex = 0; vertex < 4; vertex++) {
+        final offset = DoomVertexAbi.floatOffsetOf(vertex);
+        vertices[offset + DoomVertexAbi.lightOffset] = light;
+        vertices[offset + DoomVertexAbi.paramsOffset] = fullBright ? 1 : 0;
+      }
+      surface.markVertexRangeDirty(0, 4);
+    });
+  }
+
+  @override
+  void syncToCamera(CameraComponent3D camera) {
+    super.syncToCamera(camera);
+    final rotation = DoomSpriteCatalog.cameraRotation(
+      actorAngle: actorAngle,
+      actorX: position.x,
+      actorZ: position.z,
+      cameraX: camera.position.x,
+      cameraZ: camera.position.z,
+    );
+    final selection = spriteAtlas.catalog.resolve(
+      prefix: spritePrefix,
+      frame: frame,
+      rotation: rotation,
+    );
+    if (selection == null ||
+        (selection.lumpName == _lumpName && selection.mirrored == _mirrored)) {
+      return;
+    }
+    final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
+    final quad = _actorSpriteQuad(entry, width: width, height: height);
+    surface.material = materialsByPage[entry.page]!;
+    _setSpriteSelection(
+      surface,
+      entry,
+      spriteAtlas.atlas.pageSize,
+      mirrored: selection.mirrored,
+      quad: quad,
+    );
+    surface.setBounds(quad.bounds);
+    mesh.updateBounds();
+    markAabbDirty();
+    _lumpName = selection.lumpName;
+    _mirrored = selection.mirrored;
+  }
+}
+
+/// View-locked weapon quad whose exact WAD frame can change in-place.
+final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
+  ViewLockedWeaponSpriteComponent({
+    required super.mesh,
+    required this.surface,
+    required this.spriteAtlas,
+    required this.materialsByPage,
+    required this._lumpName,
+    required this.viewAnchorX,
+    required this.viewAnchorY,
+    required this.pixelScaleX,
+    required this.pixelScaleY,
+  });
+
+  final PackedFlameSurface surface;
+  final DoomSpriteAtlas spriteAtlas;
+  final Map<int, PaletteMaterial> materialsByPage;
+  String _lumpName;
+  final double viewAnchorX;
+  final double viewAnchorY;
+  final double pixelScaleX;
+  final double pixelScaleY;
+
+  String get lumpName => _lumpName;
+
+  bool setFrame(String lumpName) {
+    final selection = spriteAtlas.catalog.exact(lumpName);
+    if (selection == null) {
+      throw StateError('Weapon sprite $lumpName is not packed');
+    }
+    if (selection.lumpName == _lumpName) {
+      return false;
+    }
+    final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
+    final quad = _weaponSpriteQuad(
+      entry,
+      viewAnchorX: viewAnchorX,
+      viewAnchorY: viewAnchorY,
+      pixelScaleX: pixelScaleX,
+      pixelScaleY: pixelScaleY,
+    );
+    surface.material = materialsByPage[entry.page]!;
+    _setSpriteSelection(
+      surface,
+      entry,
+      spriteAtlas.atlas.pageSize,
+      mirrored: false,
+      quad: quad,
+    );
+    surface.setBounds(quad.bounds);
+    mesh.updateBounds();
+    markAabbDirty();
+    _lumpName = selection.lumpName;
+    return true;
+  }
+}
+
+/// Plain-data actor placement for [DoomScene.addActorSprite].
+final class ActorSpriteInstance {
+  const ActorSpriteInstance({
+    required this.spritePrefix,
+    required this.x,
+    required this.y,
+    required this.z,
+    this.frame = 0,
+    this.actorAngle = 0,
+    this.width,
+    this.height,
+    this.light = 1,
+    this.fullBright = false,
+  });
+
+  final String spritePrefix;
+  final int frame;
+  final double actorAngle;
+  final double x;
+  final double y;
+  final double z;
+  final double? width;
+  final double? height;
+  final double light;
+  final bool fullBright;
+}
+
+/// One exact first-person weapon frame in the supplemental sprite atlas.
+final class WeaponSpriteInstance {
+  const WeaponSpriteInstance({
+    required this.lumpName,
+    required this.viewAnchorX,
+    required this.viewAnchorY,
+    this.pixelScaleX = 1 / 320,
+    this.pixelScaleY = 1 / 200,
+  });
+
+  final String lumpName;
+
+  /// Camera-local pivot position corresponding to the patch origin.
+  final double viewAnchorX;
+  final double viewAnchorY;
+
+  /// Camera-local units per source patch pixel.
+  final double pixelScaleX;
+  final double pixelScaleY;
+}
+
+final class _GeometryBinding {
+  const _GeometryBinding({
+    required this.surface,
+    required this.mesh,
+    required this.component,
+  });
+
+  final PackedFlameSurface surface;
+  final Mesh mesh;
+  final Component3D component;
+
+  void markBoundsDirty() {
+    mesh.updateBounds();
+    component.markAabbDirty();
+  }
 }
 
 /// Concrete parent for a level's renderable components.

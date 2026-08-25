@@ -42,6 +42,16 @@ void main() {
   vec4 viewPosition = vertex_info.view * worldPosition;
   gl_Position = vertex_info.projection * viewPosition;
 
+  // depthLayer is the fourth repurposed weight. Sky is pinned just inside the
+  // far clip plane so normal depth testing can only fill background pixels;
+  // the first-person weapon is pinned just inside the near plane so nearby
+  // world geometry cannot clip it. World and actor vertices write 0.
+  if (vertexWeights.w > 0.5) {
+    gl_Position.z = gl_Position.w * 0.999999;
+  } else if (vertexWeights.w < -0.5) {
+    gl_Position.z = -gl_Position.w * 0.999999;
+  }
+
   fragTexCoord = vertexTexCoord;
   fragAtlasRect = vertexJoints;
   fragParams = vertexWeights;

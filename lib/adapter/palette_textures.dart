@@ -2,6 +2,8 @@ import 'dart:typed_data';
 import 'dart:ui' show Color, PixelFormat;
 
 import 'package:flame_3d/resources.dart';
+import 'package:doom_geometry/doom_geometry.dart' as geometry;
+import 'package:doom_wad/doom_wad.dart' as wad;
 
 import 'render_diagnostics.dart';
 
@@ -95,13 +97,17 @@ final class PaletteTextureData {
       );
     }
 
-    // Atlas: index in red, coverage in alpha. Green and blue stay zero; the
-    // shader never reads them.
+    // Atlas: index in red, coverage mirrored in green and alpha. This is the
+    // same byte contract IndexedAtlas publishes; keeping both coverage
+    // channels prevents an adapter-only texture from behaving differently
+    // from a geometry-produced page.
     final atlasRgba = Uint8List(pixelCount * 4);
     for (var pixel = 0; pixel < pixelCount; pixel++) {
       final target = pixel * 4;
       atlasRgba[target] = atlasIndices[pixel];
-      atlasRgba[target + 3] = atlasCoverage?[pixel] ?? 255;
+      final coverage = atlasCoverage?[pixel] ?? 255;
+      atlasRgba[target + 1] = coverage;
+      atlasRgba[target + 3] = coverage;
     }
 
     // COLORMAP: remapped index in red.
@@ -136,6 +142,74 @@ final class PaletteTextureData {
     );
   }
 
+  /// Bridges one geometry atlas page and the complete Doom lookup tables.
+  ///
+  /// [AtlasPage.pixels] is already the exact RGBA8 upload format (index in R,
+  /// coverage in G and A), so it is retained without a wasteful split into
+  /// index/coverage planes followed by another 4-channel expansion.
+  factory PaletteTextureData.fromDoomResources({
+    required geometry.AtlasPage page,
+    required wad.WadResources resources,
+  }) {
+    final expectedBytes = page.size * page.size * 4;
+    if (page.pixels.length != expectedBytes) {
+      throw ArgumentError.value(
+        page.pixels.length,
+        'page.pixels',
+        'expected $expectedBytes RGBA8 bytes',
+      );
+    }
+
+    final colorMaps = resources.colormap.maps;
+    final palettes = resources.playpal.palettes;
+    if (colorMaps.isEmpty || palettes.isEmpty) {
+      throw StateError('PLAYPAL and COLORMAP must contain at least one row');
+    }
+    for (final row in colorMaps) {
+      if (row.length != 256) {
+        throw ArgumentError.value(row.length, 'COLORMAP row', 'expected 256');
+      }
+    }
+    for (final row in palettes) {
+      if (row.length != 256 * 3) {
+        throw ArgumentError.value(row.length, 'PLAYPAL row', 'expected 768');
+      }
+    }
+
+    final colorMapRgba = Uint8List(colorMaps.length * 256 * 4);
+    for (var row = 0; row < colorMaps.length; row++) {
+      final source = colorMaps[row];
+      for (var index = 0; index < 256; index++) {
+        final target = (row * 256 + index) * 4;
+        colorMapRgba[target] = source[index];
+        colorMapRgba[target + 3] = 255;
+      }
+    }
+
+    final paletteRgba = Uint8List(palettes.length * 256 * 4);
+    for (var row = 0; row < palettes.length; row++) {
+      final source = palettes[row];
+      for (var index = 0; index < 256; index++) {
+        final sourceOffset = index * 3;
+        final target = (row * 256 + index) * 4;
+        paletteRgba[target] = source[sourceOffset];
+        paletteRgba[target + 1] = source[sourceOffset + 1];
+        paletteRgba[target + 2] = source[sourceOffset + 2];
+        paletteRgba[target + 3] = 255;
+      }
+    }
+
+    return PaletteTextureData._(
+      atlasRgba: page.pixels,
+      atlasWidth: page.size,
+      atlasHeight: page.size,
+      colorMapRgba: colorMapRgba,
+      colorMapRows: colorMaps.length,
+      paletteRgba: paletteRgba,
+      paletteRows: palettes.length,
+    );
+  }
+
   /// RGBA8 atlas: palette index in red, mask coverage in alpha.
   final Uint8List atlasRgba;
   final int atlasWidth;
@@ -156,7 +230,9 @@ final class PaletteTextureData {
   /// suddenly invert.
   int get maxLightRow {
     const doomLightLevels = 32;
-    final usable = colorMapRows >= doomLightLevels ? doomLightLevels : colorMapRows;
+    final usable = colorMapRows >= doomLightLevels
+        ? doomLightLevels
+        : colorMapRows;
     return usable - 1;
   }
 
@@ -192,7 +268,7 @@ final class PaletteTextureData {
   int atlasIndexAt(int x, int y) => atlasRgba[(y * atlasWidth + x) * 4];
 
   /// Reads back the encoded mask coverage at a pixel.
-  int atlasCoverageAt(int x, int y) => atlasRgba[(y * atlasWidth + x) * 4 + 3];
+  int atlasCoverageAt(int x, int y) => atlasRgba[(y * atlasWidth + x) * 4 + 1];
 }
 
 /// The three GPU textures bound by [PaletteMaterial].
@@ -218,7 +294,10 @@ final class PaletteTextures {
         height: data.paletteRows,
         format: PixelFormat.rgba8888,
       ) {
-    diagnostics?..onTextureCreated()..onTextureCreated()..onTextureCreated();
+    diagnostics
+      ?..onTextureCreated()
+      ..onTextureCreated()
+      ..onTextureCreated();
   }
 
   final PaletteTextureData data;

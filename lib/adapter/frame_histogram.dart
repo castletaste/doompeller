@@ -70,7 +70,11 @@ final class FrameHistogram {
     int rasterMicros = 0,
   }) {
     if (totalMicros < 0) {
-      throw ArgumentError.value(totalMicros, 'totalMicros', 'must not be negative');
+      throw ArgumentError.value(
+        totalMicros,
+        'totalMicros',
+        'must not be negative',
+      );
     }
     if (_length == capacity) {
       final evicted = _totals[_writeIndex];

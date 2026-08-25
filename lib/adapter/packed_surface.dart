@@ -80,9 +80,8 @@ final class PackedFlameSurface extends Surface {
   Float32List? _positionsCache;
   GpuBuffer? _buffer;
 
-  /// Inclusive dirty vertex range, or -1 when there is nothing to upload.
-  int _dirtyFirst = -1;
-  int _dirtyLast = -1;
+  /// Sorted, non-overlapping inclusive dirty vertex ranges.
+  final List<(int, int)> _dirtyRanges = <(int, int)>[];
 
   /// The live packed vertex buffer.
   ///
@@ -94,7 +93,7 @@ final class PackedFlameSurface extends Surface {
   bool get hasGpuBuffer => _buffer != null;
 
   /// Whether there are CPU-side changes not yet uploaded.
-  bool get hasPendingUpload => _dirtyFirst >= 0;
+  bool get hasPendingUpload => _dirtyRanges.isNotEmpty;
 
   /// Triangles in this surface.
   int get triangleCount => _indices.length ~/ 3;
@@ -153,8 +152,8 @@ final class PackedFlameSurface extends Surface {
   @override
   GpuBuffer get resource {
     final buffer = super.resource;
-    if (_dirtyFirst >= 0) {
-      _uploadDirtyRange(buffer);
+    if (_dirtyRanges.isNotEmpty) {
+      _uploadDirtyRanges(buffer);
     }
     return buffer;
   }
@@ -163,15 +162,15 @@ final class PackedFlameSurface extends Surface {
   GpuBuffer createResource() {
     final totalBytes = verticesBytes + indicesBytes;
     resourceSizeInByes = totalBytes;
-    final buffer = GpuBackend.instance.createBuffer(
-      storageMode: GpuStorageMode.hostVisible,
-      sizeInBytes: totalBytes,
-    )
-      ..write(_byteView(_vertices))
-      ..write(_byteView(_indices), destinationOffsetInBytes: verticesBytes);
+    final buffer =
+        GpuBackend.instance.createBuffer(
+            storageMode: GpuStorageMode.hostVisible,
+            sizeInBytes: totalBytes,
+          )
+          ..write(_byteView(_vertices))
+          ..write(_byteView(_indices), destinationOffsetInBytes: verticesBytes);
     _buffer = buffer;
-    _dirtyFirst = -1;
-    _dirtyLast = -1;
+    _dirtyRanges.clear();
     diagnostics?.onGpuBufferCreated(bytes: totalBytes);
     return buffer;
   }
@@ -181,17 +180,27 @@ final class PackedFlameSurface extends Surface {
     if (vertexIndex < 0 || vertexIndex >= vertexCount) {
       throw RangeError.range(vertexIndex, 0, vertexCount - 1, 'vertexIndex');
     }
-    if (_dirtyFirst < 0) {
-      _dirtyFirst = vertexIndex;
-      _dirtyLast = vertexIndex;
+    _insertDirtyRange(vertexIndex, vertexIndex);
+    _syncPositionsRange(vertexIndex, vertexIndex);
+  }
+
+  /// Records a contiguous mutated range without walking it vertex by vertex.
+  void markVertexRangeDirty(int firstVertex, int vertexCount) {
+    if (vertexCount < 0) {
+      throw RangeError.range(vertexCount, 0, null, 'vertexCount');
+    }
+    if (vertexCount == 0) {
       return;
     }
-    if (vertexIndex < _dirtyFirst) {
-      _dirtyFirst = vertexIndex;
+    final lastVertex = firstVertex + vertexCount - 1;
+    if (firstVertex < 0 || lastVertex >= this.vertexCount) {
+      throw RangeError(
+        'vertex range $firstVertex..$lastVertex is outside '
+        '0..${this.vertexCount - 1}',
+      );
     }
-    if (vertexIndex > _dirtyLast) {
-      _dirtyLast = vertexIndex;
-    }
+    _insertDirtyRange(firstVertex, lastVertex);
+    _syncPositionsRange(firstVertex, lastVertex);
   }
 
   /// Mutates vertices in place through [write] and uploads only what changed.
@@ -209,7 +218,7 @@ final class PackedFlameSurface extends Surface {
       _aabb = Aabb3.copy(bounds);
     }
     _syncDirtyPositions();
-    if (_dirtyFirst >= 0) {
+    if (_dirtyRanges.isNotEmpty) {
       diagnostics?.onDynamicUpdate();
     }
   }
@@ -219,11 +228,7 @@ final class PackedFlameSurface extends Surface {
   ///
   /// Vertices already at [y] are skipped, so a plane that stopped moving costs
   /// nothing. Returns whether anything changed.
-  bool setVertexHeights(
-    List<int> vertexIndices,
-    double y, {
-    Aabb3? bounds,
-  }) {
+  bool setVertexHeights(List<int> vertexIndices, double y, {Aabb3? bounds}) {
     if (!y.isFinite) {
       throw ArgumentError.value(y, 'y', 'must be finite');
     }
@@ -255,6 +260,25 @@ final class PackedFlameSurface extends Surface {
   void setBounds(Aabb3 bounds) {
     _validateBounds(bounds);
     _aabb = Aabb3.copy(bounds);
+  }
+
+  /// Conservatively grows only the vertical span after dynamic geometry.
+  ///
+  /// Bounds never shrink on the per-tic path, so moving one band cannot make
+  /// unrelated geometry in the same surface disappear from frustum culling.
+  void expandBoundsY(double y) {
+    if (!y.isFinite) {
+      throw ArgumentError.value(y, 'y', 'must be finite');
+    }
+    final min = _aabb.min;
+    final max = _aabb.max;
+    if (y >= min.y && y <= max.y) {
+      return;
+    }
+    _aabb = Aabb3.minMax(
+      Vector3(min.x, y < min.y ? y : min.y, min.z),
+      Vector3(max.x, y > max.y ? y : max.y, max.z),
+    );
   }
 
   /// Recomputes bounds by scanning every position. O(vertexCount); prefer
@@ -291,40 +315,75 @@ final class PackedFlameSurface extends Surface {
   /// the initial [createResource] upload will include the changes anyway.
   bool flushPendingUpload() {
     final buffer = _buffer;
-    if (buffer == null || _dirtyFirst < 0) {
+    if (buffer == null || _dirtyRanges.isEmpty) {
       return false;
     }
-    _uploadDirtyRange(buffer);
+    _uploadDirtyRanges(buffer);
     return true;
   }
 
-  void _uploadDirtyRange(GpuBuffer buffer) {
-    final firstByte = DoomVertexAbi.byteOffsetOf(_dirtyFirst);
-    final lastByte = DoomVertexAbi.byteOffsetOf(_dirtyLast + 1);
-    final length = lastByte - firstByte;
-    buffer.write(
-      _vertices.buffer.asByteData(_vertices.offsetInBytes + firstByte, length),
-      destinationOffsetInBytes: firstByte,
-    );
-    _dirtyFirst = -1;
-    _dirtyLast = -1;
-    diagnostics?.onDynamicUpload(bytes: length);
+  void _uploadDirtyRanges(GpuBuffer buffer) {
+    for (final range in _dirtyRanges) {
+      final firstByte = DoomVertexAbi.byteOffsetOf(range.$1);
+      final lastByte = DoomVertexAbi.byteOffsetOf(range.$2 + 1);
+      final length = lastByte - firstByte;
+      buffer.write(
+        _vertices.buffer.asByteData(
+          _vertices.offsetInBytes + firstByte,
+          length,
+        ),
+        destinationOffsetInBytes: firstByte,
+      );
+      diagnostics?.onDynamicUpload(bytes: length);
+    }
+    _dirtyRanges.clear();
   }
 
   /// Keeps the lazily materialized [positions] view consistent, but only if
   /// something already asked for it.
   void _syncDirtyPositions() {
     final cache = _positionsCache;
-    if (cache == null || _dirtyFirst < 0) {
+    if (cache == null || _dirtyRanges.isEmpty) {
       return;
     }
-    for (var vertex = _dirtyFirst; vertex <= _dirtyLast; vertex++) {
+    for (final range in _dirtyRanges) {
+      _syncPositionsRange(range.$1, range.$2);
+    }
+  }
+
+  void _syncPositionsRange(int first, int last) {
+    final cache = _positionsCache;
+    if (cache == null) {
+      return;
+    }
+    for (var vertex = first; vertex <= last; vertex++) {
       final source = DoomVertexAbi.floatOffsetOf(vertex);
       final target = vertex * 3;
       cache[target] = _vertices[source];
       cache[target + 1] = _vertices[source + 1];
       cache[target + 2] = _vertices[source + 2];
     }
+  }
+
+  void _insertDirtyRange(int first, int last) {
+    var mergedFirst = first;
+    var mergedLast = last;
+    var insertAt = 0;
+    while (insertAt < _dirtyRanges.length &&
+        _dirtyRanges[insertAt].$2 + 1 < mergedFirst) {
+      insertAt++;
+    }
+    while (insertAt < _dirtyRanges.length &&
+        _dirtyRanges[insertAt].$1 <= mergedLast + 1) {
+      final current = _dirtyRanges.removeAt(insertAt);
+      if (current.$1 < mergedFirst) {
+        mergedFirst = current.$1;
+      }
+      if (current.$2 > mergedLast) {
+        mergedLast = current.$2;
+      }
+    }
+    _dirtyRanges.insert(insertAt, (mergedFirst, mergedLast));
   }
 
   void _validateBounds(Aabb3 bounds) {

@@ -29,8 +29,14 @@ import 'package:flutter_test/flutter_test.dart';
   final halfTexelU = 0.5 / atlasWidth;
   final halfTexelV = 0.5 / atlasHeight;
 
-  atlasU = atlasU.clamp(left + halfTexelU, math.max(right - halfTexelU, left + halfTexelU));
-  atlasV = atlasV.clamp(top + halfTexelV, math.max(bottom - halfTexelV, top + halfTexelV));
+  atlasU = atlasU.clamp(
+    left + halfTexelU,
+    math.max(right - halfTexelU, left + halfTexelU),
+  );
+  atlasV = atlasV.clamp(
+    top + halfTexelV,
+    math.max(bottom - halfTexelV, top + halfTexelV),
+  );
   return (u: atlasU, v: atlasV);
 }
 

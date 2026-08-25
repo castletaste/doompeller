@@ -56,7 +56,7 @@ void main() {
   );
 
   group('atlas encoding', () {
-    test('packs the palette index in red and coverage in alpha', () {
+    test('packs index in red and mirrors coverage in green and alpha', () {
       final data = encode(
         width: 2,
         height: 1,
@@ -69,10 +69,16 @@ void main() {
       expect(data.atlasCoverageAt(0, 0), 0, reason: 'a cut-out pixel');
       expect(data.atlasIndexAt(1, 0), 200);
       expect(data.atlasCoverageAt(1, 0), 255);
+      expect(data.atlasRgba[1], data.atlasRgba[3]);
+      expect(data.atlasRgba[5], data.atlasRgba[7]);
     });
 
     test('defaults coverage to fully opaque', () {
-      final data = encode(width: 1, height: 1, indices: Uint8List.fromList(const [5]));
+      final data = encode(
+        width: 1,
+        height: 1,
+        indices: Uint8List.fromList(const [5]),
+      );
       expect(data.atlasCoverageAt(0, 0), 255);
     });
 
@@ -116,10 +122,16 @@ void main() {
       final data = encode();
 
       // Row 0 is the undarkened map, so the index passes through.
-      expect(data.lookup(100, lightRow: 0), const Color.fromARGB(255, 100, 100, 100));
+      expect(
+        data.lookup(100, lightRow: 0),
+        const Color.fromARGB(255, 100, 100, 100),
+      );
 
       // Row 8 darkens by 8 first, then the palette is read at the new index.
-      expect(data.lookup(100, lightRow: 8), const Color.fromARGB(255, 92, 92, 92));
+      expect(
+        data.lookup(100, lightRow: 8),
+        const Color.fromARGB(255, 92, 92, 92),
+      );
     });
 
     test('palette rows select a variant without touching RGB math', () {
@@ -207,8 +219,14 @@ void main() {
         reason: 'flame_3d 0.3.0 has no R8 format',
       );
       expect((backend.textures[0].width, backend.textures[0].height), (8, 4));
-      expect((backend.textures[1].width, backend.textures[1].height), (256, 34));
-      expect((backend.textures[2].width, backend.textures[2].height), (256, 14));
+      expect(
+        (backend.textures[1].width, backend.textures[1].height),
+        (256, 34),
+      );
+      expect(
+        (backend.textures[2].width, backend.textures[2].height),
+        (256, 14),
+      );
     });
   });
 }

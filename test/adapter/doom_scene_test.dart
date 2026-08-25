@@ -101,7 +101,10 @@ void main() {
           atlasPages: {'walls': buildTextures()},
         ),
       );
-      expect(identical(scene.surfaces.single.packedVertices, mesh.vertices), isTrue);
+      expect(
+        identical(scene.surfaces.single.packedVertices, mesh.vertices),
+        isTrue,
+      );
     });
 
     test('keeps kinds apart so cutout mode stays correct', () {
@@ -206,11 +209,7 @@ void main() {
       );
 
       expect(
-        scene.updateSectorPlane(
-          sectorIndex: 3,
-          height: 56,
-          isCeiling: false,
-        ),
+        scene.updateSectorPlane(sectorIndex: 3, height: 56, isCeiling: false),
         isTrue,
       );
 
@@ -253,11 +252,7 @@ void main() {
 
       final pegged = DoomScene.build(level(unpegged: false));
       expect(
-        pegged.updateWallBand(
-          linedefIndex: 7,
-          topHeight: 64,
-          bottomHeight: 0,
-        ),
+        pegged.updateWallBand(linedefIndex: 7, topHeight: 64, bottomHeight: 0),
         isTrue,
       );
       final peggedVertices = pegged.surfaces.single.packedVertices;
@@ -269,11 +264,7 @@ void main() {
       );
 
       final unpegged = DoomScene.build(level(unpegged: true));
-      unpegged.updateWallBand(
-        linedefIndex: 7,
-        topHeight: 32,
-        bottomHeight: 0,
-      );
+      unpegged.updateWallBand(linedefIndex: 7, topHeight: 32, bottomHeight: 0);
       final unpeggedVertices = unpegged.surfaces.single.packedVertices;
       expect(DoomVertexAbi.getV(unpeggedVertices, 0), 0);
       expect(
@@ -347,5 +338,26 @@ void main() {
       expect(identical(opaque, masked), isFalse);
       expect(cache.length, 2);
     });
+
+    test(
+      'same page key with different textures cannot return a stale material',
+      () {
+        final cache = PaletteMaterialCache();
+        final firstTextures = buildTextures();
+        final secondTextures = buildTextures();
+        final first = cache.resolve(
+          atlasKey: 'world',
+          textures: firstTextures,
+          alphaCutout: false,
+        );
+        final second = cache.resolve(
+          atlasKey: 'world',
+          textures: secondTextures,
+          alphaCutout: false,
+        );
+        expect(identical(first, second), isFalse);
+        expect(identical(second.textures, secondTextures), isTrue);
+      },
+    );
   });
 }

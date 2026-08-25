@@ -153,7 +153,9 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    expect(a.hashState(), 0x06ef86df);
+    // The fixture now spawns its full enemy/pickup roster, so actor identity,
+    // positions and deterministic AI consumption deliberately change this pin.
+    expect(a.hashState(), 0xa67d3e40);
   });
 
   test(

@@ -26,20 +26,24 @@ int subsectorAt(MapData map, int x, int y) {
 void main() {
   group('fixture WAD', () {
     test('caches one deterministic build', () {
-      expect(identical(DoomFixtures.pwadBytes(), DoomFixtures.pwadBytes()), isTrue);
+      expect(
+        identical(DoomFixtures.pwadBytes(), DoomFixtures.pwadBytes()),
+        isTrue,
+      );
       expect(DoomFixtures.hash(), DoomFixtures.hash());
     });
 
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      expect(DoomFixtures.hash(), 0x9f56ae6a3ddc5085);
+      expect(DoomFixtures.hash(), 0x218fe7c78513b4cf);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(wad.length, 33);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 163525);
+      expect(wad.length, 57);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -57,7 +61,9 @@ void main() {
         'HELP1',
       ];
       final WadFile wad = DoomFixtures.wad();
-      final Set<String> names = <String>{for (final LumpEntry entry in wad.lumps) entry.name};
+      final Set<String> names = <String>{
+        for (final LumpEntry entry in wad.lumps) entry.name,
+      };
       for (final String name in forbidden) {
         expect(names, isNot(contains(name)));
       }
@@ -76,7 +82,7 @@ void main() {
       expect(res.colormap.length, 34);
       expect(res.textureNames.length, 5);
       expect(res.flatNames.length, 4);
-      expect(res.spriteNames.length, 2);
+      expect(res.spriteNames.length, DoomFixtures.spriteNames.length);
       for (final String name in res.textureNames) {
         expect(res.composite(name), isNotNull, reason: name);
       }
@@ -112,41 +118,84 @@ void main() {
 
       // The island's floor sits above the room containing it, which is what
       // makes the containing sector's floor a surface with a hole.
-      expect(map.sectors[3].floorHeight, greaterThan(map.sectors[2].floorHeight));
+      expect(
+        map.sectors[3].floorHeight,
+        greaterThan(map.sectors[2].floorHeight),
+      );
 
       // The L-shaped sector needs more than four walls to be concave.
       final Iterable<Linedef> walls = map.linedefs.where(
-        (Linedef l) => !l.isTwoSided && map.sidedefs[l.rightSidedef].sector == 1,
+        (Linedef l) =>
+            !l.isTwoSided && map.sidedefs[l.rightSidedef].sector == 1,
       );
       expect(walls.length, greaterThanOrEqualTo(4));
     });
 
+    test('things occupy the intended valid sector polygons', () {
+      const Map<int, int> expectedSectorByType = <int, int>{
+        1: 0,
+        2: 1,
+        2014: 3,
+        2015: 4,
+        3004: 0,
+        3001: 2,
+        9: 4,
+        2035: 4,
+        2001: 0,
+        2007: 0,
+        2008: 2,
+        2011: 4,
+        2018: 4,
+      };
+      expect(map.things.length, expectedSectorByType.length);
+      for (final Thing thing in map.things) {
+        final int leaf = subsectorAt(map, thing.x, thing.y);
+        final Subsector subsector = map.subsectors[leaf];
+        final int sector = sectorOfSeg(map, map.segs[subsector.firstSeg]);
+        expect(
+          sector,
+          expectedSectorByType[thing.type],
+          reason: 'thing ${thing.type}',
+        );
+        expect(thing.flags, 7, reason: 'thing ${thing.type} skill flags');
+      }
+    });
+
     test('every sector is referenced by at least one sidedef', () {
-      final Set<int> used = <int>{for (final Sidedef side in map.sidedefs) side.sector};
+      final Set<int> used = <int>{
+        for (final Sidedef side in map.sidedefs) side.sector,
+      };
       expect(used.length, map.sectors.length);
     });
 
-    test('every texture named by a sidedef resolves or is the no-texture name', () {
-      final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      for (final Sidedef side in map.sidedefs) {
-        for (final String name in <String>[
-          side.upperTexture,
-          side.lowerTexture,
-          side.middleTexture,
-        ]) {
-          if (name == kNoTextureName) {
-            continue;
+    test(
+      'every texture named by a sidedef resolves or is the no-texture name',
+      () {
+        final WadResources res = WadResources.load(DoomFixtures.wadSet());
+        for (final Sidedef side in map.sidedefs) {
+          for (final String name in <String>[
+            side.upperTexture,
+            side.lowerTexture,
+            side.middleTexture,
+          ]) {
+            if (name == kNoTextureName) {
+              continue;
+            }
+            expect(res.textureDef(name), isNotNull, reason: name);
           }
-          expect(res.textureDef(name), isNotNull, reason: name);
         }
-      }
-    });
+      },
+    );
 
     test('every flat named by a sector resolves', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
       for (final Sector sector in map.sectors) {
         expect(res.flat(sector.floorFlat), isNotNull, reason: sector.floorFlat);
-        expect(res.flat(sector.ceilingFlat), isNotNull, reason: sector.ceilingFlat);
+        expect(
+          res.flat(sector.ceilingFlat),
+          isNotNull,
+          reason: sector.ceilingFlat,
+        );
       }
     });
   });
@@ -164,10 +213,15 @@ void main() {
       for (var i = 0; i < map.subsectors.length; i++) {
         final Subsector ss = map.subsectors[i];
         final Set<int> sectors = <int>{
-          for (var s = 0; s < ss.segCount; s++) sectorOfSeg(map, map.segs[ss.firstSeg + s]),
+          for (var s = 0; s < ss.segCount; s++)
+            sectorOfSeg(map, map.segs[ss.firstSeg + s]),
         };
         expect(sectors.length, 1, reason: 'subsector $i spans $sectors');
-        expect(sectors.first, isNot(-1), reason: 'subsector $i has a seg with no sidedef');
+        expect(
+          sectors.first,
+          isNot(-1),
+          reason: 'subsector $i has a seg with no sidedef',
+        );
       }
     });
 
@@ -231,7 +285,11 @@ void main() {
         final Seg seg = map.segs[i];
         final MapVertex a = map.vertices[seg.v1];
         final MapVertex b = map.vertices[seg.v2];
-        expect(a.x == b.x && a.y == b.y, isFalse, reason: 'seg $i is zero length');
+        expect(
+          a.x == b.x && a.y == b.y,
+          isFalse,
+          reason: 'seg $i is zero length',
+        );
       }
     });
 

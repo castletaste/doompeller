@@ -32,7 +32,7 @@ void main() {
 
       expect(map.name, 'MAP01');
       expect(map.sectors.length, 5);
-      expect(map.things.length, 4);
+      expect(map.things.length, 13);
       expect(map.vertices, isNotEmpty);
       expect(map.linedefs, isNotEmpty);
       expect(map.sidedefs, isNotEmpty);
@@ -64,6 +64,9 @@ void main() {
       // Sector 4 is the sky room.
       expect(map.sectors[4].ceilingIsSky, isTrue);
       expect(map.sectors[0].ceilingIsSky, isFalse);
+      // Sector 1 starts as the closed tag-0 manual door.
+      expect(map.sectors[1].floorHeight, 16);
+      expect(map.sectors[1].ceilingHeight, 16);
     });
 
     test('two-sided linedefs keep both sidedefs and differing heights', () {
@@ -112,6 +115,60 @@ void main() {
       expect(start.y, 128);
       expect(start.angle, 90);
       expect(start.flags & ThingFlags.easy, isNot(0));
+    });
+
+    test('fixture exposes the supported enemy and pickup roster', () {
+      final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
+      expect(
+        map.things.map((Thing thing) => thing.type).toSet(),
+        containsAll(<int>{
+          1,
+          2,
+          9,
+          3001,
+          3004,
+          2035,
+          2001,
+          2007,
+          2008,
+          2011,
+          2014,
+          2015,
+          2018,
+        }),
+      );
+      expect(map.things.every((Thing thing) => thing.flags == 7), isTrue);
+    });
+
+    test('sector 0 portal is a closed tag-0 manual door', () {
+      final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
+      final Linedef door = map.linedefs.singleWhere((Linedef line) {
+        if (!line.isTwoSided || line.special != 1 || line.tag != 0) {
+          return false;
+        }
+        final Sidedef front = map.sidedefs[line.rightSidedef];
+        final Sidedef back = map.sidedefs[line.leftSidedef];
+        return front.sector == 0 && back.sector == 1;
+      });
+      final MapVertex from = map.vertices[door.v1];
+      final MapVertex to = map.vertices[door.v2];
+      expect((from.x, from.y), (256, 256));
+      expect((to.x, to.y), (256, 0));
+      expect(map.sectors[1].ceilingHeight, map.sectors[1].floorHeight);
+    });
+
+    test('sky-room east wall is a front-facing S1 exit switch', () {
+      final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
+      final Linedef exit = map.linedefs.singleWhere(
+        (Linedef line) => line.special == 11,
+      );
+      final MapVertex from = map.vertices[exit.v1];
+      final MapVertex to = map.vertices[exit.v2];
+      expect((from.x, from.y), (1024, 256));
+      expect((to.x, to.y), (1024, 0));
+      expect(exit.isTwoSided, isFalse);
+      expect(exit.leftSidedef, kNoSidedef);
+      expect(map.sidedefs[exit.rightSidedef].sector, 4);
     });
   });
 

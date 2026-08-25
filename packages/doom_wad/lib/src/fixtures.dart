@@ -39,16 +39,59 @@ abstract final class DoomFixtures {
   static int hash() => fnv1a64(pwadBytes());
 
   /// Patch lumps referenced by PNAMES, in index order.
-  static const List<String> patchNames = <String>['PAT1', 'PAT2', 'PAT3', 'PAT4', 'SKYPAN'];
+  static const List<String> patchNames = <String>[
+    'PAT1',
+    'PAT2',
+    'PAT3',
+    'PAT4',
+    'SKYPAN',
+  ];
 
   /// Flat lumps inside F_START/F_END.
-  static const List<String> flatNames = <String>['FLOOR0', 'CEIL0', 'FLAT1', kSkyFlatName];
+  static const List<String> flatNames = <String>[
+    'FLOOR0',
+    'CEIL0',
+    'FLAT1',
+    kSkyFlatName,
+  ];
 
   /// Sprite lumps inside S_START/S_END.
-  static const List<String> spriteNames = <String>['TESTA0', 'TESTB0'];
+  static const List<String> spriteNames = <String>[
+    'TESTA0',
+    'TESTB0',
+    'POSSA0',
+    'POSSB0',
+    'POSSC0',
+    'SPOSA0',
+    'SPOSB0',
+    'SPOSC0',
+    'TROOA0',
+    'TROOB0',
+    'TROOC0',
+    'BAR1A0',
+    'BAR1B0',
+    'BAR1C0',
+    'BAL1A0',
+    'CLIPA0',
+    'SHOTA0',
+    'STIMA0',
+    'ARM1A0',
+    'BON1A0',
+    'BON2A0',
+    'SHELA0',
+    'PISGA0',
+    'PUNGA0',
+    'SHTGA0',
+    'CHGGA0',
+  ];
 
   /// Texture names declared in TEXTURE1, in declaration order.
-  static const List<String> texture1Names = <String>['WALL1', 'WALL2', 'WALL3', 'SKY1'];
+  static const List<String> texture1Names = <String>[
+    'WALL1',
+    'WALL2',
+    'WALL3',
+    'SKY1',
+  ];
 
   /// Texture names declared in TEXTURE2.
   static const List<String> texture2Names = <String>['WALLOVR'];
@@ -77,7 +120,8 @@ abstract final class DoomFixtures {
         LumpSource(name, encodeDoomPatch(buildFixturePatch(name))),
       LumpSource.marker('P_END'),
       LumpSource.marker('F_START'),
-      for (final String name in flatNames) LumpSource(name, buildFixtureFlat(name)),
+      for (final String name in flatNames)
+        LumpSource(name, buildFixtureFlat(name)),
       LumpSource.marker('F_END'),
       LumpSource.marker('S_START'),
       for (final String name in spriteNames)
@@ -233,7 +277,8 @@ Uint8List buildFixturePlaypal() {
   return out;
 }
 
-int _blend(int from, int to, int strength) => from + ((to - from) * strength) ~/ 255;
+int _blend(int from, int to, int strength) =>
+    from + ((to - from) * strength) ~/ 255;
 
 /// Full-saturation, full-value hue wheel; [degrees] is 0..359.
 List<int> _hueToRgb(int degrees) {
@@ -331,20 +376,98 @@ PatchImage buildFixturePatch(String name) {
   }
 }
 
-/// Builds the named fixture sprite. Sprites are patches with a hotspot offset
-/// and large transparent margins, which is what real sprite lumps look like.
+const Set<String> _fixturePickupPrefixes = <String>{
+  'CLIP',
+  'SHOT',
+  'STIM',
+  'ARM1',
+  'BON1',
+  'BON2',
+  'SHEL',
+};
+
+const Set<String> _fixtureWeaponPrefixes = <String>{
+  'PISG',
+  'PUNG',
+  'SHTG',
+  'CHGG',
+};
+
+/// Builds a deterministic, legally clean sprite from [name].
+///
+/// The stable FNV hash controls palette, silhouette and cutouts, so enemies,
+/// pickups, projectiles and weapon frames are visibly different without any
+/// source artwork. World sprites keep their feet-oriented hotspot, pickups use
+/// a smaller ground icon, and first-person weapons are bottom anchored.
 PatchImage buildFixtureSprite(String name) {
-  final bool second = name == 'TESTB0';
-  final int radius = second ? 20 : 28;
-  return _generatePatch(64, 64, 32, 60, (int x, int y) {
-    final int dx = x - 32;
-    final int dy = y - 32;
-    final int distance = dx * dx + dy * dy;
-    if (distance > radius * radius) {
+  final String upper = name.toUpperCase();
+  final int hash = _stableSpriteHash(upper);
+  final String prefix = upper.length >= 4 ? upper.substring(0, 4) : upper;
+  final bool isPickup = _fixturePickupPrefixes.contains(prefix);
+  final bool isWeapon = _fixtureWeaponPrefixes.contains(prefix);
+  final int width = isWeapon ? 96 : (isPickup ? 40 : 64);
+  final int height = isWeapon ? 64 : (isPickup ? 40 : 64);
+  final int leftOffset = width ~/ 2;
+  final int topOffset = isWeapon
+      ? height
+      : (isPickup ? height - 4 : height - 4);
+  final int cx = width ~/ 2;
+  final int cy = isWeapon ? height - 22 : height ~/ 2;
+  final int radius = isWeapon ? 34 : (isPickup ? 16 : 27);
+  final int shape = hash & 3;
+  final int hue = (hash >> 8) & 15;
+
+  return _generatePatch(width, height, leftOffset, topOffset, (int x, int y) {
+    final int dx = x - cx;
+    final int dy = y - cy;
+    final int ax = dx.abs();
+    final int ay = dy.abs();
+    final bool inside;
+    if (isWeapon) {
+      final int barrelHalfWidth = 7 + ((hash >> 4) & 7);
+      final bool barrel = ay <= radius && ax <= barrelHalfWidth + (ay ~/ 5);
+      final bool grip = y >= height - 24 && ax <= 6 + shape * 2;
+      final bool sight = y >= 4 + shape * 2 && y <= 12 + shape * 2 && ax <= 3;
+      inside = barrel || grip || sight;
+    } else {
+      inside = switch (shape) {
+        0 => dx * dx + dy * dy <= radius * radius,
+        1 => ax + ay <= radius + 5,
+        2 => ay <= radius && ax <= radius - (ay ~/ 3),
+        _ =>
+          (ay <= radius && ax <= radius ~/ 2 + ((radius - ay) ~/ 2)) ||
+              (ay < radius ~/ 3 && ax <= radius),
+      };
+    }
+    if (!inside) {
       return -1;
     }
-    return (second ? 0x50 : 0x60) + ((distance >> 6) & 7);
+
+    // Name-derived holes create genuine cutouts instead of only a transparent
+    // bounding box. Keep them small enough that every silhouette stays solid.
+    final int holeX = 3 + ((hash >> 12) & 7);
+    final int holeY = isWeapon ? cy - 10 : cy - 4 + ((hash >> 16) & 7);
+    if ((x - (cx - holeX)).abs() <= 1 && (y - holeY).abs() <= 2) {
+      return -1;
+    }
+    if ((hash & 0x20) != 0 &&
+        (x - (cx + holeX)).abs() <= 1 &&
+        (y - holeY).abs() <= 2) {
+      return -1;
+    }
+
+    final int level = 1 + ((ax + ay + (hash >> 20)) & 7);
+    return hue * 16 + level;
   });
+}
+
+int _stableSpriteHash(String name) {
+  var hash = 0x811c9dc5;
+  for (final int byte in name.codeUnits) {
+    hash ^= byte & 0xFF;
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return hash;
 }
 
 /// Runs [shade] over every pixel; a negative return means transparent.

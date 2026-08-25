@@ -204,13 +204,14 @@ void main() {
       flags: 0,
       health: 1,
     );
-    final baselineSurfaces = runtime.scene.surfaceCount;
     runtime.syncActorViewsForTest(const <MobjView>[actor]);
+    final warmedRegistry = runtime.scene.actorSurfaceRegistryCount;
     final retained = runtime.actorComponentForTest(91);
     for (final surface in runtime.scene.surfaces) {
       surface.resource;
     }
     runtime.syncActorViewsForTest(const <MobjView>[]);
+    final baselineSurfaces = runtime.scene.surfaceCount;
     final warmedBuffers = runtime.scene.diagnostics.gpuBuffersCreated;
 
     for (var cycle = 0; cycle < 100; cycle++) {
@@ -219,9 +220,9 @@ void main() {
       runtime.syncActorViewsForTest(const <MobjView>[]);
     }
 
-    expect(runtime.scene.actorSurfaceRegistryCount, 1);
+    expect(runtime.scene.actorSurfaceRegistryCount, warmedRegistry);
     expect(runtime.scene.activeActorSurfaceCount, 0);
-    expect(runtime.scene.pooledActorSurfaceCount, 1);
+    expect(runtime.scene.pooledActorSurfaceCount, warmedRegistry);
     expect(runtime.scene.surfaceCount, baselineSurfaces);
     expect(runtime.scene.flushPendingUploads(), 0);
     expect(runtime.scene.diagnostics.gpuBuffersCreated, warmedBuffers);
@@ -243,6 +244,7 @@ void main() {
         health: 1,
       );
       runtime.syncActorViewsForTest(const <MobjView>[valid]);
+      final warmedRegistry = runtime.scene.actorSurfaceRegistryCount;
       final retained = runtime.actorComponentForTest(92);
       expect(retained, isNotNull);
       expect(runtime.scene.isActorSpriteActive(retained!), isTrue);
@@ -283,7 +285,7 @@ void main() {
 
       runtime.syncActorViewsForTest(const <MobjView>[valid]);
       expect(runtime.actorComponentForTest(92), same(retained));
-      expect(runtime.scene.actorSurfaceRegistryCount, 1);
+      expect(runtime.scene.actorSurfaceRegistryCount, warmedRegistry);
     },
   );
 

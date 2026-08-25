@@ -22,10 +22,13 @@ void main() {
     expect(outcome, isA<LevelPublished<String>>());
     expect(prepared.map.name, 'MAP01');
     expect(prepared.geometry.report.fallbackSectors, isEmpty);
-    expect(prepared.geometry.report.geometryHash, 0x4441e32f);
+    expect(prepared.geometry.report.geometryHash, 0x73e94bc3);
     expect(prepared.geometry.meshes, isNotEmpty);
     expect(prepared.game.player.health, 100);
-    expect(prepared.initialSpritePrefixes, contains('PLAY'));
+    expect(
+      prepared.initialSpritePrefixes,
+      containsAll(<String>{'PLAY', 'POSS', 'TROO', 'SPOS'}),
+    );
   });
 
   test('cancelled generation cannot publish a prepared level', () async {

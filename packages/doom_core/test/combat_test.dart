@@ -10,6 +10,29 @@ MapData arena(List<Thing> things) => testMap(things: things);
 
 void main() {
   group('things and combat', () {
+    test('fixture enemy roster advances combat deterministically', () {
+      final MapData map = MapData.load(
+        DoomFixtures.wadSet(),
+        DoomFixtures.mapName,
+      );
+      final GameState a = GameState.start(map, const GameConfig(), seed: 17);
+      final GameState b = GameState.start(map, const GameConfig(), seed: 17);
+      expect(
+        a.mobjs.map((MobjView mobj) => mobj.sprite).toSet(),
+        containsAll(<String>{'POSS', 'TROO', 'SPOS'}),
+      );
+      expect(a.mobjs.length, 12);
+      final int initialHash = a.hashState();
+      for (var tic = 0; tic < 140; tic++) {
+        a.runTic(TicCmd.empty);
+        b.runTic(TicCmd.empty);
+      }
+      expect(a.tic, 140);
+      expect(a.hashState(), b.hashState());
+      expect(a.hashState(), isNot(initialHash));
+      expect(a.player.health, lessThan(100));
+    });
+
     test('health, armor, ammo, weapons and keys are deterministic pickups', () {
       final GameState game = GameState.start(
         arena(<Thing>[

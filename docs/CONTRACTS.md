@@ -179,7 +179,7 @@ momentum. Future-affecting input latch, actor-id allocator, activated one-shot
 lines, mutable actor flags/frame, and mover/actor state are hashed.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0x06ef86df` for seed 7 and its documented twenty-command stream. Spawn order
+`0xa67d3e40` for seed 7 and its documented twenty-command stream. Spawn order
 is intentionally part of deterministic identity and therefore part of the
 hash; actor hashing itself sorts by stable actor id.
 

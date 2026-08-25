@@ -21,7 +21,7 @@ void main() {
     expect(report.budgetExhausted, isFalse);
     expect(map.hasBsp, isTrue, reason: 'fixture must ship a real BSP tree');
     expect(level.meshes, isNotEmpty);
-    expect(report.totalTriangles, greaterThan(0));
+    expect(report.totalTriangles, 120);
 
     // The headline M2 number: total area disagreement across the level.
     expect(
@@ -36,7 +36,21 @@ void main() {
       isEmpty,
       reason: 'no sector should need the loop fallback',
     );
-    expect(report.geometryHash, 0x4441e32f);
+    expect(report.geometryHash, 0x73e94bc3);
+
+    final int doorLine = map.linedefs.indexWhere(
+      (Linedef line) => line.special == 1 && line.tag == 0,
+    );
+    expect(doorLine, greaterThanOrEqualTo(0));
+    final List<WallBandRef> doorBands = level.wallBands
+        .where((WallBandRef band) => band.linedef == doorLine)
+        .toList();
+    expect(doorBands, isNotEmpty);
+    expect(
+      doorBands.any((WallBandRef band) => band.top == band.bottom),
+      isTrue,
+      reason: 'manual door must pre-create collapsed dynamic bands',
+    );
   });
 
   test('fixture compile is deterministic', () {

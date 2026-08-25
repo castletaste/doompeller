@@ -85,10 +85,12 @@ class FixtureGeometry {
       ceilingFlat: 'CEIL0',
       lightLevel: 192,
     );
-    // Sector 1: concave L, floor a step up and a lower ceiling.
+    // Sector 1: concave L and a closed manual-door sector. Its ceiling starts
+    // on the floor; special 1 on the sector-0 portal opens it to the lowest
+    // neighbouring ceiling minus four units.
     builder.addSector(
       floorHeight: 16,
-      ceilingHeight: 112,
+      ceilingHeight: 16,
       floorFlat: 'FLAT1',
       ceilingFlat: 'CEIL0',
       lightLevel: 160,
@@ -119,13 +121,18 @@ class FixtureGeometry {
     );
 
     // Sector 0: a closed box. Edge 2 is the wall shared with sector 1.
-    builder.solidLoop(<List<int>>[
-      <int>[0, 0],
-      <int>[0, 256],
-      <int>[256, 256],
-      <int>[256, 0],
-    ], sector: 0, texture: 'WALL1', skipEdge: 2);
-    // Shared wall 0 <-> 1, two-sided with a floor step and ceiling drop.
+    builder.solidLoop(
+      <List<int>>[
+        <int>[0, 0],
+        <int>[0, 256],
+        <int>[256, 256],
+        <int>[256, 0],
+      ],
+      sector: 0,
+      texture: 'WALL1',
+      skipEdge: 2,
+    );
+    // Shared wall 0 <-> 1 is a tag-0 manual door (DR open-wait-close).
     builder.portal(
       from: <int>[256, 256],
       to: <int>[256, 0],
@@ -133,19 +140,26 @@ class FixtureGeometry {
       backSector: 1,
       upper: 'WALL2',
       lower: 'WALL2',
+      special: 1,
     );
 
     // Sector 1: concave L. The notch is cut from the top-right, so the sector
     // boundary turns inward and no single fan covers it. Edge 3 is the portal
     // to sector 2 and edge 5 is the wall sector 0 already contributed.
-    builder.solidLoop(<List<int>>[
-      <int>[256, 256],
-      <int>[384, 256],
-      <int>[384, 160],
-      <int>[512, 160],
-      <int>[512, 0],
-      <int>[256, 0],
-    ], sector: 1, texture: 'WALL2', skipEdge: 3, skipSecondEdge: 5);
+    builder.solidLoop(
+      <List<int>>[
+        <int>[256, 256],
+        <int>[384, 256],
+        <int>[384, 160],
+        <int>[512, 160],
+        <int>[512, 0],
+        <int>[256, 0],
+      ],
+      sector: 1,
+      texture: 'WALL2',
+      skipEdge: 3,
+      skipSecondEdge: 5,
+    );
     // Shared wall 1 <-> 2 occupies the lower part of the x = 512 boundary.
     builder.portal(
       from: <int>[512, 160],
@@ -160,13 +174,19 @@ class FixtureGeometry {
     // so only its lower half is a portal, which gives the sector a boundary
     // made of several separate linedef runs. Edge 0 is that portal (already
     // built by sector 1) and edge 3 is the portal to sector 4.
-    builder.solidLoop(<List<int>>[
-      <int>[512, 0],
-      <int>[512, 160],
-      <int>[512, 256],
-      <int>[768, 256],
-      <int>[768, 0],
-    ], sector: 2, texture: 'WALL3', skipEdge: 0, skipSecondEdge: 3);
+    builder.solidLoop(
+      <List<int>>[
+        <int>[512, 0],
+        <int>[512, 160],
+        <int>[512, 256],
+        <int>[768, 256],
+        <int>[768, 0],
+      ],
+      sector: 2,
+      texture: 'WALL3',
+      skipEdge: 0,
+      skipSecondEdge: 3,
+    );
     // Shared wall 2 <-> 4.
     builder.portal(
       from: <int>[768, 256],
@@ -179,27 +199,51 @@ class FixtureGeometry {
 
     // Sector 3: the island. Wound clockwise so its front faces inward, which is
     // how a hole in a sector floor is expressed.
-    builder.portalLoop(<List<int>>[
-      <int>[576, 64],
-      <int>[576, 192],
-      <int>[704, 192],
-      <int>[704, 64],
-    ], innerSector: 3, outerSector: 2, upper: 'WALL1', lower: 'WALL2');
+    builder.portalLoop(
+      <List<int>>[
+        <int>[576, 64],
+        <int>[576, 192],
+        <int>[704, 192],
+        <int>[704, 64],
+      ],
+      innerSector: 3,
+      outerSector: 2,
+      upper: 'WALL1',
+      lower: 'WALL2',
+    );
 
     // Sector 4: sky room, closed on three sides. Edge 0 is the portal back to
     // sector 2, already built above.
-    builder.solidLoop(<List<int>>[
-      <int>[768, 0],
-      <int>[768, 256],
-      <int>[1024, 256],
-      <int>[1024, 0],
-    ], sector: 4, texture: 'WALL1', skipEdge: 0);
+    builder.solidLoop(
+      <List<int>>[
+        <int>[768, 0],
+        <int>[768, 256],
+        <int>[1024, 256],
+        <int>[1024, 0],
+      ],
+      sector: 4,
+      texture: 'WALL1',
+      skipEdge: 0,
+      specialEdge: 2,
+      special: 11,
+    );
 
-    // Player 1 start, a co-op start, and two pickups spread across the rooms.
+    // A small, fully generated playable route: arm in sector 0, open the
+    // manual door, clear enemies across sectors 0/2/4, then use the east exit.
+    // Every thing uses all three single-player skill flags (7).
     builder.addThing(x: 128, y: 128, angle: 90, type: 1, flags: 7);
     builder.addThing(x: 384, y: 64, angle: 180, type: 2, flags: 7);
     builder.addThing(x: 640, y: 128, angle: 0, type: 2014, flags: 7);
     builder.addThing(x: 896, y: 128, angle: 270, type: 2015, flags: 7);
+    builder.addThing(x: 192, y: 192, angle: 225, type: 3004, flags: 7);
+    builder.addThing(x: 640, y: 224, angle: 270, type: 3001, flags: 7);
+    builder.addThing(x: 896, y: 192, angle: 270, type: 9, flags: 7);
+    builder.addThing(x: 960, y: 64, angle: 180, type: 2035, flags: 7);
+    builder.addThing(x: 64, y: 64, angle: 0, type: 2001, flags: 7);
+    builder.addThing(x: 64, y: 192, angle: 0, type: 2007, flags: 7);
+    builder.addThing(x: 736, y: 224, angle: 0, type: 2008, flags: 7);
+    builder.addThing(x: 832, y: 64, angle: 0, type: 2011, flags: 7);
+    builder.addThing(x: 832, y: 192, angle: 0, type: 2018, flags: 7);
 
     return FixtureGeometry._(
       builder.vertices,
@@ -263,7 +307,12 @@ class _Builder {
     things.add(Thing(x: x, y: y, angle: angle, type: type, flags: flags));
   }
 
-  int addSidedef(int sector, {String upper = '-', String lower = '-', String middle = '-'}) {
+  int addSidedef(
+    int sector, {
+    String upper = '-',
+    String lower = '-',
+    String middle = '-',
+  }) {
     sidedefs.add(
       Sidedef(
         xOffset: 0,
@@ -278,14 +327,20 @@ class _Builder {
   }
 
   /// Adds a one-sided wall from [a] to [b].
-  void solidLine(List<int> a, List<int> b, int sector, String texture) {
+  void solidLine(
+    List<int> a,
+    List<int> b,
+    int sector,
+    String texture, {
+    int special = 0,
+  }) {
     final int right = addSidedef(sector, middle: texture);
     linedefs.add(
       Linedef(
         v1: vertex(a[0], a[1]),
         v2: vertex(b[0], b[1]),
         flags: LinedefFlags.blocking,
-        special: 0,
+        special: special,
         tag: 0,
         rightSidedef: right,
         leftSidedef: kNoSidedef,
@@ -301,12 +356,20 @@ class _Builder {
     required String texture,
     int skipEdge = -1,
     int skipSecondEdge = -1,
+    int specialEdge = -1,
+    int special = 0,
   }) {
     for (var i = 0; i < points.length; i++) {
       if (i == skipEdge || i == skipSecondEdge) {
         continue;
       }
-      solidLine(points[i], points[(i + 1) % points.length], sector, texture);
+      solidLine(
+        points[i],
+        points[(i + 1) % points.length],
+        sector,
+        texture,
+        special: i == specialEdge ? special : 0,
+      );
     }
   }
 
@@ -318,6 +381,7 @@ class _Builder {
     required int backSector,
     required String upper,
     required String lower,
+    int special = 0,
   }) {
     final int right = addSidedef(frontSector, upper: upper, lower: lower);
     final int left = addSidedef(backSector, upper: upper, lower: lower);
@@ -326,7 +390,7 @@ class _Builder {
         v1: vertex(from[0], from[1]),
         v2: vertex(to[0], to[1]),
         flags: LinedefFlags.twoSided,
-        special: 0,
+        special: special,
         tag: 0,
         rightSidedef: right,
         leftSidedef: left,
@@ -369,7 +433,9 @@ FixtureMapLumps buildFixtureMapLumps() {
     final MapVertex b = geometry.vertices[line.v2];
     input.add(BspSeg(x1: a.x, y1: a.y, x2: b.x, y2: b.y, linedef: i, side: 0));
     if (line.leftSidedef != kNoSidedef) {
-      input.add(BspSeg(x1: b.x, y1: b.y, x2: a.x, y2: a.y, linedef: i, side: 1));
+      input.add(
+        BspSeg(x1: b.x, y1: b.y, x2: a.x, y2: a.y, linedef: i, side: 1),
+      );
     }
   }
 
@@ -400,22 +466,37 @@ FixtureMapLumps buildFixtureMapLumps() {
     final Linedef line = geometry.linedefs[seg.linedef];
     // The offset is the distance from the seg's start back to the start of the
     // side of the linedef it belongs to, which is how texture u is anchored.
-    final MapVertex anchor =
-        seg.side == 0 ? geometry.vertices[line.v1] : geometry.vertices[line.v2];
+    final MapVertex anchor = seg.side == 0
+        ? geometry.vertices[line.v1]
+        : geometry.vertices[line.v2];
     final int o = i * kSegBytes;
     segView.setUint16(o, internVertex(seg.x1, seg.y1), Endian.little);
     segView.setUint16(o + 2, internVertex(seg.x2, seg.y2), Endian.little);
     segView.setUint16(o + 4, bamAngle(seg.dx, seg.dy), Endian.little);
     segView.setUint16(o + 6, seg.linedef, Endian.little);
     segView.setUint16(o + 8, seg.side, Endian.little);
-    segView.setInt16(o + 10, distanceBetween(anchor.x, anchor.y, seg.x1, seg.y1), Endian.little);
+    segView.setInt16(
+      o + 10,
+      distanceBetween(anchor.x, anchor.y, seg.x1, seg.y1),
+      Endian.little,
+    );
   }
 
-  final Uint8List ssectors = Uint8List(tree.subsectors.length * kSubsectorBytes);
+  final Uint8List ssectors = Uint8List(
+    tree.subsectors.length * kSubsectorBytes,
+  );
   final ByteData ssectorView = ByteData.sublistView(ssectors);
   for (var i = 0; i < tree.subsectors.length; i++) {
-    ssectorView.setUint16(i * kSubsectorBytes, tree.subsectors[i].segCount, Endian.little);
-    ssectorView.setUint16(i * kSubsectorBytes + 2, tree.subsectors[i].firstSeg, Endian.little);
+    ssectorView.setUint16(
+      i * kSubsectorBytes,
+      tree.subsectors[i].segCount,
+      Endian.little,
+    );
+    ssectorView.setUint16(
+      i * kSubsectorBytes + 2,
+      tree.subsectors[i].firstSeg,
+      Endian.little,
+    );
   }
 
   final Uint8List nodes = Uint8List(tree.nodes.length * kNodeBytes);
@@ -442,7 +523,9 @@ FixtureMapLumps buildFixtureMapLumps() {
     vertexView.setInt16(i * kVertexBytes + 2, vertices[i].y, Endian.little);
   }
 
-  final Uint8List linedefs = Uint8List(geometry.linedefs.length * kLinedefBytes);
+  final Uint8List linedefs = Uint8List(
+    geometry.linedefs.length * kLinedefBytes,
+  );
   final ByteData linedefView = ByteData.sublistView(linedefs);
   for (var i = 0; i < geometry.linedefs.length; i++) {
     final Linedef line = geometry.linedefs[i];
@@ -456,7 +539,9 @@ FixtureMapLumps buildFixtureMapLumps() {
     linedefView.setUint16(o + 12, line.leftSidedef & 0xFFFF, Endian.little);
   }
 
-  final Uint8List sidedefs = Uint8List(geometry.sidedefs.length * kSidedefBytes);
+  final Uint8List sidedefs = Uint8List(
+    geometry.sidedefs.length * kSidedefBytes,
+  );
   final ByteData sidedefView = ByteData.sublistView(sidedefs);
   for (var i = 0; i < geometry.sidedefs.length; i++) {
     final Sidedef side = geometry.sidedefs[i];
@@ -518,7 +603,10 @@ FixtureMapLumps buildFixtureMapLumps() {
 /// A linedef is assigned to every 128x128 cell its bounding box touches, which
 /// over-includes diagonal lines but never misses one, matching what vanilla
 /// node builders emit.
-Uint8List buildFixtureBlockmap(List<MapVertex> vertices, List<Linedef> linedefs) {
+Uint8List buildFixtureBlockmap(
+  List<MapVertex> vertices,
+  List<Linedef> linedefs,
+) {
   var minX = 2147483647;
   var minY = 2147483647;
   var maxX = -2147483648;

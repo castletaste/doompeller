@@ -110,7 +110,9 @@ void main() {
         height: h,
         leftOffset: 0,
         topOffset: 0,
-        indices: Uint8List.fromList(List<int>.generate(h, (int i) => (i + 1) & 0xFF)),
+        indices: Uint8List.fromList(
+          List<int>.generate(h, (int i) => (i + 1) & 0xFF),
+        ),
         coverage: Uint8List(h)..fillRange(0, h, 255),
       );
       final PatchImage decoded = decodeDoomPatch(encodeDoomPatch(original));
@@ -119,7 +121,10 @@ void main() {
     });
 
     test('rejects a truncated patch header', () {
-      expect(() => decodeDoomPatch(Uint8List(4)), throwsA(isA<DoomFormatFailure>()));
+      expect(
+        () => decodeDoomPatch(Uint8List(4)),
+        throwsA(isA<DoomFormatFailure>()),
+      );
     });
 
     test('rejects zero and negative dimensions', () {
@@ -146,8 +151,10 @@ void main() {
     test('honours maxCompositePixels', () {
       final PatchImage big = PatchImage.empty(64, 64);
       expect(
-        () =>
-            decodeDoomPatch(encodeDoomPatch(big), limits: const DoomLimits(maxCompositePixels: 16)),
+        () => decodeDoomPatch(
+          encodeDoomPatch(big),
+          limits: const DoomLimits(maxCompositePixels: 16),
+        ),
         throwsA(
           isA<DoomLimitFailure>().having(
             (DoomLimitFailure f) => f.limitName,
@@ -179,13 +186,28 @@ void main() {
       final WadSet bare = WadSet(<WadFile>[
         WadFile.parse(buildWad(<LumpSource>[LumpSource('X', Uint8List(1))])),
       ]);
-      expect(() => WadResources.load(bare), throwsA(isA<DoomMissingLumpFailure>()));
+      expect(
+        () => WadResources.load(bare),
+        throwsA(isA<DoomMissingLumpFailure>()),
+      );
     });
 
     test('reads the texture directory in declaration order', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.textureNames, <String>['WALL1', 'WALL2', 'WALL3', 'SKY1', 'WALLOVR']);
-      expect(res.patchNames, <String>['PAT1', 'PAT2', 'PAT3', 'PAT4', 'SKYPAN']);
+      expect(res.textureNames, <String>[
+        'WALL1',
+        'WALL2',
+        'WALL3',
+        'SKY1',
+        'WALLOVR',
+      ]);
+      expect(res.patchNames, <String>[
+        'PAT1',
+        'PAT2',
+        'PAT3',
+        'PAT4',
+        'SKYPAN',
+      ]);
 
       final TextureDef wall2 = res.textureDef('WALL2')!;
       expect(wall2.width, 128);
@@ -200,15 +222,18 @@ void main() {
       expect(sky.patches.single.patchIndex, 4);
     });
 
-    test('texture lookup is case insensitive and handles the no-texture name', () {
-      final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.textureDef('wall1'), isNotNull);
-      expect(res.textureDef('WaLl1'), isNotNull);
-      expect(res.textureDef('-'), isNull);
-      expect(res.composite('-'), isNull);
-      expect(res.composite('NOSUCHTEX'), isNull);
-      expect(res.textureDef('NOSUCHTEX'), isNull);
-    });
+    test(
+      'texture lookup is case insensitive and handles the no-texture name',
+      () {
+        final WadResources res = WadResources.load(DoomFixtures.wadSet());
+        expect(res.textureDef('wall1'), isNotNull);
+        expect(res.textureDef('WaLl1'), isNotNull);
+        expect(res.textureDef('-'), isNull);
+        expect(res.composite('-'), isNull);
+        expect(res.composite('NOSUCHTEX'), isNull);
+        expect(res.textureDef('NOSUCHTEX'), isNull);
+      },
+    );
   });
 
   group('composite', () {
@@ -222,18 +247,21 @@ void main() {
       expect(composed.isFullyOpaque, isTrue);
     });
 
-    test('generated sky panorama is opaque and has diagnostic bands and columns', () {
-      final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      final PatchImage composed = res.composite('SKY1')!;
-      final PatchImage source = buildFixturePatch('SKYPAN');
-      expect(composed.width, 256);
-      expect(composed.height, 128);
-      expect(composed.isFullyOpaque, isTrue);
-      expect(composed.indices, source.indices);
-      expect(composed.indexAt(0, 0), isNot(composed.indexAt(16, 0)));
-      expect(composed.indexAt(0, 0), isNot(composed.indexAt(0, 16)));
-      expect(composed.indexAt(0, 0), isNot(composed.indexAt(240, 112)));
-    });
+    test(
+      'generated sky panorama is opaque and has diagnostic bands and columns',
+      () {
+        final WadResources res = WadResources.load(DoomFixtures.wadSet());
+        final PatchImage composed = res.composite('SKY1')!;
+        final PatchImage source = buildFixturePatch('SKYPAN');
+        expect(composed.width, 256);
+        expect(composed.height, 128);
+        expect(composed.isFullyOpaque, isTrue);
+        expect(composed.indices, source.indices);
+        expect(composed.indexAt(0, 0), isNot(composed.indexAt(16, 0)));
+        expect(composed.indexAt(0, 0), isNot(composed.indexAt(0, 16)));
+        expect(composed.indexAt(0, 0), isNot(composed.indexAt(240, 112)));
+      },
+    );
 
     test('two-patch texture places each patch at its origin', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
@@ -242,10 +270,26 @@ void main() {
       final PatchImage right = buildFixturePatch('PAT2');
       expect(composed.width, 128);
       for (var y = 0; y < 128; y++) {
-        expect(composed.indexAt(0, y), left.indexAt(0, y), reason: 'left column row $y');
-        expect(composed.indexAt(63, y), left.indexAt(63, y), reason: 'left edge row $y');
-        expect(composed.indexAt(64, y), right.indexAt(0, y), reason: 'right column row $y');
-        expect(composed.indexAt(127, y), right.indexAt(63, y), reason: 'right edge row $y');
+        expect(
+          composed.indexAt(0, y),
+          left.indexAt(0, y),
+          reason: 'left column row $y',
+        );
+        expect(
+          composed.indexAt(63, y),
+          left.indexAt(63, y),
+          reason: 'left edge row $y',
+        );
+        expect(
+          composed.indexAt(64, y),
+          right.indexAt(0, y),
+          reason: 'right column row $y',
+        );
+        expect(
+          composed.indexAt(127, y),
+          right.indexAt(63, y),
+          reason: 'right edge row $y',
+        );
       }
     });
 
@@ -296,7 +340,10 @@ void main() {
 
     test('honours maxTextures', () {
       expect(
-        () => WadResources.load(DoomFixtures.wadSet(), limits: const DoomLimits(maxTextures: 2)),
+        () => WadResources.load(
+          DoomFixtures.wadSet(),
+          limits: const DoomLimits(maxTextures: 2),
+        ),
         throwsA(
           isA<DoomLimitFailure>().having(
             (DoomLimitFailure f) => f.limitName,
@@ -325,7 +372,10 @@ void main() {
 
     test('honours maxPatchNames', () {
       expect(
-        () => WadResources.load(DoomFixtures.wadSet(), limits: const DoomLimits(maxPatchNames: 2)),
+        () => WadResources.load(
+          DoomFixtures.wadSet(),
+          limits: const DoomLimits(maxPatchNames: 2),
+        ),
         throwsA(
           isA<DoomLimitFailure>().having(
             (DoomLimitFailure f) => f.limitName,
@@ -352,7 +402,10 @@ void main() {
 
       expect(
         () => WadResources.load(
-          setWith(<LumpSource>[LumpSource('PNAMES', pnames), LumpSource('TEXTURE1', texture)]),
+          setWith(<LumpSource>[
+            LumpSource('PNAMES', pnames),
+            LumpSource('TEXTURE1', texture),
+          ]),
         ),
         throwsA(
           isA<DoomFormatFailure>().having(
@@ -403,7 +456,8 @@ void main() {
 
     test('finds sprites between S_START and S_END', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.spriteNames, <String>['TESTA0', 'TESTB0']);
+      expect(res.spriteNames.length, DoomFixtures.spriteNames.length);
+      expect(res.spriteNames, containsAll(DoomFixtures.spriteNames));
 
       final PatchImage sprite = res.sprite('TESTA0')!;
       expect(sprite.width, 64);
@@ -414,15 +468,93 @@ void main() {
       expect(sprite.coverage, buildFixtureSprite('TESTA0').coverage);
     });
 
-    test('sprite lookup is case insensitive, memoised and namespace scoped', () {
-      final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.sprite('testa0'), isNotNull);
-      expect(identical(res.sprite('TESTA0'), res.sprite('TESTA0')), isTrue);
-      // PLAYPAL is a real lump but lives outside S_START/S_END.
-      expect(res.sprite('PLAYPAL'), isNull);
-      expect(res.sprite('NOSUCHSPRITE'), isNull);
-      expect(res.sprite(''), isNull);
-    });
+    test(
+      'generated gameplay sprites decode distinctly with useful offsets',
+      () {
+        final WadResources res = WadResources.load(DoomFixtures.wadSet());
+        final Set<int> fingerprints = <int>{};
+        for (final String name in DoomFixtures.spriteNames) {
+          expect(name.length, lessThanOrEqualTo(8), reason: name);
+          expect(name, name.toUpperCase(), reason: name);
+          final PatchImage decoded = res.sprite(name)!;
+          final PatchImage generated = buildFixtureSprite(name);
+          expect(decoded.indices, generated.indices, reason: '$name indices');
+          expect(
+            decoded.coverage,
+            generated.coverage,
+            reason: '$name coverage',
+          );
+          expect(decoded.isFullyOpaque, isFalse, reason: '$name cutout');
+          expect(decoded.coverage, contains(0), reason: '$name transparency');
+          expect(
+            decoded.coverage,
+            contains(255),
+            reason: '$name opaque pixels',
+          );
+          fingerprints.add(
+            fnv1a64(
+              Uint8List.fromList(<int>[
+                decoded.width,
+                decoded.height,
+                decoded.leftOffset,
+                decoded.topOffset,
+                ...decoded.indices,
+                ...decoded.coverage,
+              ]),
+            ),
+          );
+        }
+        expect(fingerprints.length, DoomFixtures.spriteNames.length);
+
+        for (final String name in <String>[
+          'POSSA0',
+          'SPOSA0',
+          'TROOA0',
+          'BAR1A0',
+          'BAL1A0',
+        ]) {
+          final PatchImage sprite = res.sprite(name)!;
+          expect((sprite.width, sprite.height), (64, 64), reason: name);
+          expect((sprite.leftOffset, sprite.topOffset), (32, 60), reason: name);
+        }
+        for (final String name in <String>[
+          'CLIPA0',
+          'SHOTA0',
+          'STIMA0',
+          'ARM1A0',
+          'BON1A0',
+          'BON2A0',
+          'SHELA0',
+        ]) {
+          final PatchImage sprite = res.sprite(name)!;
+          expect((sprite.width, sprite.height), (40, 40), reason: name);
+          expect((sprite.leftOffset, sprite.topOffset), (20, 36), reason: name);
+        }
+        for (final String name in <String>[
+          'PISGA0',
+          'PUNGA0',
+          'SHTGA0',
+          'CHGGA0',
+        ]) {
+          final PatchImage sprite = res.sprite(name)!;
+          expect((sprite.width, sprite.height), (96, 64), reason: name);
+          expect((sprite.leftOffset, sprite.topOffset), (48, 64), reason: name);
+        }
+      },
+    );
+
+    test(
+      'sprite lookup is case insensitive, memoised and namespace scoped',
+      () {
+        final WadResources res = WadResources.load(DoomFixtures.wadSet());
+        expect(res.sprite('testa0'), isNotNull);
+        expect(identical(res.sprite('TESTA0'), res.sprite('TESTA0')), isTrue);
+        // PLAYPAL is a real lump but lives outside S_START/S_END.
+        expect(res.sprite('PLAYPAL'), isNull);
+        expect(res.sprite('NOSUCHSPRITE'), isNull);
+        expect(res.sprite(''), isNull);
+      },
+    );
 
     test('accepts the SS_START marker variant', () {
       final WadSet set = setWith(<LumpSource>[

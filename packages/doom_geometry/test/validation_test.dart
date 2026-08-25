@@ -9,8 +9,9 @@ import 'support/synthetic_map.dart';
 /// The validator has to actually catch the defects it claims to catch. These
 /// tests hand it deliberately broken geometry and assert it fires.
 void main() {
-  final GeometryValidator validator =
-      GeometryValidator(GeometryOptions.defaults);
+  final GeometryValidator validator = GeometryValidator(
+    GeometryOptions.defaults,
+  );
 
   SectorFinding check(SectorMesh2D bsp, SectorMesh2D oracle) =>
       validator.validateSector(
@@ -48,8 +49,11 @@ void main() {
         ]),
       );
       final SectorFinding finding = check(bad, bad);
-      expect(finding.tJunctions, greaterThan(0),
-          reason: 'the midpoint vertex must be detected on the long edge');
+      expect(
+        finding.tJunctions,
+        greaterThan(0),
+        reason: 'the midpoint vertex must be detected on the long edge',
+      );
       expect(finding.issues, contains(GeometryIssue.tJunction));
       expect(validator.shouldFallBack(finding), isTrue);
     });
@@ -67,12 +71,24 @@ void main() {
           100, 100,
         ]),
         Uint32List.fromList(<int>[
-          0, 1, 2,
-          0, 2, 3,
-          0, 3, 4,
-          1, 5, 2,
-          5, 6, 2,
-          6, 3, 2,
+          0,
+          1,
+          2,
+          0,
+          2,
+          3,
+          0,
+          3,
+          4,
+          1,
+          5,
+          2,
+          5,
+          6,
+          2,
+          6,
+          3,
+          2,
         ]),
       );
       final SectorFinding finding = check(good, good);
@@ -92,7 +108,20 @@ void main() {
 
     test('overlapping triangles', () {
       final SectorMesh2D bad = SectorMesh2D(
-        Float64List.fromList(<double>[0, 0, 100, 0, 0, 100, 10, 10, 90, 10, 10, 90]),
+        Float64List.fromList(<double>[
+          0,
+          0,
+          100,
+          0,
+          0,
+          100,
+          10,
+          10,
+          90,
+          10,
+          10,
+          90,
+        ]),
         Uint32List.fromList(<int>[0, 1, 2, 3, 4, 5]),
       );
       final SectorFinding finding = check(bad, bad);
@@ -112,6 +141,29 @@ void main() {
       final SectorFinding finding = check(small, big);
       expect(finding.issues, contains(GeometryIssue.areaMismatch));
       expect(validator.shouldFallBack(finding), isTrue);
+    });
+
+    test('detects a half-unit gap across a million-unit sector', () {
+      final SectorMesh2D bsp = SectorMesh2D(
+        Float64List.fromList(<double>[0, 0, 999.5, 0, 999.5, 1000, 0, 1000]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+      );
+      final SectorMesh2D oracle = SectorMesh2D(
+        Float64List.fromList(<double>[0, 0, 1000, 0, 1000, 1000, 0, 1000]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+      );
+      expect(check(bsp, oracle).issues, contains(GeometryIssue.areaMismatch));
+    });
+
+    test('detects crossing triangles whose centroids miss each other', () {
+      final SectorMesh2D bad = SectorMesh2D(
+        Float64List.fromList(<double>[
+          162, 131, 51, 134, 21, 62,
+          -19, 100, -88, 45, 61, 89,
+        ]),
+        Uint32List.fromList(<int>[0, 1, 2, 3, 4, 5]),
+      );
+      expect(check(bad, bad).issues, contains(GeometryIssue.overlap));
     });
 
     test('an empty region is reported', () {
@@ -151,8 +203,10 @@ void main() {
       final int s = b.sector();
       b.solidLoop(<int>[0, 0, 512, 0, 512, 512, 0, 512], s);
       final MapData map = b.build();
-      final BspRegionSet regions = BspRegionBuilder(map, GeometryOptions.defaults)
-          .build(tiny);
+      final BspRegionSet regions = BspRegionBuilder(
+        map,
+        GeometryOptions.defaults,
+      ).build(tiny);
       expect(tiny.exhausted, isTrue);
       expect(regions.budgetExhausted, isTrue);
       expect(regions.isUsable, isFalse);
@@ -189,10 +243,53 @@ void main() {
       final Loop bowtie = Loop(
         Float64List.fromList(<double>[0, 0, 100, 100, 100, 0, 0, 100]),
       );
+      final TriangulationResult result = EarClipper().triangulate(
+        bowtie,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
+      expect(
+        result.isComplete,
+        isFalse,
+        reason: 'a self-intersecting ring must be reported, not looped on',
+      );
+    });
+
+    test('asymmetric bow-tie is rejected before ear clipping', () {
+      final Loop bowtie = Loop(
+        Float64List.fromList(<double>[0, 0, 5, 5, 0, 5, 3, 0]),
+      );
       final TriangulationResult result =
           EarClipper().triangulate(bowtie, const <Loop>[], CheckBudget(10000));
-      expect(result.isComplete, isFalse,
-          reason: 'a self-intersecting ring must be reported, not looped on');
+      expect(result.isComplete, isFalse);
+      expect(result.triangleCount, 0);
+    });
+
+    test('hole sharing an outer edge is not a valid oracle ring', () {
+      final Loop outer = Loop(
+        Float64List.fromList(<double>[0, 0, 10, 0, 10, 10, 0, 10]),
+      );
+      final Loop touching = Loop(
+        Float64List.fromList(<double>[0, 2, 2, 2, 2, 4, 0, 4]),
+      );
+      final TriangulationResult result = EarClipper()
+          .triangulate(outer, <Loop>[touching], CheckBudget(10000));
+      expect(result.isComplete, isFalse);
+    });
+
+    test('nested holes are rejected instead of bridged as siblings', () {
+      final Loop outer = Loop(
+        Float64List.fromList(<double>[0, 0, 20, 0, 20, 20, 0, 20]),
+      );
+      final Loop hole = Loop(
+        Float64List.fromList(<double>[2, 2, 10, 2, 10, 10, 2, 10]),
+      );
+      final Loop nested = Loop(
+        Float64List.fromList(<double>[4, 4, 6, 4, 6, 6, 4, 6]),
+      );
+      final TriangulationResult result = EarClipper()
+          .triangulate(outer, <Loop>[hole, nested], CheckBudget(10000));
+      expect(result.isComplete, isFalse);
     });
   });
 
@@ -221,26 +318,64 @@ void main() {
     });
 
     test('respects maxAtlasPixels instead of allocating unbounded pages', () {
-      final AtlasBuilder builder = AtlasBuilder(
-        testTextures(),
-        const GeometryOptions(
-          atlasPageSize: 64,
-          limits: DoomLimits(maxAtlasPixels: 64 * 64),
-        ),
-      )
-        ..addFlat('FLOOR0_1')
-        ..addFlat('CEIL1_1')
-        ..addWallTexture('BIGDOOR2');
+      final AtlasBuilder builder =
+          AtlasBuilder(
+              testTextures(),
+              const GeometryOptions(
+                atlasPageSize: 64,
+                limits: DoomLimits(maxAtlasPixels: 64 * 64),
+              ),
+            )
+            ..addFlat('FLOOR0_1')
+            ..addFlat('CEIL1_1')
+            ..addWallTexture('BIGDOOR2');
       final IndexedAtlas atlas = builder.build();
       expect(atlas.pageCount, 1);
-      expect(atlas.overflowed, isNotEmpty,
-          reason: 'what did not fit must be named, not dropped in silence');
+      expect(
+        atlas.overflowed,
+        isNotEmpty,
+        reason: 'what did not fit must be named, not dropped in silence',
+      );
+    });
+
+    test('zero atlas budget fails typed instead of emitting page zero', () {
+      final MapBuilder b = MapBuilder('NOATLAS');
+      final int s = b.sector();
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s);
+      expect(
+        () => DoomGeometryCompiler.compileWithTextures(
+          b.build(),
+          testTextures(),
+          options: const GeometryOptions(
+            limits: DoomLimits(maxAtlasPixels: 0),
+          ),
+        ),
+        throwsA(isA<DoomLimitFailure>()),
+      );
+    });
+
+    test('partial atlas overflow fails typed before dangling meshes exist', () {
+      final MapBuilder b = MapBuilder('PARTIALATLAS');
+      final int s = b.sector();
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s);
+      expect(
+        () => DoomGeometryCompiler.compileWithTextures(
+          b.build(),
+          testTextures(),
+          options: const GeometryOptions(
+            atlasPageSize: 64,
+            limits: DoomLimits(maxAtlasPixels: 64 * 64),
+          ),
+        ),
+        throwsA(isA<DoomLimitFailure>()),
+      );
     });
 
     test('texel data lands in the index and coverage channels', () {
-      final AtlasBuilder builder =
-          AtlasBuilder(testTextures(), GeometryOptions.defaults)
-            ..addFlat('FLOOR0_1');
+      final AtlasBuilder builder = AtlasBuilder(
+        testTextures(),
+        GeometryOptions.defaults,
+      )..addFlat('FLOOR0_1');
       final IndexedAtlas atlas = builder.build();
       final AtlasEntry entry = atlas.entry('FLOOR0_1')!;
       final AtlasPage page = atlas.pages[entry.page];
@@ -250,16 +385,65 @@ void main() {
   });
 
   group('packing', () {
+    test('a single 65537-vertex primitive splits before uint16 narrowing', () {
+      const int vertexCount = 65537;
+      final Float64List positions = Float64List(vertexCount * 3);
+      final Float64List uvs = Float64List(vertexCount * 2);
+      final List<int> indices = <int>[];
+      for (var i = 0; i + 2 < vertexCount; i += 3) {
+        positions[i * 3] = i.toDouble();
+        positions[(i + 1) * 3] = (i + 1).toDouble();
+        positions[(i + 2) * 3] = (i + 2).toDouble();
+        indices.addAll(<int>[i, i + 1, i + 2]);
+      }
+      indices.addAll(<int>[65534, 65535, 65536]);
+      final MeshPacker packer = MeshPacker();
+      final List<VertexRange> ranges = packer.addPrimitive(
+        page: 0,
+        kind: SurfaceKind.opaque,
+        positions: positions,
+        uvs: uvs,
+        indices: indices,
+        normalX: 0,
+        normalY: 1,
+        normalZ: 0,
+        light: 1,
+        atlasU0: 0,
+        atlasV0: 0,
+        atlasU1: 1,
+        atlasV1: 1,
+      );
+      final List<PackedMesh> meshes = packer.finish();
+      expect(ranges.length, 2);
+      expect(meshes.length, 2);
+      for (final PackedMesh mesh in meshes) {
+        expect(mesh.vertexCount, lessThanOrEqualTo(65535));
+        expect(mesh.indices.every((int i) => i < mesh.vertexCount), isTrue);
+      }
+    });
+
+    test('maxTriangles is enforced before packing', () {
+      final MapBuilder b = MapBuilder('TRILIMIT');
+      final int s = b.sector();
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s);
+      expect(
+        () => DoomGeometryCompiler.compileWithTextures(
+          b.build(),
+          testTextures(),
+          options: const GeometryOptions(
+            limits: DoomLimits(maxTriangles: 1),
+          ),
+        ),
+        throwsA(isA<DoomLimitFailure>()),
+      );
+    });
     test('meshes never exceed the 16-bit index limit', () {
       final MapBuilder b = MapBuilder('HUGE');
       for (var i = 0; i < 120; i++) {
         final int s = b.sector(floorHeight: i);
         final int x = (i % 20) * 256;
         final int y = (i ~/ 20) * 256;
-        b.solidLoop(
-          <int>[x, y, x + 200, y, x + 200, y + 200, x, y + 200],
-          s,
-        );
+        b.solidLoop(<int>[x, y, x + 200, y, x + 200, y + 200, x, y + 200], s);
       }
       final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
         b.build(buildNodes: false),
@@ -320,17 +504,44 @@ void main() {
     });
   });
 
+  test('convex repaired boundary retains a midpoint on every side', () {
+    final Float64List boundary = Float64List.fromList(<double>[
+      0, 0, 5, 0, 10, 0,
+      10, 5, 10, 10,
+      5, 10, 0, 10,
+      0, 5,
+    ]);
+    final TriangulationResult result = triangulateConvexBoundary(boundary);
+    expect(result.triangleCount, 8);
+    expect(result.area, closeTo(100, 1e-9));
+    final Set<int> used = result.indices.toSet();
+    for (var i = 0; i < 8; i++) {
+      expect(used, contains(i), reason: 'boundary vertex $i was dropped');
+    }
+  });
+
   group('determinism', () {
     test('the same map compiles to the same hash every time', () {
       MapBuilder make() {
         final MapBuilder b = MapBuilder('DET');
         final int s = b.sector();
-        b.solidLoop(
-          <int>[0, 0, 256, 0, 256, 128, 128, 128, 128, 256, 0, 256],
-          s,
-        );
+        b.solidLoop(<int>[
+          0,
+          0,
+          256,
+          0,
+          256,
+          128,
+          128,
+          128,
+          128,
+          256,
+          0,
+          256,
+        ], s);
         return b;
       }
+
       final int a = DoomGeometryCompiler.compileWithTextures(
         make().build(),
         testTextures(),
@@ -352,13 +563,15 @@ void main() {
       b2.solidLoop(<int>[0, 0, 320, 0, 320, 256, 0, 256], s2);
 
       expect(
-        DoomGeometryCompiler.compileWithTextures(b1.build(), testTextures())
-            .report
-            .geometryHash,
+        DoomGeometryCompiler.compileWithTextures(
+          b1.build(),
+          testTextures(),
+        ).report.geometryHash,
         isNot(
-          DoomGeometryCompiler.compileWithTextures(b2.build(), testTextures())
-              .report
-              .geometryHash,
+          DoomGeometryCompiler.compileWithTextures(
+            b2.build(),
+            testTextures(),
+          ).report.geometryHash,
         ),
       );
     });

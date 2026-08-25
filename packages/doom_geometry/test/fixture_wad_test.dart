@@ -30,6 +30,7 @@ void main() {
     expect(report.degenerateTriangleCount, 0);
     expect(report.fallbackSectors, isEmpty,
         reason: 'no sector should need the loop fallback');
+    expect(report.geometryHash, 0x2d4cb614);
   });
 
   test('fixture compile is deterministic', () {
@@ -41,4 +42,3 @@ void main() {
     expect(a, b);
   });
 }
-

@@ -28,8 +28,9 @@ void main() {
 
   test('floor vertices actually carry the new height', () {
     final CompiledLevel level = _compile();
-    final SectorPlaneRef floor =
-        level.floorPlanes.firstWhere((SectorPlaneRef p) => p.sector == 0);
+    final SectorPlaneRef floor = level.floorPlanes.firstWhere(
+      (SectorPlaneRef p) => p.sector == 0,
+    );
     expect(floor.height, 0);
 
     level.setFloorHeight(0, 72);
@@ -37,9 +38,11 @@ void main() {
 
     for (final VertexRange range in floor.ranges) {
       final PackedMesh mesh = level.meshes[range.meshIndex];
-      for (var v = range.firstVertex;
-          v < range.firstVertex + range.vertexCount;
-          v++) {
+      for (
+        var v = range.firstVertex;
+        v < range.firstVertex + range.vertexCount;
+        v++
+      ) {
         expect(mesh.vertexHeight(v), 72);
       }
     }
@@ -48,10 +51,12 @@ void main() {
   test('ceiling moves independently of the floor', () {
     final CompiledLevel level = _compile();
     level.setCeilingHeight(0, 200);
-    final SectorPlaneRef floor =
-        level.floorPlanes.firstWhere((SectorPlaneRef p) => p.sector == 0);
-    final SectorPlaneRef ceiling =
-        level.ceilingPlanes.firstWhere((SectorPlaneRef p) => p.sector == 0);
+    final SectorPlaneRef floor = level.floorPlanes.firstWhere(
+      (SectorPlaneRef p) => p.sector == 0,
+    );
+    final SectorPlaneRef ceiling = level.ceilingPlanes.firstWhere(
+      (SectorPlaneRef p) => p.sector == 0,
+    );
     expect(ceiling.height, 200);
     expect(floor.height, 0);
   });
@@ -74,10 +79,16 @@ void main() {
     b.solidLoop(<int>[0, 0, 256, 0, 256, 256, 0, 256], room);
     final int v1 = b.vertex(256, 0);
     final int v2 = b.vertex(256, 256);
-    final int frontSide =
-        b.sidedef(sector: room, upper: 'BIGDOOR2', lower: 'BIGDOOR2');
-    final int backSide =
-        b.sidedef(sector: door, upper: 'BIGDOOR2', lower: 'BIGDOOR2');
+    final int frontSide = b.sidedef(
+      sector: room,
+      upper: 'BIGDOOR2',
+      lower: 'BIGDOOR2',
+    );
+    final int backSide = b.sidedef(
+      sector: door,
+      upper: 'BIGDOOR2',
+      lower: 'BIGDOOR2',
+    );
     b.line(v1: v2, v2: v1, right: frontSide, left: backSide);
     b.solidLoop(<int>[256, 0, 512, 0, 512, 256, 256, 256], door);
 
@@ -87,8 +98,7 @@ void main() {
     );
 
     final WallBandRef upper = level.wallBands.firstWhere(
-      (WallBandRef w) =>
-          w.band == WallBandKind.upper && w.frontSector == room,
+      (WallBandRef w) => w.band == WallBandKind.upper && w.frontSector == room,
     );
     // Closed: the upper band spans the whole doorway.
     expect(upper.bottom, 0);
@@ -101,11 +111,15 @@ void main() {
     // was covering the doorway shrinks to nothing.
     ceilings[door] = 128;
     level.setCeilingHeight(door, 128);
-    final int updated =
-        level.updateWallsForSector(door, 0, 128, floors, ceilings);
+    final int updated = level.updateWallsForSector(
+      door,
+      0,
+      128,
+      floors,
+      ceilings,
+    );
     expect(updated, greaterThan(0));
-    expect(upper.top, upper.bottom,
-        reason: 'a fully open door shows no upper');
+    expect(upper.top, upper.bottom, reason: 'a fully open door shows no upper');
 
     // Halfway shut again.
     ceilings[door] = 64;
@@ -131,13 +145,92 @@ void main() {
     );
   });
 
+  test('lower-unpegged wall recomputes from the raw sidedef offset', () {
+    final MapBuilder b = MapBuilder('LIFT');
+    final int room = b.sector(floorHeight: 0, ceilingHeight: 128);
+    final int lift = b.sector(floorHeight: 128, ceilingHeight: 128);
+    b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], room);
+    final int v1 = b.vertex(128, 0);
+    final int v2 = b.vertex(128, 128);
+    final int front = b.sidedef(
+      sector: room,
+      lower: 'STARTAN3',
+      yOffset: 0,
+    );
+    final int back = b.sidedef(sector: lift, lower: 'STARTAN3');
+    b.line(
+      v1: v2,
+      v2: v1,
+      right: front,
+      left: back,
+      flags: LinedefFlags.lowerUnpegged,
+      special: 62,
+    );
+    b.solidLoop(<int>[128, 0, 256, 0, 256, 128, 128, 128], lift);
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(),
+      testTextures(),
+    );
+    final WallBandRef lower = level.wallBands.firstWhere(
+      (WallBandRef w) =>
+          w.band == WallBandKind.lower && w.frontSector == room,
+    );
+    final List<double> floors = <double>[0, 128];
+    final List<double> ceilings = <double>[128, 128];
+    for (final double height in <double>[64, 128, 64]) {
+      floors[lift] = height;
+      level.updateWallsForSector(lift, height, 128, floors, ceilings);
+      final PackedMesh mesh = level.meshes[lower.meshIndex];
+      final double topV = mesh.vertexV(lower.firstVertex + 2);
+      expect(topV, closeTo((128 - height) / 128, 1e-6));
+    }
+  });
+
+  test('manual door special tag zero precreates its collapsed upper band', () {
+    final MapBuilder b = MapBuilder('MANUALDOOR');
+    final int room = b.sector(floorHeight: 0, ceilingHeight: 128);
+    final int door = b.sector(floorHeight: 0, ceilingHeight: 128);
+    b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], room);
+    final int v1 = b.vertex(128, 0);
+    final int v2 = b.vertex(128, 128);
+    final int front = b.sidedef(sector: room, upper: 'BIGDOOR2');
+    final int back = b.sidedef(sector: door, upper: 'BIGDOOR2');
+    b.line(
+      v1: v2,
+      v2: v1,
+      right: front,
+      left: back,
+      special: 1,
+      tag: 0,
+    );
+    b.solidLoop(<int>[128, 0, 256, 0, 256, 128, 128, 128], door);
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(),
+      testTextures(),
+    );
+    final WallBandRef upper = level.wallBands.firstWhere(
+      (WallBandRef w) =>
+          w.band == WallBandKind.upper && w.frontSector == room,
+    );
+    expect(upper.top, upper.bottom);
+    final List<double> floors = <double>[0, 0];
+    final List<double> ceilings = <double>[128, 128];
+    ceilings[door] = 64;
+    level.updateWallsForSector(door, 0, 64, floors, ceilings);
+    expect(upper.bottom, 64);
+    expect(upper.top, 128);
+  });
+
   test('an inverted opening collapses rather than inverting', () {
     final CompiledLevel level = _compile();
     final WallBandRef band = level.wallBands.first;
     final bool visible = band.applyHeights(level.meshes, 100, 40);
     expect(visible, isFalse);
-    expect(band.top, band.bottom,
-        reason: 'top below bottom must clamp, not flip the quad');
+    expect(
+      band.top,
+      band.bottom,
+      reason: 'top below bottom must clamp, not flip the quad',
+    );
   });
 
   test('updates survive a mesh split boundary', () {

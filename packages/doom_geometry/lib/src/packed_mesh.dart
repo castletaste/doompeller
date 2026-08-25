@@ -130,8 +130,9 @@ class PackedMesh {
   /// update paths; no mesh rebuild, no reallocation.
   void setVertexHeight(int vertex, double height) {
     vertices[vertex * DoomVertexAbi.floatsPerVertex +
-        DoomVertexAbi.positionOffset +
-        1] = height;
+            DoomVertexAbi.positionOffset +
+            1] =
+        height;
   }
 
   double vertexHeight(int vertex) =>
@@ -143,8 +144,9 @@ class PackedMesh {
   /// keeps its texture pinned the way vanilla pegging says it should.
   void setVertexV(int vertex, double v) {
     vertices[vertex * DoomVertexAbi.floatsPerVertex +
-        DoomVertexAbi.texCoordOffset +
-        1] = v;
+            DoomVertexAbi.texCoordOffset +
+            1] =
+        v;
   }
 
   double vertexV(int vertex) =>
@@ -155,7 +157,8 @@ class PackedMesh {
   /// Rewrites the light level of one vertex, for light-changing sectors.
   void setVertexLight(int vertex, double light) {
     vertices[vertex * DoomVertexAbi.floatsPerVertex +
-        DoomVertexAbi.colorOffset] = light;
+            DoomVertexAbi.colorOffset] =
+        light;
   }
 }
 
@@ -251,12 +254,14 @@ class WallBandRef {
     required this.upperUnpegged,
     required this.textureHeight,
     required this.yOffset,
+    required this.rawYOffset,
+    required this.nearCeilingAnchor,
     required this.atlasV0,
     required this.atlasV1,
     required this.baseBottom,
     required this.baseTop,
-  })  : _bottom = baseBottom,
-        _top = baseTop;
+  }) : _bottom = baseBottom,
+       _top = baseTop;
 
   final int linedef;
   final int sidedef;
@@ -282,6 +287,12 @@ class WallBandRef {
   /// Sidedef vertical offset in texels.
   final double yOffset;
 
+  /// Original sidedef row offset, before any band-specific pegging.
+  final double rawYOffset;
+
+  /// Near ceiling at compile time, used when no runtime value is supplied.
+  final double nearCeilingAnchor;
+
   /// Atlas sub-rect this band samples, in normalised page coordinates.
   final double atlasV0;
   final double atlasV1;
@@ -302,40 +313,65 @@ class WallBandRef {
   /// Returns false when the opening has closed, in which case the quad is
   /// collapsed to zero height rather than left stale or removed; the runtime
   /// keeps a stable draw list and the collapsed quad rasterises nothing.
-  bool applyHeights(List<PackedMesh> meshes, double bottom, double top) {
+  bool applyHeights(
+    List<PackedMesh> meshes,
+    double bottom,
+    double top, {
+    double? nearCeiling,
+  }) {
     final double clampedTop = top < bottom ? bottom : top;
-    if (bottom == _bottom && clampedTop == _top) {
-      return clampedTop > bottom;
+    double drawBottom = bottom;
+    double drawTop = clampedTop;
+    double topTexel = rawYOffset;
+    double bottomTexel;
+    final double height = clampedTop - bottom;
+    switch (band) {
+      case WallBandKind.solid:
+        if (lowerUnpegged) {
+          topTexel = rawYOffset + textureHeight - height;
+        }
+        bottomTexel = topTexel + height;
+      case WallBandKind.lower:
+        if (lowerUnpegged) {
+          topTexel =
+              rawYOffset + ((nearCeiling ?? nearCeilingAnchor) - clampedTop);
+        }
+        bottomTexel = topTexel + height;
+      case WallBandKind.upper:
+        if (!upperUnpegged) {
+          topTexel = rawYOffset + textureHeight - height;
+        }
+        bottomTexel = topTexel + height;
+      case WallBandKind.middle:
+        final double unclippedTop = lowerUnpegged
+            ? bottom + textureHeight + rawYOffset
+            : clampedTop + rawYOffset;
+        final double unclippedBottom = unclippedTop - textureHeight;
+        drawTop = unclippedTop < clampedTop ? unclippedTop : clampedTop;
+        drawBottom = unclippedBottom > bottom ? unclippedBottom : bottom;
+        if (drawTop < drawBottom) {
+          drawTop = drawBottom;
+        }
+        topTexel = unclippedTop - drawTop;
+        bottomTexel = unclippedTop - drawBottom;
     }
-    _bottom = bottom;
-    _top = clampedTop;
+    _bottom = drawBottom;
+    _top = drawTop;
     final PackedMesh mesh = meshes[meshIndex];
-    mesh.setVertexHeight(firstVertex, bottom);
-    mesh.setVertexHeight(firstVertex + 1, bottom);
-    mesh.setVertexHeight(firstVertex + 2, clampedTop);
-    mesh.setVertexHeight(firstVertex + 3, clampedTop);
+    mesh.setVertexHeight(firstVertex, drawBottom);
+    mesh.setVertexHeight(firstVertex + 1, drawBottom);
+    mesh.setVertexHeight(firstVertex + 2, drawTop);
+    mesh.setVertexHeight(firstVertex + 3, drawTop);
     if (textureHeight > 0) {
-      final double height = clampedTop - bottom;
-      // Vanilla pegging: normally the texture hangs from the top of the band,
-      // so the top edge is the fixed reference. Unpegged flips the reference to
-      // the bottom, which is what stops a door track from sliding with the door.
-      final double topTexel;
-      final bool pegToBottom =
-          band == WallBandKind.upper ? !upperUnpegged : lowerUnpegged;
-      if (pegToBottom) {
-        topTexel = yOffset - height;
-      } else {
-        topTexel = yOffset;
-      }
-      final double bottomTexel = topTexel + height;
-      final double span = atlasV1 - atlasV0;
-      final double vTop = atlasV0 + (topTexel / textureHeight) * span;
-      final double vBottom = atlasV0 + (bottomTexel / textureHeight) * span;
+      // Texture coordinates stay local. The fragment shader applies atlasV0
+      // and atlasV1 exactly once after repeat/clamp resolution.
+      final double vTop = topTexel / textureHeight;
+      final double vBottom = bottomTexel / textureHeight;
       mesh.setVertexV(firstVertex, vBottom);
       mesh.setVertexV(firstVertex + 1, vBottom);
       mesh.setVertexV(firstVertex + 2, vTop);
       mesh.setVertexV(firstVertex + 3, vTop);
     }
-    return clampedTop > bottom;
+    return drawTop > drawBottom;
   }
 }

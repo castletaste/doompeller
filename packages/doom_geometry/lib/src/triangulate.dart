@@ -77,7 +77,7 @@ class TriangulationResult {
   final Float64List vertices;
 
   /// Triangle list into [vertices], counter-clockwise.
-  final Uint16List indices;
+  final Uint32List indices;
 
   /// Corners snipped for having no usable area.
   final int degenerateCount;
@@ -99,16 +99,53 @@ class TriangulationResult {
       final int a = indices[t] * 2;
       final int b = indices[t + 1] * 2;
       final int c = indices[t + 2] * 2;
-      sum += ((vertices[b] - vertices[a]) * (vertices[c + 1] - vertices[a + 1]) -
-              (vertices[c] - vertices[a]) * (vertices[b + 1] - vertices[a + 1]))
-          .abs();
+      sum +=
+          ((vertices[b] - vertices[a]) * (vertices[c + 1] - vertices[a + 1]) -
+                  (vertices[c] - vertices[a]) *
+                      (vertices[b + 1] - vertices[a + 1]))
+              .abs();
     }
     return sum * 0.5;
   }
 
   static final TriangulationResult empty = TriangulationResult(
     vertices: Float64List(0),
-    indices: Uint16List(0),
+    indices: Uint32List(0),
+    degenerateCount: 0,
+    budgetExhausted: false,
+    unresolvedVertices: 0,
+  );
+}
+
+/// Triangulates a convex repaired boundary without dropping collinear points.
+///
+/// A centre fan gives every boundary edge its own non-degenerate triangle, so
+/// even a rectangle with inserted midpoints on all four sides retains every
+/// repair vertex in the emitted index buffer.
+TriangulationResult triangulateConvexBoundary(Float64List boundary) {
+  final int n = boundary.length ~/ 2;
+  if (n < 3) {
+    return TriangulationResult.empty;
+  }
+  final Float64List vertices = Float64List((n + 1) * 2);
+  vertices.setRange(0, boundary.length, boundary);
+  var centerX = 0.0;
+  var centerY = 0.0;
+  for (var i = 0; i < n; i++) {
+    centerX += boundary[i * 2];
+    centerY += boundary[i * 2 + 1];
+  }
+  vertices[n * 2] = centerX / n;
+  vertices[n * 2 + 1] = centerY / n;
+  final Uint32List indices = Uint32List(n * 3);
+  for (var i = 0; i < n; i++) {
+    indices[i * 3] = n;
+    indices[i * 3 + 1] = i;
+    indices[i * 3 + 2] = (i + 1) % n;
+  }
+  return TriangulationResult(
+    vertices: vertices,
+    indices: indices,
     degenerateCount: 0,
     budgetExhausted: false,
     unresolvedVertices: 0,
@@ -150,6 +187,26 @@ class EarClipper {
     if (outer.length < 3) {
       return TriangulationResult.empty;
     }
+    if (!_isSimpleRing(outer, budget, epsilon)) {
+      return _invalid(outer.length);
+    }
+    for (var i = 0; i < holes.length; i++) {
+      final Loop hole = holes[i];
+      if (!_isSimpleRing(hole, budget, epsilon) ||
+          !outer.containsPoint(hole.x(0), hole.y(0))) {
+        return _invalid(outer.length + hole.length);
+      }
+      for (var j = 0; j < i; j++) {
+        if (_ringsTouchOrCross(hole, holes[j], budget, epsilon) ||
+            hole.containsPoint(holes[j].x(0), holes[j].y(0)) ||
+            holes[j].containsPoint(hole.x(0), hole.y(0))) {
+          return _invalid(outer.length + hole.length + holes[j].length);
+        }
+      }
+      if (_ringsTouchOrCross(outer, hole, budget, epsilon)) {
+        return _invalid(outer.length + hole.length);
+      }
+    }
     // A ring with no net signed area has no orientation to normalise to, so
     // ear clipping cannot even decide which side is "inside". The classic case
     // is a figure-eight, whose two halves cancel exactly. Clipping it would
@@ -158,7 +215,7 @@ class EarClipper {
     if (outer.signedArea2.abs() <= epsilon) {
       return TriangulationResult(
         vertices: Float64List(0),
-        indices: Uint16List(0),
+        indices: Uint32List(0),
         degenerateCount: 0,
         budgetExhausted: false,
         unresolvedVertices: outer.length,
@@ -174,6 +231,109 @@ class EarClipper {
       return TriangulationResult.empty;
     }
     return _clip(budget, epsilon);
+  }
+
+  TriangulationResult _invalid(int unresolved) => TriangulationResult(
+    vertices: Float64List(0),
+    indices: Uint32List(0),
+    degenerateCount: 0,
+    budgetExhausted: false,
+    unresolvedVertices: unresolved,
+  );
+
+  bool _isSimpleRing(Loop ring, CheckBudget budget, double epsilon) {
+    if (ring.length < 3) {
+      return false;
+    }
+    for (var i = 0; i < ring.length; i++) {
+      final int i2 = (i + 1) % ring.length;
+      for (var j = i + 1; j < ring.length; j++) {
+        if (!budget.spend()) {
+          return false;
+        }
+        final int j2 = (j + 1) % ring.length;
+        if (i == j || i2 == j || j2 == i) {
+          continue;
+        }
+        if (_segmentsTouchOrCross(
+          ring.x(i),
+          ring.y(i),
+          ring.x(i2),
+          ring.y(i2),
+          ring.x(j),
+          ring.y(j),
+          ring.x(j2),
+          ring.y(j2),
+          epsilon,
+        )) {
+          return false;
+        }
+      }
+    }
+    return !budget.exhausted;
+  }
+
+  bool _ringsTouchOrCross(Loop a, Loop b, CheckBudget budget, double epsilon) {
+    for (var i = 0; i < a.length; i++) {
+      final int i2 = (i + 1) % a.length;
+      for (var j = 0; j < b.length; j++) {
+        if (!budget.spend()) {
+          return true;
+        }
+        final int j2 = (j + 1) % b.length;
+        if (_segmentsTouchOrCross(
+          a.x(i),
+          a.y(i),
+          a.x(i2),
+          a.y(i2),
+          b.x(j),
+          b.y(j),
+          b.x(j2),
+          b.y(j2),
+          epsilon,
+        )) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static bool _segmentsTouchOrCross(
+    double ax,
+    double ay,
+    double bx,
+    double by,
+    double cx,
+    double cy,
+    double dx,
+    double dy,
+    double epsilon,
+  ) {
+    final double d1 = _cross(ax, ay, bx, by, cx, cy);
+    final double d2 = _cross(ax, ay, bx, by, dx, dy);
+    final double d3 = _cross(cx, cy, dx, dy, ax, ay);
+    final double d4 = _cross(cx, cy, dx, dy, bx, by);
+    if (((d1 > epsilon && d2 < -epsilon) || (d1 < -epsilon && d2 > epsilon)) &&
+        ((d3 > epsilon && d4 < -epsilon) || (d3 < -epsilon && d4 > epsilon))) {
+      return true;
+    }
+    bool onSegment(
+      double px,
+      double py,
+      double x1,
+      double y1,
+      double x2,
+      double y2,
+    ) =>
+        px >= (x1 < x2 ? x1 : x2) - epsilon &&
+        px <= (x1 > x2 ? x1 : x2) + epsilon &&
+        py >= (y1 < y2 ? y1 : y2) - epsilon &&
+        py <= (y1 > y2 ? y1 : y2) + epsilon;
+    return (d1.abs() <= epsilon && onSegment(cx, cy, ax, ay, bx, by)) ||
+        (d2.abs() <= epsilon && onSegment(dx, dy, ax, ay, bx, by)) ||
+        (d3.abs() <= epsilon && onSegment(ax, ay, cx, cy, dx, dy)) ||
+        (d4.abs() <= epsilon && onSegment(bx, by, cx, cy, dx, dy));
   }
 
   /// Joins each hole to the outer ring with a zero-width bridge.
@@ -388,8 +548,7 @@ class EarClipper {
     double by,
     double px,
     double py,
-  ) =>
-      (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+  ) => (bx - ax) * (py - ay) - (by - ay) * (px - ax);
 
   TriangulationResult _clip(CheckBudget budget, double epsilon) {
     final int n = _work.length >> 1;
@@ -577,7 +736,7 @@ class EarClipper {
     for (var i = 0; i < floats; i++) {
       verts[i] = _work[i];
     }
-    final Uint16List idx = Uint16List(_out.length);
+    final Uint32List idx = Uint32List(_out.length);
     for (var i = 0; i < _out.length; i++) {
       idx[i] = _out[i];
     }

@@ -48,6 +48,13 @@ class GeometryValidator {
     if ((bspArea - loopArea).abs() > tolerance) {
       issues.add(GeometryIssue.areaMismatch);
     }
+    if (bsp.triangleCount > 0 &&
+        loop.triangleCount > 0 &&
+        !_boundariesMatch(bsp, loop, budget)) {
+      // Reuse areaMismatch as the covered-shape mismatch issue. Equal area is
+      // insufficient when a wedge is lost on one side and gained on another.
+      issues.add(GeometryIssue.areaMismatch);
+    }
 
     final int degenerate = _countDegenerate(bsp);
     if (degenerate > 0) {
@@ -108,9 +115,94 @@ class GeometryValidator {
 
   double _areaTolerance(double loopArea) {
     final double relative = loopArea * options.areaToleranceFraction;
-    return relative > options.areaToleranceFloor
-        ? relative
-        : options.areaToleranceFloor;
+    final double latticeSlack = 4.0 / options.weldGrid;
+    final double absolute = options.areaToleranceFloor > latticeSlack
+        ? options.areaToleranceFloor
+        : latticeSlack;
+    return relative > absolute ? relative : absolute;
+  }
+
+  bool _boundariesMatch(
+    SectorMesh2D first,
+    SectorMesh2D second,
+    CheckBudget budget,
+  ) {
+    final List<_BoundarySegment> a = _boundarySegments(first);
+    final List<_BoundarySegment> b = _boundarySegments(second);
+    return _segmentsCoveredBy(a, b, budget) &&
+        _segmentsCoveredBy(b, a, budget);
+  }
+
+  List<_BoundarySegment> _boundarySegments(SectorMesh2D mesh) {
+    final Map<(int, int), _BoundarySegment> segments =
+        <(int, int), _BoundarySegment>{};
+    final Map<(int, int), int> counts = <(int, int), int>{};
+    for (var t = 0; t < mesh.indices.length; t += 3) {
+      for (var e = 0; e < 3; e++) {
+        final int ai = mesh.indices[t + e] * 2;
+        final int bi = mesh.indices[t + (e + 1) % 3] * 2;
+        final int ak = _pointKey(mesh.xy[ai], mesh.xy[ai + 1]);
+        final int bk = _pointKey(mesh.xy[bi], mesh.xy[bi + 1]);
+        final (int, int) key = ak < bk ? (ak, bk) : (bk, ak);
+        counts[key] = (counts[key] ?? 0) + 1;
+        segments.putIfAbsent(
+          key,
+          () => _BoundarySegment(
+            mesh.xy[ai],
+            mesh.xy[ai + 1],
+            mesh.xy[bi],
+            mesh.xy[bi + 1],
+          ),
+        );
+      }
+    }
+    return <_BoundarySegment>[
+      for (final MapEntry<(int, int), _BoundarySegment> entry
+          in segments.entries)
+        if (counts[entry.key] == 1) entry.value,
+    ];
+  }
+
+  bool _segmentsCoveredBy(
+    List<_BoundarySegment> source,
+    List<_BoundarySegment> target,
+    CheckBudget budget,
+  ) {
+    final double tolerance = 2.0 / options.weldGrid;
+    final double toleranceSq = tolerance * tolerance;
+    final Float64List scratch = Float64List(1);
+    for (final _BoundarySegment segment in source) {
+      final List<(double, double)> probes = <(double, double)>[
+        (segment.ax, segment.ay),
+        ((segment.ax + segment.bx) * 0.5, (segment.ay + segment.by) * 0.5),
+        (segment.bx, segment.by),
+      ];
+      for (final (double, double) probe in probes) {
+        var covered = false;
+        for (final _BoundarySegment candidate in target) {
+          if (!budget.spend()) {
+            return false;
+          }
+          if (distanceToSegmentSquared(
+                probe.$1,
+                probe.$2,
+                candidate.ax,
+                candidate.ay,
+                candidate.bx,
+                candidate.by,
+                scratch,
+              ) <=
+              toleranceSq) {
+            covered = true;
+            break;
+          }
+        }
+        if (!covered) {
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   int _countDegenerate(SectorMesh2D mesh) {
@@ -122,7 +214,8 @@ class GeometryValidator {
       final int a = idx[t] * 2;
       final int b = idx[t + 1] * 2;
       final int c = idx[t + 2] * 2;
-      final double cross = (xy[b] - xy[a]) * (xy[c + 1] - xy[a + 1]) -
+      final double cross =
+          (xy[b] - xy[a]) * (xy[c + 1] - xy[a + 1]) -
           (xy[c] - xy[a]) * (xy[b + 1] - xy[a + 1]);
       if (cross.abs() <= epsSq) {
         count++;
@@ -257,8 +350,15 @@ class GeometryValidator {
             vy > (ay > by ? ay : by) + eps) {
           continue;
         }
-        final double distSq =
-            distanceToSegmentSquared(vx, vy, ax, ay, bx, by, scratch);
+        final double distSq = distanceToSegmentSquared(
+          vx,
+          vy,
+          ax,
+          ay,
+          bx,
+          by,
+          scratch,
+        );
         final double t = scratch[0];
         if (distSq <= epsSq && t > 0 && t < 1) {
           count++;
@@ -272,8 +372,8 @@ class GeometryValidator {
   ///
   /// Pairs are narrowed by a uniform grid keyed on triangle bounding boxes, so
   /// this is near-linear on real maps while still charging the budget for the
-  /// pathological case. Overlap is decided by testing centroids, which catches
-  /// full and partial containment without needing exact polygon intersection.
+  /// pathological case. Overlap detects containment and proper edge crossings;
+  /// shared boundary edges and vertices alone are not overlaps.
   int _countOverlaps(SectorMesh2D mesh, CheckBudget budget) {
     final Uint32List idx = mesh.indices;
     final Float64List xy = mesh.xy;
@@ -330,20 +430,49 @@ class GeometryValidator {
     return overlaps;
   }
 
-  bool _trianglesOverlap(
-    Float64List xy,
-    Uint32List idx,
-    int ti,
-    int tj,
-  ) {
-    // Centroid-in-other is a conservative proxy: two triangles that merely
-    // share an edge or a vertex never contain each other's centroid, while any
-    // real area overlap of a convex pair does for at least one of the six
-    // centroid/sub-centroid probes below.
+  bool _trianglesOverlap(Float64List xy, Uint32List idx, int ti, int tj) {
     if (_centroidInside(xy, idx, ti, tj) || _centroidInside(xy, idx, tj, ti)) {
       return true;
     }
+    for (var ei = 0; ei < 3; ei++) {
+      final int ia = idx[ti * 3 + ei] * 2;
+      final int ib = idx[ti * 3 + (ei + 1) % 3] * 2;
+      for (var ej = 0; ej < 3; ej++) {
+        final int ja = idx[tj * 3 + ej] * 2;
+        final int jb = idx[tj * 3 + (ej + 1) % 3] * 2;
+        if (_segmentsProperlyCross(
+          xy[ia],
+          xy[ia + 1],
+          xy[ib],
+          xy[ib + 1],
+          xy[ja],
+          xy[ja + 1],
+          xy[jb],
+          xy[jb + 1],
+        )) {
+          return true;
+        }
+      }
+    }
     return false;
+  }
+
+  static bool _segmentsProperlyCross(
+    double ax,
+    double ay,
+    double bx,
+    double by,
+    double cx,
+    double cy,
+    double dx,
+    double dy,
+  ) {
+    final double d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    final double d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+    final double d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+    final double d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
   }
 
   bool _centroidInside(Float64List xy, Uint32List idx, int inner, int outer) {
@@ -425,4 +554,13 @@ class _EdgeAudit {
   final int unmatched;
   final List<int> boundaryFrom;
   final List<int> boundaryTo;
+}
+
+class _BoundarySegment {
+  const _BoundarySegment(this.ax, this.ay, this.bx, this.by);
+
+  final double ax;
+  final double ay;
+  final double bx;
+  final double by;
 }

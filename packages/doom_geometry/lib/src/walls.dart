@@ -69,6 +69,8 @@ class WallQuad {
     required this.uLeft,
     required this.uRight,
     required this.yOffset,
+    required this.rawYOffset,
+    required this.nearCeiling,
     required this.lowerUnpegged,
     required this.upperUnpegged,
     required this.lightLevel,
@@ -104,6 +106,12 @@ class WallQuad {
 
   /// Vertical texel coordinate at the TOP of the band.
   final double yOffset;
+
+  /// Raw sidedef row offset, before band-specific pegging.
+  final double rawYOffset;
+
+  /// Near-sector ceiling used by lower-unpegged anchoring.
+  final double nearCeiling;
 
   final bool lowerUnpegged;
   final bool upperUnpegged;
@@ -164,8 +172,9 @@ class WallBuilder {
       final double ay = a.y.toDouble();
       final double bx = b.x.toDouble();
       final double by = b.y.toDouble();
-      final double length =
-          math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+      final double length = math.sqrt(
+        (bx - ax) * (bx - ax) + (by - ay) * (by - ay),
+      );
       if (length <= 0) {
         degenerate++;
         continue;
@@ -303,6 +312,8 @@ class WallBuilder {
         uLeft: side.xOffset.toDouble(),
         uRight: side.xOffset + length,
         yOffset: top,
+        rawYOffset: side.yOffset.toDouble(),
+        nearCeiling: ceiling,
         lowerUnpegged: line.lowerUnpegged,
         upperUnpegged: line.upperUnpegged,
         lightLevel: _light(sector, contrast),
@@ -340,7 +351,9 @@ class WallBuilder {
     var skySkipped = 0;
 
     // Lower band: the far floor stands above the near one.
-    if (farFloor > nearFloor && near.lowerTexture != kNoTextureName) {
+    final bool mayMove = line.special != 0 || line.tag != 0;
+    if ((farFloor > nearFloor || mayMove) &&
+        near.lowerTexture != kNoTextureName) {
       final _TexSize size = _sizeOf(near.lowerTexture, missing);
       // Pegged to the top of the step; lower-unpegged anchors at the near
       // ceiling instead, so a rising lift's texture stays put.
@@ -360,13 +373,15 @@ class WallBuilder {
           x2: bx,
           y2: by,
           bottom: nearFloor,
-          top: farFloor,
+          top: farFloor > nearFloor ? farFloor : nearFloor,
           texture: near.lowerTexture,
           textureWidth: size.width,
           textureHeight: size.height,
           uLeft: near.xOffset.toDouble(),
           uRight: near.xOffset + length,
           yOffset: top,
+          rawYOffset: near.yOffset.toDouble(),
+          nearCeiling: nearCeil,
           lowerUnpegged: line.lowerUnpegged,
           upperUnpegged: line.upperUnpegged,
           lightLevel: light,
@@ -375,11 +390,13 @@ class WallBuilder {
     }
 
     // Upper band: the far ceiling hangs below the near one.
-    if (farCeil < nearCeil) {
+    if (farCeil < nearCeil || mayMove) {
       if (nearSector.ceilingIsSky && farSector.ceilingIsSky) {
         // Both sides open to sky: vanilla draws nothing here so the sky runs
         // continuously across the boundary.
-        skySkipped++;
+        if (farCeil < nearCeil) {
+          skySkipped++;
+        }
       } else if (near.upperTexture != kNoTextureName) {
         final _TexSize size = _sizeOf(near.upperTexture, missing);
         // Hangs from the far ceiling; upper-unpegged anchors at the near
@@ -399,7 +416,7 @@ class WallBuilder {
             y1: ay,
             x2: bx,
             y2: by,
-            bottom: farCeil,
+            bottom: farCeil < nearCeil ? farCeil : nearCeil,
             top: nearCeil,
             texture: near.upperTexture,
             textureWidth: size.width,
@@ -407,6 +424,8 @@ class WallBuilder {
             uLeft: near.xOffset.toDouble(),
             uRight: near.xOffset + length,
             yOffset: top,
+            rawYOffset: near.yOffset.toDouble(),
+            nearCeiling: nearCeil,
             lowerUnpegged: line.lowerUnpegged,
             upperUnpegged: line.upperUnpegged,
             lightLevel: light,
@@ -420,7 +439,7 @@ class WallBuilder {
       final _TexSize size = _sizeOf(near.middleTexture, missing);
       final double openBottom = nearFloor > farFloor ? nearFloor : farFloor;
       final double openTop = nearCeil < farCeil ? nearCeil : farCeil;
-      if (openTop > openBottom && size.height > 0) {
+      if ((openTop > openBottom || mayMove) && size.height > 0) {
         // A midtexture does not tile vertically in vanilla: it is drawn once,
         // clipped to the opening. Lower-unpegged hangs it from the bottom of
         // the opening upwards, otherwise from the top downwards.
@@ -429,37 +448,38 @@ class WallBuilder {
             : openTop + near.yOffset;
         final double drawBottom = drawTop - size.height;
         final double clampedTop = drawTop < openTop ? drawTop : openTop;
-        final double clampedBottom =
-            drawBottom > openBottom ? drawBottom : openBottom;
-        if (clampedTop > clampedBottom) {
-          out.add(
-            WallQuad(
-              linedef: index,
-              sidedef: nearIndex,
-              band: WallBandKind.middle,
-              kind: SurfaceKind.masked,
-              frontSector: near.sector,
-              backSector: far.sector,
-              x1: ax,
-              y1: ay,
-              x2: bx,
-              y2: by,
-              bottom: clampedBottom,
-              top: clampedTop,
-              texture: near.middleTexture,
-              textureWidth: size.width,
-              textureHeight: size.height,
-              uLeft: near.xOffset.toDouble(),
-              uRight: near.xOffset + length,
-              // Texel row at the clamped top, accounting for any part of the
-              // texture clipped away above.
-              yOffset: drawTop - clampedTop,
-              lowerUnpegged: line.lowerUnpegged,
-              upperUnpegged: line.upperUnpegged,
-              lightLevel: light,
-            ),
-          );
-        }
+        final double clampedBottom = drawBottom > openBottom
+            ? drawBottom
+            : openBottom;
+        out.add(
+          WallQuad(
+            linedef: index,
+            sidedef: nearIndex,
+            band: WallBandKind.middle,
+            kind: SurfaceKind.masked,
+            frontSector: near.sector,
+            backSector: far.sector,
+            x1: ax,
+            y1: ay,
+            x2: bx,
+            y2: by,
+            bottom: clampedBottom,
+            top: clampedTop,
+            texture: near.middleTexture,
+            textureWidth: size.width,
+            textureHeight: size.height,
+            uLeft: near.xOffset.toDouble(),
+            uRight: near.xOffset + length,
+            // Texel row at the clamped top, accounting for any part of the
+            // texture clipped away above.
+            yOffset: drawTop - clampedTop,
+            rawYOffset: near.yOffset.toDouble(),
+            nearCeiling: nearCeil,
+            lowerUnpegged: line.lowerUnpegged,
+            upperUnpegged: line.upperUnpegged,
+            lightLevel: light,
+          ),
+        );
       }
     }
     return skySkipped;
@@ -514,4 +534,3 @@ class _TexSize {
   final double width;
   final double height;
 }
-

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:test/test.dart';
 
@@ -81,6 +83,35 @@ void main() {
     }
   });
 
+  test('packed local UV is mapped through atlas rect exactly once', () {
+    final MapBuilder b = MapBuilder('LOCALUV');
+    final int s = b.sector();
+    b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s);
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(),
+      testTextures(),
+    );
+    final VertexRange range = level.floorPlanes.single.ranges.single;
+    final Float32List vertices = level.meshes[range.meshIndex].vertices;
+    var vertex = range.firstVertex;
+    while (vertex < range.firstVertex + range.vertexCount &&
+        vertices[vertex * DoomVertexAbi.floatsPerVertex +
+                DoomVertexAbi.texCoordOffset]
+            .abs() >
+            1e-9) {
+      vertex++;
+    }
+    expect(vertex, lessThan(range.firstVertex + range.vertexCount));
+    final int o = vertex * DoomVertexAbi.floatsPerVertex;
+    final double localU = vertices[o + DoomVertexAbi.texCoordOffset];
+    final double left = vertices[o + DoomVertexAbi.atlasRectOffset];
+    final double right = vertices[o + DoomVertexAbi.atlasRectOffset + 2];
+    final double resolved =
+        left + (right - left) * (localU - localU.floorToDouble());
+    expect(localU, 0);
+    expect(resolved, closeTo(left, 1e-9));
+  });
+
   test('a sky ceiling is emitted full bright', () {
     final MapBuilder b = MapBuilder('SKY');
     final int s = b.sector(ceilingFlat: kSkyFlatName);
@@ -89,10 +120,14 @@ void main() {
       b.build(),
       testTextures(),
     );
-    final PackedMesh sky =
-        level.meshes.firstWhere((PackedMesh m) => m.kind == SurfaceKind.sky);
-    expect(sky.vertices[16], 1.0,
-        reason: 'vanilla never darkens the sky with distance');
+    final PackedMesh sky = level.meshes.firstWhere(
+      (PackedMesh m) => m.kind == SurfaceKind.sky,
+    );
+    expect(
+      sky.vertices[16],
+      1.0,
+      reason: 'vanilla never darkens the sky with distance',
+    );
   });
 
   test('floors face up and ceilings face down', () {
@@ -107,16 +142,18 @@ void main() {
     final SectorPlaneRef floor = level.floorPlanes.single;
     final VertexRange fr = floor.ranges.single;
     expect(
-      level.meshes[fr.meshIndex]
-          .vertices[fr.firstVertex * DoomVertexAbi.floatsPerVertex + 10],
+      level.meshes[fr.meshIndex].vertices[fr.firstVertex *
+              DoomVertexAbi.floatsPerVertex +
+          10],
       1.0,
     );
 
     final SectorPlaneRef ceiling = level.ceilingPlanes.single;
     final VertexRange cr = ceiling.ranges.single;
     expect(
-      level.meshes[cr.meshIndex]
-          .vertices[cr.firstVertex * DoomVertexAbi.floatsPerVertex + 10],
+      level.meshes[cr.meshIndex].vertices[cr.firstVertex *
+              DoomVertexAbi.floatsPerVertex +
+          10],
       -1.0,
     );
   });
@@ -129,4 +166,3 @@ void main() {
     expect(DoomVertexAbi.worldZ(30), -30);
   });
 }
-

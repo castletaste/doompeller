@@ -378,4 +378,3 @@ class _PendingImage {
   final int leftOffset;
   final int topOffset;
 }
-

@@ -6,8 +6,7 @@
 /// updated in place at runtime.
 library;
 
-export 'src/atlas.dart'
-    show AtlasBuilder, AtlasEntry, AtlasPage, IndexedAtlas;
+export 'src/atlas.dart' show AtlasBuilder, AtlasEntry, AtlasPage, IndexedAtlas;
 export 'src/bsp_regions.dart' show BspRegion, BspRegionBuilder, BspRegionSet;
 export 'src/compiler.dart' show CompiledLevel, DoomGeometryCompiler;
 export 'src/geometry_options.dart' show GeometryOptions;
@@ -61,5 +60,10 @@ export 'src/wad_types.dart'
         kNoTextureName,
         kSkyFlatName;
 export 'src/triangulate.dart'
-    show CheckBudget, EarClipper, Loop, TriangulationResult;
+    show
+        CheckBudget,
+        EarClipper,
+        Loop,
+        TriangulationResult,
+        triangulateConvexBoundary;
 export 'src/walls.dart' show WallBuilder, WallQuad, WallSet;

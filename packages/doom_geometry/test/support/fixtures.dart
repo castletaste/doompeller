@@ -77,4 +77,3 @@ double bspAreaOfSector(BspRegionSet regions, int sector) {
   }
   return total;
 }
-

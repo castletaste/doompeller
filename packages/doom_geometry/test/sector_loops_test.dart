@@ -217,4 +217,3 @@ MapData _room(List<int> points) {
   b.solidLoop(points, s);
   return b.build(buildNodes: false);
 }
-

@@ -24,12 +24,9 @@ void main() {
     });
 
     test('two-sided step makes a lower band on the low side only', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 32,
-        lowCeil: 128,
-        highCeil: 128,
-      ));
+      final WallSet walls = _wallsOf(
+        _twoRooms(lowFloor: 0, highFloor: 32, lowCeil: 128, highCeil: 128),
+      );
       final List<WallQuad> lowers = walls.quads
           .where((WallQuad q) => q.band == WallBandKind.lower)
           .toList();
@@ -43,12 +40,9 @@ void main() {
     });
 
     test('two-sided ceiling drop makes an upper band', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-      ));
+      final WallSet walls = _wallsOf(
+        _twoRooms(lowFloor: 0, highFloor: 0, lowCeil: 128, highCeil: 96),
+      );
       final List<WallQuad> uppers = walls.quads
           .where((WallQuad q) => q.band == WallBandKind.upper)
           .toList();
@@ -58,13 +52,15 @@ void main() {
     });
 
     test('upper between two sky ceilings is not drawn', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-        skyBoth: true,
-      ));
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 0,
+          lowCeil: 128,
+          highCeil: 96,
+          skyBoth: true,
+        ),
+      );
       expect(
         walls.quads.where((WallQuad q) => q.band == WallBandKind.upper),
         isEmpty,
@@ -74,13 +70,15 @@ void main() {
     });
 
     test('upper between sky and non-sky IS drawn', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-        skyFront: true,
-      ));
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 0,
+          lowCeil: 128,
+          highCeil: 96,
+          skyFront: true,
+        ),
+      );
       expect(
         walls.quads.where((WallQuad q) => q.band == WallBandKind.upper).length,
         1,
@@ -89,13 +87,15 @@ void main() {
     });
 
     test('middle texture on a two-sided line is masked', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 128,
-        middle: 'MIDGRATE',
-      ));
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 0,
+          lowCeil: 128,
+          highCeil: 128,
+          middle: 'MIDGRATE',
+        ),
+      );
       final List<WallQuad> mids = walls.quads
           .where((WallQuad q) => q.band == WallBandKind.middle)
           .toList();
@@ -119,8 +119,7 @@ void main() {
       expect(walls.quads.first.yOffset, 8);
     });
 
-    test('one-sided lower-unpegged anchors the texture bottom at the floor',
-        () {
+    test('one-sided lower-unpegged anchors the texture bottom at the floor', () {
       // Room is 128 tall, STARTAN3 is 128 tall, so an exact fit means the
       // unpegged anchor lands on the same row as the pegged one.
       final WallSet walls = _wallsOf(
@@ -137,69 +136,74 @@ void main() {
     });
 
     test('lower band pegged normally starts at the top of the step', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 32,
-        lowCeil: 128,
-        highCeil: 128,
-      ));
-      final WallQuad lower = walls.quads
-          .firstWhere((WallQuad q) => q.band == WallBandKind.lower);
+      final WallSet walls = _wallsOf(
+        _twoRooms(lowFloor: 0, highFloor: 32, lowCeil: 128, highCeil: 128),
+      );
+      final WallQuad lower = walls.quads.firstWhere(
+        (WallQuad q) => q.band == WallBandKind.lower,
+      );
       expect(lower.yOffset, 0);
     });
 
     test('lower band lower-unpegged anchors at the near ceiling', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 32,
-        lowCeil: 128,
-        highCeil: 128,
-        flags: LinedefFlags.lowerUnpegged,
-      ));
-      final WallQuad lower = walls.quads
-          .firstWhere((WallQuad q) => q.band == WallBandKind.lower);
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 32,
+          lowCeil: 128,
+          highCeil: 128,
+          flags: LinedefFlags.lowerUnpegged,
+        ),
+      );
+      final WallQuad lower = walls.quads.firstWhere(
+        (WallQuad q) => q.band == WallBandKind.lower,
+      );
       // Texels counted from the near ceiling (128) down to the step top (32).
       expect(lower.yOffset, 128 - 32);
     });
 
     test('upper band pegged normally hangs from the far ceiling', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-      ));
-      final WallQuad upper = walls.quads
-          .firstWhere((WallQuad q) => q.band == WallBandKind.upper);
+      final WallSet walls = _wallsOf(
+        _twoRooms(lowFloor: 0, highFloor: 0, lowCeil: 128, highCeil: 96),
+      );
+      final WallQuad upper = walls.quads.firstWhere(
+        (WallQuad q) => q.band == WallBandKind.upper,
+      );
       // The band is 32 tall and STARTAN3 is 128, so the visible slice is the
       // texture's bottom 32 rows.
       expect(upper.yOffset, 128 - 32);
     });
 
     test('upper band upper-unpegged draws down from the near ceiling', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-        flags: LinedefFlags.upperUnpegged,
-      ));
-      final WallQuad upper = walls.quads
-          .firstWhere((WallQuad q) => q.band == WallBandKind.upper);
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 0,
+          lowCeil: 128,
+          highCeil: 96,
+          flags: LinedefFlags.upperUnpegged,
+        ),
+      );
+      final WallQuad upper = walls.quads.firstWhere(
+        (WallQuad q) => q.band == WallBandKind.upper,
+      );
       expect(upper.yOffset, 0, reason: 'top row of the texture at the top');
     });
 
     test('sidedef y offset adds on top of the pegging rule', () {
-      final WallSet walls = _wallsOf(_twoRooms(
-        lowFloor: 0,
-        highFloor: 0,
-        lowCeil: 128,
-        highCeil: 96,
-        flags: LinedefFlags.upperUnpegged,
-        yOffset: 12,
-      ));
-      final WallQuad upper = walls.quads
-          .firstWhere((WallQuad q) => q.band == WallBandKind.upper);
+      final WallSet walls = _wallsOf(
+        _twoRooms(
+          lowFloor: 0,
+          highFloor: 0,
+          lowCeil: 128,
+          highCeil: 96,
+          flags: LinedefFlags.upperUnpegged,
+          yOffset: 12,
+        ),
+      );
+      final WallQuad upper = walls.quads.firstWhere(
+        (WallQuad q) => q.band == WallBandKind.upper,
+      );
       expect(upper.yOffset, 12);
     });
   });
@@ -209,11 +213,14 @@ void main() {
       final WallSet walls = _wallsOf(_simpleRoom());
       // The room is axis-aligned, so every wall is purely horizontal or
       // vertical and the two groups must differ.
-      final Set<double> lights =
-          walls.quads.map((WallQuad q) => q.lightLevel).toSet();
+      final Set<double> lights = walls.quads
+          .map((WallQuad q) => q.lightLevel)
+          .toSet();
       expect(lights.length, 2);
-      expect(lights.reduce((double a, double b) => a > b ? a : b),
-          greaterThan(lights.reduce((double a, double b) => a < b ? a : b)));
+      expect(
+        lights.reduce((double a, double b) => a > b ? a : b),
+        greaterThan(lights.reduce((double a, double b) => a < b ? a : b)),
+      );
     });
 
     test('can be disabled', () {
@@ -223,6 +230,36 @@ void main() {
       );
       expect(walls.quads.map((WallQuad q) => q.lightLevel).toSet().length, 1);
     });
+  });
+
+  test('packed wall normals agree with triangle winding', () {
+    final MapData map = _simpleRoom();
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      map,
+      testTextures(),
+    );
+    final WallBandRef band = level.wallBands.first;
+    final PackedMesh mesh = level.meshes[band.meshIndex];
+    final int a = band.firstVertex;
+    final int b = band.firstVertex + 1;
+    final int c = band.firstVertex + 2;
+    double p(int vertex, int component) => mesh.vertices[
+        vertex * DoomVertexAbi.floatsPerVertex +
+            DoomVertexAbi.positionOffset + component];
+    final double abx = p(b, 0) - p(a, 0);
+    final double aby = p(b, 1) - p(a, 1);
+    final double abz = p(b, 2) - p(a, 2);
+    final double acx = p(c, 0) - p(a, 0);
+    final double acy = p(c, 1) - p(a, 1);
+    final double acz = p(c, 2) - p(a, 2);
+    final double windingX = aby * acz - abz * acy;
+    final double windingZ = abx * acy - aby * acx;
+    final int o = a * DoomVertexAbi.floatsPerVertex +
+        DoomVertexAbi.normalOffset;
+    expect(
+      windingX * mesh.vertices[o] + windingZ * mesh.vertices[o + 2],
+      greaterThan(0),
+    );
   });
 
   test('missing textures are reported, not fatal', () {
@@ -238,8 +275,7 @@ void main() {
 WallSet _wallsOf(
   MapData map, {
   GeometryOptions options = GeometryOptions.defaults,
-}) =>
-    WallBuilder(map, testTextures(), options).build();
+}) => WallBuilder(map, testTextures(), options).build();
 
 MapData _simpleRoom({
   int xOffset = 0,
@@ -301,4 +337,3 @@ MapData _twoRooms({
   b.line(v1: v1, v2: v2, right: frontSide, left: backSide, flags: flags);
   return b.build(buildNodes: false);
 }
-

@@ -47,4 +47,3 @@ MapTextureSource _textures() {
     },
   );
 }
-

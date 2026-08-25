@@ -101,7 +101,7 @@ int _checksFor(MapData map) =>
         .report
         .intersectionChecks;
 
-/// A grid of rooms joined by two-sided doorways.
+/// A grid of synthetic rooms used only as a scale fixture.
 ///
 /// Rooms alternate floor and ceiling heights so upper and lower wall bands both
 /// exist, and every room is concave so the node builder has real work to do.
@@ -145,4 +145,3 @@ int _isqrt(int value) {
   }
   return root;
 }
-

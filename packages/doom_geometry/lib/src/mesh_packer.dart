@@ -34,12 +34,12 @@ class MeshPacker {
     return fresh;
   }
 
-  /// Appends a triangle fan-free indexed primitive.
+  /// Appends indexed triangle soup, splitting it before 16-bit narrowing.
   ///
   /// [positions] is x, y, z triples; [uvs] u, v pairs; [normal] is shared by
   /// every vertex; [indices] are local to this primitive. Returns the range the
   /// vertices landed in so callers can build update handles.
-  VertexRange addPrimitive({
+  List<VertexRange> addPrimitive({
     required int page,
     required SurfaceKind kind,
     required Float64List positions,
@@ -56,36 +56,86 @@ class MeshPacker {
     double uvMode = DoomVertexAbi.uvModeRepeat,
     bool fullBright = false,
   }) {
-    final int vertexCount = positions.length ~/ 3;
-    final _Bucket bucket = _bucketFor(page, kind, vertexCount);
-    final int base = bucket.vertexCount;
-    for (var v = 0; v < vertexCount; v++) {
-      bucket.pushVertex(
-        positions[v * 3],
-        positions[v * 3 + 1],
-        positions[v * 3 + 2],
-        uvs[v * 2],
-        uvs[v * 2 + 1],
-        light,
-        normalX,
-        normalY,
-        normalZ,
-        atlasU0,
-        atlasV0,
-        atlasU1,
-        atlasV1,
-        uvMode,
-        fullBright,
+    if (positions.length % 3 != 0 || uvs.length % 2 != 0) {
+      throw ArgumentError('positions and uvs must contain complete vertices');
+    }
+    final int sourceVertexCount = positions.length ~/ 3;
+    if (uvs.length ~/ 2 != sourceVertexCount || indices.length % 3 != 0) {
+      throw ArgumentError('vertex attributes and triangle indices disagree');
+    }
+
+    final List<VertexRange> ranges = <VertexRange>[];
+    final Map<int, int> remap = <int, int>{};
+    final List<int> sourceVertices = <int>[];
+    final List<int> localIndices = <int>[];
+
+    void flush() {
+      if (localIndices.isEmpty) {
+        return;
+      }
+      final _Bucket bucket = _bucketFor(page, kind, sourceVertices.length);
+      final int base = bucket.vertexCount;
+      for (final int source in sourceVertices) {
+        bucket.pushVertex(
+          positions[source * 3],
+          positions[source * 3 + 1],
+          positions[source * 3 + 2],
+          uvs[source * 2],
+          uvs[source * 2 + 1],
+          light,
+          normalX,
+          normalY,
+          normalZ,
+          atlasU0,
+          atlasV0,
+          atlasU1,
+          atlasV1,
+          uvMode,
+          fullBright,
+        );
+      }
+      for (final int index in localIndices) {
+        bucket.pushIndex(base + index);
+      }
+      ranges.add(
+        VertexRange(
+          meshIndex: bucket.index,
+          firstVertex: base,
+          vertexCount: sourceVertices.length,
+        ),
       );
+      remap.clear();
+      sourceVertices.clear();
+      localIndices.clear();
     }
-    for (var i = 0; i < indices.length; i++) {
-      bucket.pushIndex(base + indices[i]);
+
+    for (var t = 0; t < indices.length; t += 3) {
+      var newVertices = 0;
+      for (var corner = 0; corner < 3; corner++) {
+        final int source = indices[t + corner];
+        if (source < 0 || source >= sourceVertexCount) {
+          throw RangeError.range(source, 0, sourceVertexCount - 1, 'index');
+        }
+        if (!remap.containsKey(source)) {
+          newVertices++;
+        }
+      }
+      if (sourceVertices.isNotEmpty &&
+          sourceVertices.length + newVertices >
+              DoomVertexAbi.maxVerticesPerMesh) {
+        flush();
+      }
+      for (var corner = 0; corner < 3; corner++) {
+        final int source = indices[t + corner];
+        final int local = remap.putIfAbsent(source, () {
+          sourceVertices.add(source);
+          return sourceVertices.length - 1;
+        });
+        localIndices.add(local);
+      }
     }
-    return VertexRange(
-      meshIndex: bucket.index,
-      firstVertex: base,
-      vertexCount: vertexCount,
-    );
+    flush();
+    return ranges;
   }
 
   List<PackedMesh> finish() {
@@ -189,8 +239,9 @@ class _Bucket {
   }
 
   PackedMesh freeze() {
-    final Float32List verts =
-        Float32List(vertexCount * DoomVertexAbi.floatsPerVertex);
+    final Float32List verts = Float32List(
+      vertexCount * DoomVertexAbi.floatsPerVertex,
+    );
     verts.setRange(0, verts.length, _vertices);
     final Uint16List idx = Uint16List(indexCount);
     idx.setRange(0, indexCount, _indices);
@@ -209,8 +260,8 @@ class _Bucket {
 ///
 /// Flats are not projected: Doom aligns them to a fixed 64-unit world grid, so
 /// a floor's texture stays put as the floor moves and lines up across every
-/// sector that shares it. So the UV is just the map position over 64, mapped
-/// into the flat's atlas region.
+/// sector that shares it. The shader owns atlas-rect mapping, so this mapper
+/// emits texture-local UV only.
 class FlatUvMapper {
   const FlatUvMapper(this.entry, this.pageSize);
 
@@ -218,15 +269,13 @@ class FlatUvMapper {
   final int pageSize;
 
   double u(double mapX) {
-    final double tile = mapX / kFlatTileSize;
-    return entry.u0(pageSize) + tile * (entry.width / pageSize);
+    return mapX / kFlatTileSize;
   }
 
   double v(double mapY) {
     // Map Y grows north while texture V grows down, so the sign flips here to
     // keep flats reading the same way they do in the original.
-    final double tile = -mapY / kFlatTileSize;
-    return entry.v0(pageSize) + tile * (entry.height / pageSize);
+    return -mapY / kFlatTileSize;
   }
 }
 

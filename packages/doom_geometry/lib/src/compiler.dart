@@ -115,7 +115,7 @@ class CompiledLevel {
           bottom = nearFloor > farFloor ? nearFloor : farFloor;
           top = nearCeil < farCeil ? nearCeil : farCeil;
       }
-      band.applyHeights(meshes, bottom, top);
+      band.applyHeights(meshes, bottom, top, nearCeiling: nearCeil);
       updated++;
     }
     return updated;
@@ -138,8 +138,7 @@ class DoomGeometryCompiler {
     MapData map,
     WadResources res, {
     GeometryOptions options = GeometryOptions.defaults,
-  }) =>
-      _Compiler(map, ResourceTextureSource(res), options).run();
+  }) => _Compiler(map, ResourceTextureSource(res), options).run();
 
   /// Compiles against any [TextureSource].
   ///
@@ -149,8 +148,7 @@ class DoomGeometryCompiler {
     MapData map,
     TextureSource textures, {
     GeometryOptions options = GeometryOptions.defaults,
-  }) =>
-      _Compiler(map, textures, options).run();
+  }) => _Compiler(map, textures, options).run();
 }
 
 class _Compiler {
@@ -164,7 +162,9 @@ class _Compiler {
 
   CompiledLevel run() {
     final Stopwatch clock = Stopwatch()..start();
-    final CheckBudget budget = CheckBudget(options.limits.maxIntersectionChecks);
+    final CheckBudget budget = CheckBudget(
+      options.limits.maxIntersectionChecks,
+    );
     final int sectorCount = map.sectors.length;
 
     // 1. Oracle. Always built when validation or fallback might need it.
@@ -178,9 +178,8 @@ class _Compiler {
     // to be one convex cell legitimately has zero nodes and one subsector. The
     // region builder handles that as the root leaf, so the gate here is just
     // "is there a subsector partition of the level at all".
-    final bool useBsp = options.bspFirst &&
-        map.subsectors.isNotEmpty &&
-        map.segs.isNotEmpty;
+    final bool useBsp =
+        options.bspFirst && map.subsectors.isNotEmpty && map.segs.isNotEmpty;
     final BspRegionSet regions = useBsp
         ? BspRegionBuilder(map, options).build(budget)
         : const BspRegionSet(
@@ -194,8 +193,10 @@ class _Compiler {
           );
 
     // 3. Per-sector meshes from each path, then validate.
-    final List<SectorMesh2D> bspMeshes =
-        List<SectorMesh2D>.filled(sectorCount, SectorMesh2D.empty());
+    final List<SectorMesh2D> bspMeshes = List<SectorMesh2D>.filled(
+      sectorCount,
+      SectorMesh2D.empty(),
+    );
     final Int32List emptyPerSector = Int32List(sectorCount);
     var repairedVertices = 0;
     var repairedRegions = 0;
@@ -206,14 +207,19 @@ class _Compiler {
       // into the long edge keeps the shape and area identical while making both
       // sides agree vertex for vertex, which is what stops a hairline seam from
       // opening between them at raster time.
-      final TJunctionRepairResult repair =
-          repairTJunctions(regions.regions, options, budget);
+      final TJunctionRepairResult repair = repairTJunctions(
+        regions.regions,
+        options,
+        budget,
+      );
       repairedVertices = repair.insertedVertices;
       repairedRegions = repair.repairedRegions;
       _gatherBspMeshes(repair.regions, bspMeshes, emptyPerSector, budget);
     }
-    final List<SectorMesh2D> loopMeshes =
-        List<SectorMesh2D>.filled(sectorCount, SectorMesh2D.empty());
+    final List<SectorMesh2D> loopMeshes = List<SectorMesh2D>.filled(
+      sectorCount,
+      SectorMesh2D.empty(),
+    );
     if (needLoops) {
       for (var s = 0; s < sectorCount; s++) {
         loopMeshes[s] = _loopMesh(loops[s]);
@@ -223,8 +229,10 @@ class _Compiler {
     final GeometryValidator validator = GeometryValidator(options);
     final List<SectorFinding> findings = <SectorFinding>[];
     final List<int> fallbacks = <int>[];
-    final List<SectorMesh2D> chosen =
-        List<SectorMesh2D>.filled(sectorCount, SectorMesh2D.empty());
+    final List<SectorMesh2D> chosen = List<SectorMesh2D>.filled(
+      sectorCount,
+      SectorMesh2D.empty(),
+    );
 
     for (var s = 0; s < sectorCount; s++) {
       if (!useBsp) {
@@ -285,7 +293,8 @@ class _Compiler {
       // genuinely has no area.
       final bool loopHasGeometry = loopMeshes[s].triangleCount > 0;
       final bool bspHasGeometry = bspMeshes[s].triangleCount > 0;
-      final bool fallBack = loopHasGeometry &&
+      final bool fallBack =
+          loopHasGeometry &&
           (validator.shouldFallBack(finding) || !bspHasGeometry);
       chosen[s] = fallBack ? loopMeshes[s] : bspMeshes[s];
       if (fallBack) {
@@ -312,6 +321,17 @@ class _Compiler {
     // 4. Walls.
     final WallSet walls = WallBuilder(map, textures, options).build();
 
+    var triangleEstimate = 0;
+    for (final SectorMesh2D mesh in chosen) {
+      triangleEstimate += mesh.triangleCount * 2; // floor plus ceiling
+    }
+    triangleEstimate += walls.quads.length * 2;
+    DoomLimits.check(
+      triangleEstimate,
+      options.limits.maxTriangles,
+      'maxTriangles',
+    );
+
     // 5. Atlas.
     final AtlasBuilder atlasBuilder = AtlasBuilder(textures, options);
     for (var s = 0; s < sectorCount; s++) {
@@ -323,6 +343,13 @@ class _Compiler {
       atlasBuilder.addWallTexture(walls.quads[i].texture);
     }
     final IndexedAtlas atlas = atlasBuilder.build();
+    if (atlas.pageCount == 0 || atlas.overflowed.isNotEmpty) {
+      throw DoomLimitFailure(
+        'maxAtlasPixels: atlas overflowed for ${atlas.overflowed.join(', ')}',
+        limitName: 'maxAtlasPixels',
+        limit: options.limits.maxAtlasPixels,
+      );
+    }
 
     // 6. Pack.
     final List<SectorPlaneRef> floors = <SectorPlaneRef>[];
@@ -374,10 +401,16 @@ class _Compiler {
     CheckBudget budget,
   ) {
     final int sectorCount = out.length;
-    final List<List<double>> verts =
-        List<List<double>>.generate(sectorCount, (int _) => <double>[], growable: false);
-    final List<List<int>> tris =
-        List<List<int>>.generate(sectorCount, (int _) => <int>[], growable: false);
+    final List<List<double>> verts = List<List<double>>.generate(
+      sectorCount,
+      (int _) => <double>[],
+      growable: false,
+    );
+    final List<List<int>> tris = List<List<int>>.generate(
+      sectorCount,
+      (int _) => <int>[],
+      growable: false,
+    );
 
     for (var r = 0; r < regions.length; r++) {
       final BspRegion region = regions[r];
@@ -389,36 +422,15 @@ class _Compiler {
         emptyPerSector[sector]++;
         continue;
       }
-      // Convex by construction, so a fan is exact and needs no ear clipping.
-      //
-      // Anchor choice is load-bearing, not cosmetic. A fan from A emits
-      // triangles (A, vi, vi+1), and such a triangle is degenerate exactly
-      // when A lies on the line of edge (vi, vi+1) -- which, for a convex
-      // polygon, means A sits on the same straight run as that edge. Dropping
-      // the degenerate triangle then leaves the neighbouring triangle bounded
-      // by a single long edge that skips straight over the vertex T-junction
-      // repair had just inserted, silently re-opening the crack.
-      //
-      // Anchoring where the run lies OPPOSITE the anchor instead makes every
-      // fan triangle real, and the fan's outer chain then reproduces the whole
-      // polygon boundary, inserted vertices included.
-      final int n = region.vertexCount;
+      // Convex by construction. Fan from an inserted centre rather than a
+      // boundary corner: every repaired boundary edge becomes one real
+      // triangle, even when all four sides contain collinear inserted points.
       final int base = verts[sector].length ~/ 2;
-      for (var i = 0; i < n; i++) {
-        verts[sector].add(region.xy[i * 2]);
-        verts[sector].add(region.xy[i * 2 + 1]);
-      }
-      final int anchor = _fanAnchor(region.xy, n, options.epsilon);
-      for (var k = 1; k + 1 < n; k++) {
-        final int i = (anchor + k) % n;
-        final int j = (anchor + k + 1) % n;
-        if (_isCollinear(region.xy, anchor, i, j, options.epsilon)) {
-          continue;
-        }
-        tris[sector]
-          ..add(base + anchor)
-          ..add(base + i)
-          ..add(base + j);
+      final TriangulationResult triangulation =
+          triangulateConvexBoundary(region.xy);
+      verts[sector].addAll(triangulation.vertices);
+      for (final int index in triangulation.indices) {
+        tris[sector].add(base + index);
       }
       budget.spend();
     }
@@ -428,50 +440,6 @@ class _Compiler {
         Uint32List.fromList(tris[s]),
       );
     }
-  }
-
-  /// Picks a fan anchor that yields no degenerate triangles.
-  ///
-  /// Prefers a vertex whose own corner and both neighbouring corners are all
-  /// genuine, which guarantees neither of the anchor's two edges is part of a
-  /// subdivided straight run and therefore that no fan triangle collapses.
-  /// Falls back to any genuine corner, then to 0 for a fully collinear polygon
-  /// (which has no area and emits nothing anyway).
-  static int _fanAnchor(Float64List xy, int n, double epsilon) {
-    var firstCorner = -1;
-    for (var i = 0; i < n; i++) {
-      if (!_isCorner(xy, i, n, epsilon)) {
-        continue;
-      }
-      if (firstCorner < 0) {
-        firstCorner = i;
-      }
-      if (_isCorner(xy, (i + 1) % n, n, epsilon) &&
-          _isCorner(xy, (i - 1 + n) % n, n, epsilon)) {
-        return i;
-      }
-    }
-    return firstCorner < 0 ? 0 : firstCorner;
-  }
-
-  static bool _isCorner(Float64List xy, int i, int n, double epsilon) =>
-      !_isCollinear(xy, (i - 1 + n) % n, i, (i + 1) % n, epsilon);
-
-  static bool _isCollinear(
-    Float64List xy,
-    int a,
-    int b,
-    int c,
-    double epsilon,
-  ) {
-    final double ax = xy[a * 2];
-    final double ay = xy[a * 2 + 1];
-    final double bx = xy[b * 2];
-    final double by = xy[b * 2 + 1];
-    final double cx = xy[c * 2];
-    final double cy = xy[c * 2 + 1];
-    final double cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    return cross.abs() <= epsilon;
   }
 
   SectorMesh2D _loopMesh(SectorLoopResult loop) {
@@ -487,10 +455,7 @@ class _Compiler {
         tris.add(base + t.indices[k]);
       }
     }
-    return SectorMesh2D(
-      Float64List.fromList(verts),
-      Uint32List.fromList(tris),
-    );
+    return SectorMesh2D(Float64List.fromList(verts), Uint32List.fromList(tris));
   }
 
   void _packPlanes(
@@ -554,8 +519,9 @@ class _Compiler {
     }
     final Float64List positions = Float64List(vertexCount * 3);
     final Float64List uvs = Float64List(vertexCount * 2);
-    final FlatUvMapper? mapper =
-        entry == null ? null : FlatUvMapper(entry, atlas.pageSize);
+    final FlatUvMapper? mapper = entry == null
+        ? null
+        : FlatUvMapper(entry, atlas.pageSize);
     for (var v = 0; v < vertexCount; v++) {
       final double mx = mesh.xy[v * 2];
       final double my = mesh.xy[v * 2 + 1];
@@ -582,7 +548,7 @@ class _Compiler {
           ..add(mesh.indices[t + 2]);
       }
     }
-    final VertexRange range = _packer.addPrimitive(
+    final List<VertexRange> ranges = _packer.addPrimitive(
       page: page,
       kind: kind,
       positions: positions,
@@ -606,7 +572,7 @@ class _Compiler {
     return SectorPlaneRef(
       sector: sector,
       isCeiling: isCeiling,
-      ranges: <VertexRange>[range],
+      ranges: ranges,
       baseHeight: height,
     );
   }
@@ -619,7 +585,7 @@ class _Compiler {
 
     for (var i = 0; i < walls.quads.length; i++) {
       final WallQuad quad = walls.quads[i];
-      if (quad.isDegenerate) {
+      if (quad.x1 == quad.x2 && quad.y1 == quad.y2) {
         continue;
       }
       final AtlasEntry? entry = atlas.entry(quad.texture);
@@ -648,14 +614,12 @@ class _Compiler {
       final double v0 = entry == null ? 0 : entry.v0(pageSize);
       final double vSpan = entry == null ? 1 : entry.height / pageSize;
 
-      // Texel coordinates, then into the atlas sub-rect. Values outside 0..1 of
-      // the sub-rect are intentional: the shader wraps within the region, which
-      // is how a wall tiles horizontally across a long linedef.
-      final double uA = u0 + (quad.uLeft / texW) * uSpan;
-      final double uB = u0 + (quad.uRight / texW) * uSpan;
-      final double vTop = v0 + (quad.yOffset / texH) * vSpan;
-      final double vBottom =
-          v0 + ((quad.yOffset + quad.height) / texH) * vSpan;
+      // Texture-local coordinates. Atlas rect mapping happens exactly once in
+      // the shader, after repeat/clamp resolution.
+      final double uA = quad.uLeft / texW;
+      final double uB = quad.uRight / texW;
+      final double vTop = quad.yOffset / texH;
+      final double vBottom = (quad.yOffset + quad.height) / texH;
 
       uvs[0] = uA;
       uvs[1] = vBottom;
@@ -672,10 +636,10 @@ class _Compiler {
       final double dx = quad.x2 - quad.x1;
       final double dy = quad.y2 - quad.y1;
       final double len = _length(dx, dy);
-      final double nx = len > 0 ? -dy / len : 0;
-      final double nz = len > 0 ? -dx / len : 0;
+      final double nx = len > 0 ? dy / len : 0;
+      final double nz = len > 0 ? dx / len : 0;
 
-      final VertexRange range = _packer.addPrimitive(
+      final List<VertexRange> ranges = _packer.addPrimitive(
         page: page,
         kind: quad.kind,
         positions: positions,
@@ -700,12 +664,14 @@ class _Compiler {
           band: quad.band,
           frontSector: quad.frontSector,
           backSector: quad.backSector,
-          meshIndex: range.meshIndex,
-          firstVertex: range.firstVertex,
+          meshIndex: ranges.single.meshIndex,
+          firstVertex: ranges.single.firstVertex,
           lowerUnpegged: quad.lowerUnpegged,
           upperUnpegged: quad.upperUnpegged,
           textureHeight: texH,
           yOffset: quad.yOffset,
+          rawYOffset: quad.rawYOffset,
+          nearCeilingAnchor: quad.nearCeiling,
           atlasV0: v0,
           atlasV1: v0 + vSpan,
           baseBottom: quad.bottom,

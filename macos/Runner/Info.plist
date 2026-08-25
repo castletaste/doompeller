@@ -28,5 +28,13 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Doompeller renders through flame_3d, which targets Flutter GPU. Both
+	     keys are required: Impeller is the Metal backend, and Flutter GPU is the
+	     low-level API flame_3d binds buffers and pipelines through. Without them
+	     the app falls back to Skia and every custom-shader draw fails. -->
+	<key>FLTEnableImpeller</key>
+	<true/>
+	<key>FLTEnableFlutterGPU</key>
+	<true/>
 </dict>
 </plist>

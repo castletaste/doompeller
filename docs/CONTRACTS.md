@@ -201,3 +201,64 @@ lines with mismatched heights and an F_SKY1 ceiling.
 
 `buildWad`, `encodeDoomPatch` and `buildBspTree` are exported so the other
 packages can build their own fixtures rather than duplicating the writers.
+
+## doom_geometry addendum (M2)
+
+Additive only: every signature in the doom_geometry section above still holds.
+`DoomGeometryCompiler.compile(MapData, WadResources, {GeometryOptions})` is
+unchanged and returns `CompiledLevel` as specified.
+
+### Vertex ABI
+
+doom_geometry writes the 20-float record defined by `lib/adapter/vertex_abi.dart`,
+**including** that file's repurposing of the skinning slots. The adapter remains
+the authority; `packages/doom_geometry/test/vertex_abi_test.dart` is a tripwire
+that fails if the two drift apart.
+
+| floats | contents |
+|--------|----------|
+| 0..2   | position x, y, z |
+| 3..4   | texCoord u, v |
+| 5..8   | light, 1, 1, alpha |
+| 9..11  | normal x, y, z |
+| 12..15 | atlas rect u0, v0, u1, v1 |
+| 16..19 | fullBright, lightRow, uvMode, unused |
+
+World space is `(mapX, height, -mapY)`. The Y negation preserves map winding
+seen from above, so floors keep a +Y normal and ceilings are emitted reversed.
+
+### Additional public surface
+
+- `GeometryOptions` carries, beyond the three fields specified: `epsilon`,
+  `weldGrid`, `maxBspDepth`, `areaToleranceFraction`, `areaToleranceFloor`,
+  `atlasPageSize`, `spriteGutter` and `fakeContrast`. All have defaults, so
+  `const GeometryOptions()` is still valid.
+- `DoomGeometryCompiler.compileWithTextures(MapData, TextureSource, ...)` is a
+  test-only entry point taking synthetic textures instead of a parsed WAD.
+  `ResourceTextureSource` adapts a real `WadResources` to `TextureSource`.
+- `CompiledLevel` exposes `setFloorHeight`, `setCeilingHeight` and
+  `updateWallsForSector` for in-place door and lift updates. No mesh is
+  rebuilt or reallocated; only vertex floats are rewritten.
+- `SectorPlaneRef` holds `List<VertexRange> ranges` rather than a single mesh
+  index, because a sector's floor can straddle a 65535-vertex mesh split.
+- `WallBandRef` carries the pegging inputs (`lowerUnpegged`, `upperUnpegged`,
+  `textureHeight`, `yOffset`, `atlasV0`, `atlasV1`) so a moving wall re-pegs
+  its texture without a rebuild.
+- `GeometryReport` adds `repairedTJunctionVertices` and `repairedRegions`.
+
+### Atlas tiling scheme
+
+Pages are RGBA8 because flame_3d 0.3.0 has no R8 format: R is the palette
+index, G and A are coverage, B is reserved. World textures tile; each vertex
+carries its own atlas sub-rect in floats 12..15 and `uvMode = uvModeRepeat`,
+and the shader wraps within that rect, so UVs past 1.0 are expected and a
+region boundary is always a texture boundary. Sprites use `uvModeClamp` and
+get a transparent gutter.
+
+### T-junction repair
+
+Between BSP region reconstruction and triangulation, vertices lying in the
+interior of another region's edge **of the same sector** are inserted into that
+edge. Area and shape are unchanged; both sides of a shared boundary then agree
+vertex for vertex, which is what closes the hairline cracks that BSP-first
+geometry was flagged as risky for.

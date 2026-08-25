@@ -155,3 +155,49 @@ class DoomScene { ... }                            // builds MeshComponents, upd
 Target 60 FPS. Spike baseline on macOS release: p50 0.77 ms, p95 1.09 ms,
 p99 2.04 ms Flutter `FrameTiming.totalSpan` with 24 GPU buffers. E1M1 is much
 larger, so every milestone re-measures.
+
+## Addendum: doom_wad, as implemented
+
+Appended by the doom_wad implementation. The signatures above are unchanged
+except where noted here.
+
+### PatchImage pixel order is ROW-major
+
+The sketch above annotated `PatchImage` as "column-major decoded". The
+implementation stores pixels ROW-major: pixel (x, y) lives at
+`y * width + x`, for both `indices` and `coverage`.
+
+On disk a Doom patch *is* column-major, but the decoder transposes once at load
+time because every consumer downstream wants scanline order: atlas packing,
+composite blitting and GPU upload all walk rows. Leaving it column-major would
+push a transpose into each of them.
+
+Consumers in `doom_geometry` and `lib/adapter` must index accordingly.
+
+### Additive API beyond the sketch
+
+Nothing below removes or changes a signature above; it is extra surface the
+implementation needed.
+
+- `FlatImage` gained a `name` field, so its constructor is
+  `FlatImage({required String name, required Uint8List indices})`. It carries
+  `isSky`, which is how F_SKY1 is detected without a second lookup.
+- `WadResources` also exposes `patchNames`, `patchAt(int)`,
+  `patchByName(String)`, `flatNames` and `textureNames`.
+- `WadFile` also exposes `lastIndexOfLump`, `byteLength` and `length`;
+  `LumpEntry` carries `index`, `name`, `offset`, `size` and `isMarker`.
+- `WadSet` also exposes `nameAt`, `entryAt`, `wadIndexAt`, `indexOfFrom`,
+  `require` and `length`.
+- `Playpal.toArgb(int)` and `Colormap.toPlane()` pack palettes and light
+  maps for texture upload.
+
+### Test fixtures
+
+`DoomFixtures` generates a synthetic PWAD in memory with a real BSP tree, so
+no test needs a commercial WAD. `DoomFixtures.wadSet()` is the entry point;
+`DoomFixtures.hash()` is pinned in `test/fixture_test.dart` to catch drift.
+Its MAP01 has a convex sector, a concave L, a sector with a hole, two-sided
+lines with mismatched heights and an F_SKY1 ceiling.
+
+`buildWad`, `encodeDoomPatch` and `buildBspTree` are exported so the other
+packages can build their own fixtures rather than duplicating the writers.

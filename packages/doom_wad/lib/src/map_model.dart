@@ -1,5 +1,9 @@
 import 'dart:typed_data';
 
+import 'limits.dart';
+import 'map_loader.dart';
+import 'wad.dart';
+
 /// Pure data model for one Doom map. No behaviour, no Flutter, no rendering.
 ///
 /// Field names follow the classic lump layouts so cross-checking against the
@@ -262,6 +266,15 @@ class MapData {
   final List<Thing> things;
   final Blockmap? blockmap;
   final Uint8List? reject;
+
+  /// Reads and validates [mapName] from [set]. See loadMapData for the rules
+  /// applied to malformed input.
+  static MapData load(
+    WadSet set,
+    String mapName, {
+    DoomLimits limits = DoomLimits.defaults,
+  }) =>
+      loadMapData(set, mapName, limits: limits);
 
   bool get hasBsp => nodes.isNotEmpty && subsectors.isNotEmpty && segs.isNotEmpty;
 

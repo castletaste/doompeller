@@ -38,7 +38,8 @@ class DoomLimits {
   static const DoomLimits defaults;
   final int maxLumpCount, maxLumpBytes, maxVertices, maxLinedefs, maxSidedefs,
             maxSectors, maxSegs, maxSubsectors, maxNodes, maxThings,
-            maxTextures, maxPatchesPerTexture, maxIntersectionChecks;
+            maxTextures, maxPatchesPerTexture, maxBlockmapCells,
+            maxBlockmapEntries, maxIntersectionChecks;
 }
 
 class WadFile {

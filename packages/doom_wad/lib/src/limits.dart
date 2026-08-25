@@ -22,6 +22,8 @@ class DoomLimits {
     this.maxPatchesPerTexture = 256,
     this.maxPatchNames = 8192,
     this.maxCompositePixels = 4096 * 4096,
+    this.maxBlockmapCells = 1024 * 1024,
+    this.maxBlockmapEntries = 2 * 1024 * 1024,
     this.maxIntersectionChecks = 1000000,
     this.maxTriangles = 2000000,
     this.maxAtlasPixels = 4096 * 4096,
@@ -44,6 +46,16 @@ class DoomLimits {
   final int maxPatchesPerTexture;
   final int maxPatchNames;
   final int maxCompositePixels;
+
+  /// Maximum number of cells allocated for a map BLOCKMAP. The vanilla
+  /// dimensions are unsigned 16-bit words, so checking this before multiplying
+  /// or allocating prevents a hostile offset table from exhausting memory.
+  final int maxBlockmapCells;
+
+  /// Maximum number of words in all BLOCKMAP cell lists (including each
+  /// cell's optional pad and terminator). This bounds the proportional scan
+  /// and the temporary list used while decoding a cell.
+  final int maxBlockmapEntries;
 
   /// Budget for quadratic geometric validation work. Without this a crafted
   /// sector can make loop validation run effectively forever.

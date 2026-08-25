@@ -68,25 +68,35 @@ void main() {
 
     test('two-sided linedefs keep both sidedefs and differing heights', () {
       final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
-      final Iterable<Linedef> portals = map.linedefs.where((Linedef l) => l.isTwoSided);
+      final Iterable<Linedef> portals = map.linedefs.where(
+        (Linedef l) => l.isTwoSided,
+      );
       expect(portals, isNotEmpty);
 
       var withStep = 0;
       for (final Linedef line in portals) {
         expect(line.leftSidedef, isNot(kNoSidedef));
         expect(line.rightSidedef, isNot(kNoSidedef));
-        final Sector front = map.sectors[map.sidedefs[line.rightSidedef].sector];
+        final Sector front =
+            map.sectors[map.sidedefs[line.rightSidedef].sector];
         final Sector back = map.sectors[map.sidedefs[line.leftSidedef].sector];
-        if (front.floorHeight != back.floorHeight || front.ceilingHeight != back.ceilingHeight) {
+        if (front.floorHeight != back.floorHeight ||
+            front.ceilingHeight != back.ceilingHeight) {
           withStep++;
         }
       }
-      expect(withStep, greaterThan(0), reason: 'fixture must exercise upper and lower wall bands');
+      expect(
+        withStep,
+        greaterThan(0),
+        reason: 'fixture must exercise upper and lower wall bands',
+      );
     });
 
     test('one-sided linedefs report no left sidedef', () {
       final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
-      final Iterable<Linedef> solid = map.linedefs.where((Linedef l) => !l.isTwoSided);
+      final Iterable<Linedef> solid = map.linedefs.where(
+        (Linedef l) => !l.isTwoSided,
+      );
       expect(solid, isNotEmpty);
       for (final Linedef line in solid) {
         expect(line.leftSidedef, kNoSidedef);
@@ -111,8 +121,13 @@ void main() {
       ByteData.sublistView(linedefs).setUint16(0, 9999, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('LINEDEFS', linedefs), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('v1'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('v1'),
+          ),
+        ),
       );
     });
 
@@ -121,8 +136,13 @@ void main() {
       ByteData.sublistView(linedefs).setUint16(10, 4000, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('LINEDEFS', linedefs), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('sidedef'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('sidedef'),
+          ),
+        ),
       );
     });
 
@@ -141,8 +161,13 @@ void main() {
       ByteData.sublistView(sidedefs).setInt16(28, 77, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('SIDEDEFS', sidedefs), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('sector'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('sector'),
+          ),
+        ),
       );
     });
 
@@ -151,8 +176,13 @@ void main() {
       ByteData.sublistView(segs).setUint16(6, 5000, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('SEGS', segs), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('linedef'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('linedef'),
+          ),
+        ),
       );
     });
 
@@ -161,8 +191,13 @@ void main() {
       ByteData.sublistView(segs).setUint16(8, 7, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('SEGS', segs), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('side'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('side'),
+          ),
+        ),
       );
     });
 
@@ -190,63 +225,100 @@ void main() {
       ByteData.sublistView(nodes).setUint16(24, 900, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('NODES', nodes), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('node'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('node'),
+          ),
+        ),
       );
     });
 
     test('rejects a node child pointing outside SSECTORS', () {
       final Uint8List nodes = lumpCopy('NODES');
-      ByteData.sublistView(nodes).setUint16(24, kSubsectorBit | 800, Endian.little);
+      ByteData.sublistView(
+        nodes,
+      ).setUint16(24, kSubsectorBit | 800, Endian.little);
       expect(
         () => MapData.load(fixtureWithLump('NODES', nodes), 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('subsector'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('subsector'),
+          ),
+        ),
       );
     });
 
-    test('rejects a lump whose length is not a multiple of its record size', () {
-      final Uint8List vertexes = lumpCopy('VERTEXES');
-      expect(
-        () => MapData.load(
-          fixtureWithLump('VERTEXES', Uint8List.sublistView(vertexes, 0, vertexes.length - 1)),
-          'MAP01',
-        ),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('multiple'))),
-      );
-    });
+    test(
+      'rejects a lump whose length is not a multiple of its record size',
+      () {
+        final Uint8List vertexes = lumpCopy('VERTEXES');
+        expect(
+          () => MapData.load(
+            fixtureWithLump(
+              'VERTEXES',
+              Uint8List.sublistView(vertexes, 0, vertexes.length - 1),
+            ),
+            'MAP01',
+          ),
+          throwsA(
+            isA<DoomMapFailure>().having(
+              (DoomMapFailure f) => f.message,
+              'message',
+              contains('multiple'),
+            ),
+          ),
+        );
+      },
+    );
 
     test('rejects a Hexen-format map', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(buildWad(<LumpSource>[
-          LumpSource.marker('MAP01'),
-          LumpSource('THINGS', Uint8List(0)),
-          LumpSource('LINEDEFS', Uint8List(0)),
-          LumpSource('SIDEDEFS', Uint8List(0)),
-          LumpSource('VERTEXES', Uint8List(0)),
-          LumpSource('SECTORS', Uint8List(0)),
-          LumpSource('BEHAVIOR', Uint8List(4)),
-        ])),
+        WadFile.parse(
+          buildWad(<LumpSource>[
+            LumpSource.marker('MAP01'),
+            LumpSource('THINGS', Uint8List(0)),
+            LumpSource('LINEDEFS', Uint8List(0)),
+            LumpSource('SIDEDEFS', Uint8List(0)),
+            LumpSource('VERTEXES', Uint8List(0)),
+            LumpSource('SECTORS', Uint8List(0)),
+            LumpSource('BEHAVIOR', Uint8List(4)),
+          ]),
+        ),
       ]);
       expect(
         () => MapData.load(set, 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('Hexen'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('Hexen'),
+          ),
+        ),
       );
     });
 
     test('reports a map missing a mandatory lump', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(buildWad(<LumpSource>[
-          LumpSource.marker('MAP01'),
-          LumpSource('THINGS', Uint8List(0)),
-        ])),
+        WadFile.parse(
+          buildWad(<LumpSource>[
+            LumpSource.marker('MAP01'),
+            LumpSource('THINGS', Uint8List(0)),
+          ]),
+        ),
       ]);
       expect(
         () => MapData.load(set, 'MAP01'),
-        throwsA(isA<DoomMapFailure>()
-            .having((DoomMapFailure f) => f.message, 'message', contains('LINEDEFS'))),
+        throwsA(
+          isA<DoomMapFailure>().having(
+            (DoomMapFailure f) => f.message,
+            'message',
+            contains('LINEDEFS'),
+          ),
+        ),
       );
     });
   });
@@ -254,66 +326,154 @@ void main() {
   group('map limits', () {
     test('maxVertices produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxVertices: 2)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxVertices')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxVertices: 2),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxVertices',
+          ),
+        ),
       );
     });
 
     test('maxSectors produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxSectors: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxSectors')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxSectors: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxSectors',
+          ),
+        ),
       );
     });
 
     test('maxSidedefs produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxSidedefs: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxSidedefs')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxSidedefs: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxSidedefs',
+          ),
+        ),
       );
     });
 
     test('maxLinedefs produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxLinedefs: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxLinedefs')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxLinedefs: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxLinedefs',
+          ),
+        ),
       );
     });
 
     test('maxSegs produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxSegs: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxSegs')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxSegs: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxSegs',
+          ),
+        ),
       );
     });
 
     test('maxSubsectors produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01',
-            limits: const DoomLimits(maxSubsectors: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxSubsectors')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxSubsectors: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxSubsectors',
+          ),
+        ),
       );
     });
 
     test('maxNodes produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxNodes: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxNodes')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxNodes: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxNodes',
+          ),
+        ),
       );
     });
 
     test('maxThings produces a typed limit failure', () {
       expect(
-        () => MapData.load(DoomFixtures.wadSet(), 'MAP01', limits: const DoomLimits(maxThings: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxThings')),
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxThings: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxThings',
+          ),
+        ),
+      );
+    });
+
+    test('maxBlockmapCells propagates through MapData.load', () {
+      expect(
+        () => MapData.load(
+          DoomFixtures.wadSet(),
+          'MAP01',
+          limits: const DoomLimits(maxBlockmapCells: 1),
+        ),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxBlockmapCells',
+          ),
+        ),
       );
     });
   });
@@ -360,7 +520,11 @@ void main() {
         'MAP01',
       );
       expect(map.blockmap, isNull);
-      expect(map.sectors, isNotEmpty, reason: 'the rest of the map must still load');
+      expect(
+        map.sectors,
+        isNotEmpty,
+        reason: 'the rest of the map must still load',
+      );
     });
 
     test('an odd-length blockmap yields null', () {
@@ -374,6 +538,75 @@ void main() {
       view.setUint16(6, 4, Endian.little);
       expect(parseBlockmap(lump, 4), isNull);
     });
+
+    test(
+      'huge dimensions in a tiny lump yield null before the cell budget',
+      () {
+        final Uint8List lump = Uint8List(8);
+        final ByteData view = ByteData.sublistView(lump);
+        view.setUint16(4, 0xFFFF, Endian.little);
+        view.setUint16(6, 0xFFFF, Endian.little);
+
+        expect(
+          parseBlockmap(lump, 4, limits: const DoomLimits(maxBlockmapCells: 1)),
+          isNull,
+        );
+      },
+    );
+
+    test(
+      'a valid-shaped blockmap over the cell budget fails with a typed limit',
+      () {
+        final List<int> words = <int>[0, 0, 1, 1, 5, 0, 0xFFFF];
+        final Uint8List lump = Uint8List(words.length * 2);
+        final ByteData view = ByteData.sublistView(lump);
+        for (var i = 0; i < words.length; i++) {
+          view.setUint16(i * 2, words[i], Endian.little);
+        }
+
+        expect(
+          () => parseBlockmap(
+            lump,
+            4,
+            limits: const DoomLimits(maxBlockmapCells: 0),
+          ),
+          throwsA(
+            isA<DoomLimitFailure>().having(
+              (DoomLimitFailure f) => f.limitName,
+              'limitName',
+              'maxBlockmapCells',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'a valid-shaped blockmap over the entry budget fails with a typed limit',
+      () {
+        final List<int> words = <int>[0, 0, 1, 1, 5, 0, 0xFFFF];
+        final Uint8List lump = Uint8List(words.length * 2);
+        final ByteData view = ByteData.sublistView(lump);
+        for (var i = 0; i < words.length; i++) {
+          view.setUint16(i * 2, words[i], Endian.little);
+        }
+
+        expect(
+          () => parseBlockmap(
+            lump,
+            4,
+            limits: const DoomLimits(maxBlockmapEntries: 1),
+          ),
+          throwsA(
+            isA<DoomLimitFailure>().having(
+              (DoomLimitFailure f) => f.limitName,
+              'limitName',
+              'maxBlockmapEntries',
+            ),
+          ),
+        );
+      },
+    );
 
     test('an unterminated cell list yields null', () {
       // One cell whose list runs to the end of the lump with no 0xFFFF.

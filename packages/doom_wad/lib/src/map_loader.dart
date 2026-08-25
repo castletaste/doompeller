@@ -31,7 +31,11 @@ const List<String> kMapLumpNames = <String>[
 
 /// Lumps that may follow a map marker without ending the map. BEHAVIOR marks a
 /// Hexen-format map, which this loader rejects rather than misparsing.
-const List<String> _kOptionalMapLumps = <String>['BEHAVIOR', 'SCRIPTS', 'GL_VERT'];
+const List<String> _kOptionalMapLumps = <String>[
+  'BEHAVIOR',
+  'SCRIPTS',
+  'GL_VERT',
+];
 
 /// The map lumps of one level, resolved to flat [WadSet] indices.
 class _MapLumps {
@@ -64,12 +68,43 @@ MapData loadMapData(
 
   final List<MapVertex> vertices = _readVertices(set, lumps, name, limits);
   final List<Sector> sectors = _readSectors(set, lumps, name, limits);
-  final List<Sidedef> sidedefs = _readSidedefs(set, lumps, name, limits, sectors.length);
-  final List<Linedef> linedefs =
-      _readLinedefs(set, lumps, name, limits, vertices.length, sidedefs.length);
-  final List<Seg> segs = _readSegs(set, lumps, name, limits, vertices.length, linedefs.length);
-  final List<Subsector> subsectors = _readSubsectors(set, lumps, name, limits, segs.length);
-  final List<BspNode> nodes = _readNodes(set, lumps, name, limits, subsectors.length);
+  final List<Sidedef> sidedefs = _readSidedefs(
+    set,
+    lumps,
+    name,
+    limits,
+    sectors.length,
+  );
+  final List<Linedef> linedefs = _readLinedefs(
+    set,
+    lumps,
+    name,
+    limits,
+    vertices.length,
+    sidedefs.length,
+  );
+  final List<Seg> segs = _readSegs(
+    set,
+    lumps,
+    name,
+    limits,
+    vertices.length,
+    linedefs.length,
+  );
+  final List<Subsector> subsectors = _readSubsectors(
+    set,
+    lumps,
+    name,
+    limits,
+    segs.length,
+  );
+  final List<BspNode> nodes = _readNodes(
+    set,
+    lumps,
+    name,
+    limits,
+    subsectors.length,
+  );
   final List<Thing> things = _readThings(set, lumps, name, limits);
 
   final int? rejectIndex = lumps['REJECT'];
@@ -84,8 +119,13 @@ MapData loadMapData(
   }
 
   final int? blockmapIndex = lumps['BLOCKMAP'];
-  final Blockmap? blockmap =
-      blockmapIndex == null ? null : parseBlockmap(set.bytesAt(blockmapIndex), linedefs.length);
+  final Blockmap? blockmap = blockmapIndex == null
+      ? null
+      : parseBlockmap(
+          set.bytesAt(blockmapIndex),
+          linedefs.length,
+          limits: limits,
+        );
 
   return MapData(
     name: name,
@@ -148,7 +188,12 @@ _MapLumps _findMapLumps(WadSet set, String name) {
 }
 
 /// Throws unless [bytes] holds a whole number of [recordBytes] sized records.
-int _recordCount(Uint8List bytes, int recordBytes, String mapName, String lumpName) {
+int _recordCount(
+  Uint8List bytes,
+  int recordBytes,
+  String mapName,
+  String lumpName,
+) {
   final int length = bytes.lengthInBytes;
   if (length % recordBytes != 0) {
     throw DoomMapFailure(
@@ -158,7 +203,13 @@ int _recordCount(Uint8List bytes, int recordBytes, String mapName, String lumpNa
   return length ~/ recordBytes;
 }
 
-void _checkIndex(int value, int count, String mapName, String lumpName, String field) {
+void _checkIndex(
+  int value,
+  int count,
+  String mapName,
+  String lumpName,
+  String field,
+) {
   if (value < 0 || value >= count) {
     throw DoomMapFailure(
       '$mapName/$lumpName: $field is $value, outside the valid range 0..${count - 1}',
@@ -166,7 +217,12 @@ void _checkIndex(int value, int count, String mapName, String lumpName, String f
   }
 }
 
-List<MapVertex> _readVertices(WadSet set, _MapLumps lumps, String name, DoomLimits limits) {
+List<MapVertex> _readVertices(
+  WadSet set,
+  _MapLumps lumps,
+  String name,
+  DoomLimits limits,
+) {
   final Uint8List bytes = set.bytesAt(lumps['VERTEXES']!);
   final int count = _recordCount(bytes, kVertexBytes, name, 'VERTEXES');
   DoomLimits.check(count, limits.maxVertices, 'maxVertices');
@@ -182,7 +238,12 @@ List<MapVertex> _readVertices(WadSet set, _MapLumps lumps, String name, DoomLimi
   return out;
 }
 
-List<Sector> _readSectors(WadSet set, _MapLumps lumps, String name, DoomLimits limits) {
+List<Sector> _readSectors(
+  WadSet set,
+  _MapLumps lumps,
+  String name,
+  DoomLimits limits,
+) {
   final Uint8List bytes = set.bytesAt(lumps['SECTORS']!);
   final int count = _recordCount(bytes, kSectorBytes, name, 'SECTORS');
   DoomLimits.check(count, limits.maxSectors, 'maxSectors');
@@ -258,13 +319,27 @@ List<Linedef> _readLinedefs(
     final int right = _sidedefRef(data.getInt16(o + 10, Endian.little));
     final int left = _sidedefRef(data.getInt16(o + 12, Endian.little));
     if (right != kNoSidedef) {
-      _checkIndex(right, sidedefCount, name, 'LINEDEFS', 'linedef $i right sidedef');
+      _checkIndex(
+        right,
+        sidedefCount,
+        name,
+        'LINEDEFS',
+        'linedef $i right sidedef',
+      );
     }
     if (left != kNoSidedef) {
-      _checkIndex(left, sidedefCount, name, 'LINEDEFS', 'linedef $i left sidedef');
+      _checkIndex(
+        left,
+        sidedefCount,
+        name,
+        'LINEDEFS',
+        'linedef $i left sidedef',
+      );
     }
     if (right == kNoSidedef && left == kNoSidedef) {
-      throw DoomMapFailure('$name/LINEDEFS: linedef $i has no sidedef on either side');
+      throw DoomMapFailure(
+        '$name/LINEDEFS: linedef $i has no sidedef on either side',
+      );
     }
 
     out.add(
@@ -312,7 +387,9 @@ List<Seg> _readSegs(
     _checkIndex(linedef, linedefCount, name, 'SEGS', 'seg $i linedef');
     final int side = data.getUint16(o + 8, Endian.little);
     if (side != 0 && side != 1) {
-      throw DoomMapFailure('$name/SEGS: seg $i has side $side, expected 0 or 1');
+      throw DoomMapFailure(
+        '$name/SEGS: seg $i has side $side, expected 0 or 1',
+      );
     }
     out.add(
       Seg(
@@ -405,7 +482,13 @@ List<BspNode> _readNodes(
   return List<BspNode>.unmodifiable(out);
 }
 
-void _checkChild(int child, int nodeCount, int subsectorCount, String mapName, String field) {
+void _checkChild(
+  int child,
+  int nodeCount,
+  int subsectorCount,
+  String mapName,
+  String field,
+) {
   if ((child & kSubsectorBit) != 0) {
     final int target = child & ~kSubsectorBit;
     _checkIndex(target, subsectorCount, mapName, 'NODES', '$field subsector');
@@ -414,7 +497,12 @@ void _checkChild(int child, int nodeCount, int subsectorCount, String mapName, S
   }
 }
 
-List<Thing> _readThings(WadSet set, _MapLumps lumps, String name, DoomLimits limits) {
+List<Thing> _readThings(
+  WadSet set,
+  _MapLumps lumps,
+  String name,
+  DoomLimits limits,
+) {
   final int? index = lumps['THINGS'];
   if (index == null) {
     return const <Thing>[];
@@ -454,7 +542,14 @@ List<Thing> _readThings(WadSet set, _MapLumps lumps, String name, DoomLimits lim
 ///  * Blockmaps whose header is impossible, or whose offset table does not fit,
 ///    yield null. A missing blockmap costs the caller a slower broadphase; a
 ///    wrong one costs correctness.
-Blockmap? parseBlockmap(Uint8List bytes, int linedefCount) {
+///
+/// A structurally fitting BLOCKMAP that exceeds [DoomLimits] throws a typed
+/// [DoomLimitFailure] before allocating or scanning beyond its budget.
+Blockmap? parseBlockmap(
+  Uint8List bytes,
+  int linedefCount, {
+  DoomLimits limits = DoomLimits.defaults,
+}) {
   final int length = bytes.lengthInBytes;
   if (length < 8 || length.isOdd) {
     return null;
@@ -468,15 +563,27 @@ Blockmap? parseBlockmap(Uint8List bytes, int linedefCount) {
     return null;
   }
 
-  final int cellCount = columns * rows;
   final int words = length ~/ 2;
   // Header is 4 words; the offset table needs one word per cell.
-  if (4 + cellCount > words) {
+  // Check structural fit before applying a budget: a tiny malformed lump with
+  // hostile dimensions is an ordinary unusable BLOCKMAP and must degrade to
+  // null without being classified as a configured-budget failure.
+  final int cellCount = columns * rows;
+  if (cellCount > words - 4) {
     return null;
   }
 
-  final List<Uint16List> cells = List<Uint16List>.filled(cellCount, _emptyCell, growable: false);
+  DoomLimits.check(cellCount, limits.maxBlockmapCells, 'maxBlockmapCells');
+  final int listWords = words - (4 + cellCount);
+  DoomLimits.check(listWords, limits.maxBlockmapEntries, 'maxBlockmapEntries');
+
+  final List<Uint16List> cells = List<Uint16List>.filled(
+    cellCount,
+    _emptyCell,
+    growable: false,
+  );
   final List<int> scratch = <int>[];
+  var scannedEntries = 0;
   for (var i = 0; i < cellCount; i++) {
     final int offset = data.getUint16(8 + i * 2, Endian.little);
     // The list must start after the offset table; a smaller value is the
@@ -488,10 +595,22 @@ Blockmap? parseBlockmap(Uint8List bytes, int linedefCount) {
     var cursor = offset;
     // Vanilla writes a 0x0000 pad first. Some node builders omit it.
     if (data.getUint16(cursor * 2, Endian.little) == 0) {
+      DoomLimits.check(
+        scannedEntries + 1,
+        limits.maxBlockmapEntries,
+        'maxBlockmapEntries',
+      );
+      scannedEntries++;
       cursor++;
     }
     var terminated = false;
     while (cursor < words) {
+      DoomLimits.check(
+        scannedEntries + 1,
+        limits.maxBlockmapEntries,
+        'maxBlockmapEntries',
+      );
+      scannedEntries++;
       final int value = data.getUint16(cursor * 2, Endian.little);
       cursor++;
       if (value == 0xFFFF) {

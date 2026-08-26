@@ -8,16 +8,28 @@ import 'mobj.dart';
 import 'mobj_info.dart';
 import 'random.dart';
 import 'sector_runtime.dart';
+import 'sound_events.dart';
 import 'specials.dart';
 import 'ticcmd.dart';
 import 'views.dart';
 
 const int _playerRadius = 16 * kFracUnit;
 const int _maxStep = 24 * kFracUnit;
+const int _maxBob = 0x100000;
+const int _singleAxisMaxBobMomentum = 8 * kFracUnit;
+const int _bobAngleStep = (kFineAngles ~/ 20) << kAngleToFineShift;
+const int _ceilingViewClearance = 4 * kFracUnit;
 
 /// Integer-only 35 Hz game simulation. Its iteration order is spawn order;
 /// removal is deferred to the end of each tic so callbacks cannot reorder it.
 class GameState {
+  /// Output buffering is deliberately bounded: repeated weapon/pain/item
+  /// sounds are expendable before door, platform, death, and exit cues. When
+  /// all buffered events are critical, an incoming non-critical event is
+  /// discarded; an incoming critical event replaces the oldest critical one.
+  /// Every discard increments [droppedSoundEventCount], so loss is observable.
+  static const int maxSoundJournalLength = 256;
+
   GameState._(this._runtime, this.config, int seed)
     : _random = DoomRandom(index: seed) {
     _totalSecrets = _runtime.sectors
@@ -34,6 +46,8 @@ class GameState {
   final DoomRandom _random;
   final List<Mobj> _mobjs = <Mobj>[];
   final List<SectorChange> _changes = <SectorChange>[];
+  final List<SoundEvent> _sounds = <SoundEvent>[];
+  int _droppedSoundEvents = 0;
   int _tic = 0;
   int _nextId = 1;
   late Mobj _playerMobj;
@@ -66,6 +80,18 @@ class GameState {
     return result;
   }
 
+  /// Ordered sound requests retained until consumed. Like [changeJournal],
+  /// this is output-only and a renderer may poll less often than 35 Hz.
+  List<SoundEvent> get soundJournal => List<SoundEvent>.unmodifiable(_sounds);
+  List<SoundEvent> consumeSoundJournal() {
+    final List<SoundEvent> result = List<SoundEvent>.unmodifiable(_sounds);
+    _sounds.clear();
+    return result;
+  }
+
+  /// Cumulative output-only telemetry, deliberately excluded from hashState.
+  int get droppedSoundEventCount => _droppedSoundEvents;
+
   int get secretsFound => _secrets;
   int get killCount => _killCount;
   int get totalKills => _totalKills;
@@ -79,19 +105,24 @@ class GameState {
   int get playerSectorIndex => _playerMobj.sectorIndex;
   bool get levelComplete => _levelComplete;
   bool get usedSecretExit => _secretExit;
-  PlayerView get player => PlayerView(
-    x: _playerMobj.x,
-    y: _playerMobj.y,
-    z: _playerMobj.z,
-    angle: _playerMobj.angle,
-    viewZ: _playerMobj.viewZ + _bob,
-    health: _health,
-    armor: _armor,
-    ammo: Ammo(bullets: _bullets, shells: _shells),
-    weapon: _weapon,
-    bob: _bob,
-    keys: Set<Key>.unmodifiable(_keys),
-  );
+  PlayerView get player {
+    final int ceiling = _runtime.sectors[_playerMobj.sectorIndex].ceilingHeight;
+    final int bobbedViewZ = _playerMobj.viewZ + _bob;
+    final int highestViewZ = ceiling - _ceilingViewClearance;
+    return PlayerView(
+      x: _playerMobj.x,
+      y: _playerMobj.y,
+      z: _playerMobj.z,
+      angle: _playerMobj.angle,
+      viewZ: bobbedViewZ < highestViewZ ? bobbedViewZ : highestViewZ,
+      health: _health,
+      armor: _armor,
+      ammo: Ammo(bullets: _bullets, shells: _shells),
+      weapon: _weapon,
+      bob: _bob,
+      keys: Set<Key>.unmodifiable(_keys),
+    );
+  }
 
   void runTic(TicCmd cmd) {
     _tic++;
@@ -163,10 +194,19 @@ class GameState {
     _tryMove(_playerMobj, _playerMobj.momX, _playerMobj.momY);
     _playerMobj.momX = fixedMul(_playerMobj.momX, 0xe800);
     _playerMobj.momY = fixedMul(_playerMobj.momY, 0xe800);
-    _bob =
-        ((approxDistance(_playerMobj.momX, _playerMobj.momY) >> 2) *
-            Trig.sin(_tic * 0x10000000)) >>
-        kFracBits;
+    int bob =
+        (fixedMul(_playerMobj.momX, _playerMobj.momX) +
+            fixedMul(_playerMobj.momY, _playerMobj.momY)) >>
+        2;
+    // Above eight units on either axis, the mathematical square already
+    // guarantees MAXBOB. Saturate before a wrapped fixed-point square can
+    // disguise that fact for the larger impulses accepted by this runtime.
+    if (fixedAbs(_playerMobj.momX) >= _singleAxisMaxBobMomentum ||
+        fixedAbs(_playerMobj.momY) >= _singleAxisMaxBobMomentum ||
+        bob > _maxBob) {
+      bob = _maxBob;
+    }
+    _bob = fixedMul(bob >> 1, Trig.sin(_tic * _bobAngleStep));
     if (cmd.using && !_useHeld) _useLine();
     _useHeld = cmd.using;
     if (cmd.attacking) _playerAttack();
@@ -180,30 +220,40 @@ class GameState {
       3 => Weapon.chaingun,
       _ => _weapon,
     };
-    if (!_ownedWeapons.contains(requested)) return;
+    if (!_ownedWeapons.contains(requested) || requested == _weapon) return;
+    _setWeapon(requested);
+  }
+
+  void _setWeapon(Weapon requested) {
+    if (requested == _weapon) return;
     _weapon = requested;
+    _emitPlayerSound('DSWPNUP');
   }
 
   void _playerAttack() {
     if (_weapon == Weapon.shotgun && _shells == 0) {
-      _weapon = Weapon.pistol;
+      _setWeapon(Weapon.pistol);
       return;
     }
     if ((_weapon == Weapon.pistol || _weapon == Weapon.chaingun) &&
         _bullets == 0) {
-      _weapon = Weapon.fist;
+      _setWeapon(Weapon.fist);
       return;
     }
     switch (_weapon) {
       case Weapon.fist:
+        _emitPlayerSound('DSPUNCH');
         _hitscan(64 * kFracUnit, 2 + (_random.next() % 10));
       case Weapon.pistol:
+        _emitPlayerSound('DSPISTOL');
         _bullets--;
         _hitscan(1024 * kFracUnit, 5 * (1 + (_random.next() % 3)));
       case Weapon.chaingun:
+        _emitPlayerSound('DSPISTOL');
         _bullets--;
         _hitscan(1024 * kFracUnit, 5 * (1 + (_random.next() % 3)));
       case Weapon.shotgun:
+        _emitPlayerSound('DSSHOTGN');
         _shells--;
         for (int i = 0; i < 7; i++) {
           _hitscan(
@@ -419,8 +469,15 @@ class GameState {
     }
     if (selected == null) return;
     if (!_isUseSpecial(selected.special)) return;
-    if (_isDoorSpecial(selected.special)) _tryActivateDoor(selected);
-    if (_isUseLiftSpecial(selected.special)) _activateLift(selected);
+    if (_isDoorSpecial(selected.special)) {
+      final bool activated = _tryActivateDoor(selected);
+      if (activated && _isSwitchDoorSpecial(selected.special)) {
+        _emitPlayerSound('DSSWTCHN');
+      }
+    }
+    if (_isUseLiftSpecial(selected.special) && _activateLift(selected)) {
+      _emitPlayerSound('DSSWTCHN');
+    }
     if (selected.special == LineSpecial.exitSwitchOnce ||
         selected.special == LineSpecial.secretExitSwitchOnce) {
       if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
@@ -445,6 +502,7 @@ class GameState {
     if (!_activatedOnceLines.add(lineIndex)) return;
     _levelComplete = true;
     _secretExit = secret;
+    _emitNonPositionalSound('DSSWTCHX');
   }
 
   void _shootSpecialLine() {
@@ -476,8 +534,9 @@ class GameState {
         selected = line;
       }
     }
-    if (selected?.special == LineSpecial.floorRaise24) {
-      _activateFloor(selected!);
+    if (selected?.special == LineSpecial.floorRaise24 &&
+        _activateFloor(selected!)) {
+      _emitPlayerSound('DSSWTCHN');
     }
   }
 
@@ -492,11 +551,10 @@ class GameState {
   bool _tryActivateDoor(Linedef line) {
     final Key? required = _requiredKey(line.special);
     if (required != null && !_keys.contains(required)) return false;
-    _activateDoor(line);
-    return true;
+    return _activateDoor(line);
   }
 
-  void _activateDoor(Linedef line) {
+  bool _activateDoor(Linedef line) {
     // tag 0 manual doors affect the adjacent back sector; classification comes
     // from special, never from the tag.
     final int? back = _runtime.backSector(line);
@@ -506,19 +564,25 @@ class GameState {
             for (int i = 0; i < _runtime.sectors.length; i++)
               if (_runtime.sectors[i].staticData.tag == line.tag) i,
           ];
+    var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
-      sector.activeMover ??= _DoorMover(
-        sector,
-        _doorOpenTop(index),
-        closeAfterWait: !_doorStaysOpen(line.special),
-        obstructed: (int nextCeiling) =>
-            _sectorObstructed(index, ceiling: nextCeiling),
-      );
+      if (sector.activeMover == null) {
+        sector.activeMover = _DoorMover(
+          sector,
+          _doorOpenTop(index),
+          closeAfterWait: !_doorStaysOpen(line.special),
+          obstructed: (int nextCeiling) =>
+              _sectorObstructed(index, ceiling: nextCeiling),
+        );
+        _emitSectorSound('DSDOROPN', index);
+        activated = true;
+      }
     }
+    return activated;
   }
 
-  void _activateLift(Linedef line) {
+  bool _activateLift(Linedef line) {
     final int? back = _runtime.backSector(line);
     final List<int> targets = line.tag == 0
         ? (back == null ? <int>[] : <int>[back])
@@ -526,17 +590,24 @@ class GameState {
             for (int i = 0; i < _runtime.sectors.length; i++)
               if (_runtime.sectors[i].staticData.tag == line.tag) i,
           ];
+    var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
-      sector.activeMover ??= _LiftMover(sector, _lowestNeighborFloor(index));
+      if (sector.activeMover == null) {
+        sector.activeMover = _LiftMover(sector, _lowestNeighborFloor(index));
+        _emitSectorSound('DSPSTART', index);
+        activated = true;
+      }
     }
+    return activated;
   }
 
-  void _activateFloor(Linedef line) {
+  bool _activateFloor(Linedef line) {
     final List<int> targets = <int>[
       for (int i = 0; i < _runtime.sectors.length; i++)
         if (_runtime.sectors[i].staticData.tag == line.tag && line.tag != 0) i,
     ];
+    var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
       final int target = switch (line.special) {
@@ -545,13 +616,17 @@ class GameState {
           _lowestNeighborCeiling(index) - toFixed(8),
         _ => sector.floorHeight,
       };
-      sector.activeMover ??= _FloorMover(
-        sector,
-        target,
-        obstructed: (int nextFloor) =>
-            _sectorObstructed(index, floor: nextFloor),
-      );
+      if (sector.activeMover == null) {
+        sector.activeMover = _FloorMover(
+          sector,
+          target,
+          obstructed: (int nextFloor) =>
+              _sectorObstructed(index, floor: nextFloor),
+        );
+        activated = true;
+      }
     }
+    return activated;
   }
 
   bool _sectorObstructed(int index, {int? floor, int? ceiling}) {
@@ -618,7 +693,11 @@ class GameState {
       final SectorMover? mover = s.activeMover;
       if (mover != null) {
         final int oldFloor = s.floorHeight, oldCeiling = s.ceilingHeight;
+        final bool doorWasClosing = mover is _DoorMover && mover.isClosing;
         mover.tick();
+        if (mover is _DoorMover && !doorWasClosing && mover.isClosing) {
+          _emitSectorSound('DSDORCLS', s.index);
+        }
         if (oldFloor != s.floorHeight) {
           for (final Mobj m in _mobjs) {
             if (m.removed || m.sectorIndex != s.index) continue;
@@ -638,6 +717,7 @@ class GameState {
           );
         }
         if (mover.finished) {
+          if (mover is _LiftMover) _emitSectorSound('DSPSTOP', s.index);
           s.activeMover = null;
         }
       }
@@ -837,6 +917,7 @@ class GameState {
       target.spriteFrame = 2;
       target.flags |= MobjFlags.corpse;
       target.flags &= ~MobjFlags.shootable;
+      _emitMobjSound('DSPODTH1', target);
       if (target.info.id == MobjType.barrel) _explodeBarrel(target, source);
     } else if (_random.chance(target.info.painChance)) {
       target.state = MobjState.pain;
@@ -845,6 +926,7 @@ class GameState {
   }
 
   void _damagePlayer(int damage) {
+    final bool wasAlive = _health > 0;
     final int possibleSave = damage ~/ 3;
     final int saved = _armor < possibleSave ? _armor : possibleSave;
     _armor -= saved;
@@ -853,6 +935,7 @@ class GameState {
       _health = 0;
     }
     _playerMobj.health = _health;
+    if (wasAlive) _emitPlayerSound('DSPLPAIN');
     if (_health == 0) {
       _playerMobj.flags &= ~MobjFlags.shootable;
       _playerMobj.state = MobjState.death;
@@ -892,11 +975,11 @@ class GameState {
         case MobjType.shotgun:
           _shells += 8;
           _ownedWeapons.add(Weapon.shotgun);
-          _weapon = Weapon.shotgun;
+          _setWeapon(Weapon.shotgun);
         case MobjType.chaingun:
           _bullets += 20;
           _ownedWeapons.add(Weapon.chaingun);
-          _weapon = Weapon.chaingun;
+          _setWeapon(Weapon.chaingun);
         case MobjType.megaHealth:
           _health = (_health + 100 > 200) ? 200 : _health + 100;
         case MobjType.soulSphere:
@@ -909,7 +992,7 @@ class GameState {
           _shells += 4;
         case MobjType.berserk:
           if (_health < 100) _health = 100;
-          _weapon = Weapon.fist;
+          _setWeapon(Weapon.fist);
         case MobjType.invulnerability ||
             MobjType.invisibility ||
             MobjType.radiationSuit ||
@@ -938,6 +1021,7 @@ class GameState {
           _health = (_health + 10 > 100) ? 100 : _health + 10;
       }
       if ((m.info.flags & MobjFlags.countItem) != 0) _itemCount++;
+      _emitPlayerSound('DSITEMUP');
       m.removed = true;
     }
   }
@@ -953,6 +1037,112 @@ class GameState {
     flags: m.flags,
     health: m.health,
   );
+
+  void _emitPlayerSound(String soundId) {
+    _appendSound(
+      SoundEvent(
+        soundId: soundId,
+        origin: SoundOrigin.player,
+        sourceId: SoundEvent.playerSourceId,
+        tic: _tic,
+        x: _playerMobj.x,
+        y: _playerMobj.y,
+        z: _playerMobj.z,
+      ),
+    );
+  }
+
+  void _emitMobjSound(String soundId, Mobj m) {
+    _appendSound(
+      SoundEvent(
+        soundId: soundId,
+        origin: SoundOrigin.world,
+        sourceId: m.id,
+        tic: _tic,
+        x: m.x,
+        y: m.y,
+        z: m.z,
+      ),
+    );
+  }
+
+  void _emitSectorSound(String soundId, int sectorIndex) {
+    final SectorRuntime sector = _runtime.sectors[sectorIndex];
+    if (sector.touchingLinedefs.isEmpty) {
+      _appendSound(
+        SoundEvent(
+          soundId: soundId,
+          origin: SoundOrigin.world,
+          sourceId: SoundEvent.sectorSourceId(sectorIndex),
+          tic: _tic,
+          x: 0,
+          y: 0,
+          z: sector.floorHeight,
+        ),
+      );
+      return;
+    }
+    final Linedef line = _runtime.map.linedefs[sector.touchingLinedefs.first];
+    final MapVertex a = _runtime.map.vertices[line.v1];
+    final MapVertex b = _runtime.map.vertices[line.v2];
+    _appendSound(
+      SoundEvent(
+        soundId: soundId,
+        origin: SoundOrigin.world,
+        sourceId: SoundEvent.sectorSourceId(sectorIndex),
+        tic: _tic,
+        x: toFixed(a.x + b.x) ~/ 2,
+        y: toFixed(a.y + b.y) ~/ 2,
+        z: sector.floorHeight,
+      ),
+    );
+  }
+
+  void _emitNonPositionalSound(String soundId) {
+    _appendSound(
+      SoundEvent(
+        soundId: soundId,
+        origin: SoundOrigin.nonPositional,
+        sourceId: SoundEvent.nonPositionalSourceId,
+        tic: _tic,
+        x: 0,
+        y: 0,
+        z: 0,
+      ),
+    );
+  }
+
+  void _appendSound(SoundEvent event) {
+    if (_sounds.length < maxSoundJournalLength) {
+      _sounds.add(event);
+      return;
+    }
+
+    final int expendable = _sounds.indexWhere(
+      (SoundEvent pending) => !_isCriticalSound(pending.soundId),
+    );
+    if (expendable >= 0) {
+      _sounds.removeAt(expendable);
+      _sounds.add(event);
+      _droppedSoundEvents++;
+      return;
+    }
+    if (_isCriticalSound(event.soundId)) {
+      _sounds.removeAt(0);
+      _sounds.add(event);
+    }
+    _droppedSoundEvents++;
+  }
+
+  static bool _isCriticalSound(String soundId) => switch (soundId) {
+    'DSDOROPN' ||
+    'DSDORCLS' ||
+    'DSPSTART' ||
+    'DSPSTOP' ||
+    'DSPODTH1' ||
+    'DSSWTCHX' => true,
+    _ => false,
+  };
 
   int hashState() {
     int h = 0x811c9dc5;
@@ -1027,7 +1217,7 @@ class GameState {
       add(m.removed ? 1 : 0);
     }
     // _bob is a pure function of already-hashed tic and player momentum.
-    // _changes is an output journal: consuming it cannot affect simulation
+    // _changes and _sounds are output journals: consuming them cannot affect simulation
     // state or future tics, so including it would make replay hashes depend on
     // renderer polling rather than seed + TicCmd stream.
     return h;
@@ -1047,6 +1237,7 @@ class _DoorMover extends SectorMover {
   final bool Function(int nextCeiling) obstructed;
   int _wait = 150;
   bool _closing = false;
+  bool get isClosing => _closing;
   @override
   bool tick() {
     final int step = toFixed(4);
@@ -1147,6 +1338,8 @@ class _FloorMover extends SectorMover {
 
 bool _isDoorSpecial(int special) =>
     <int>{1, 26, 27, 28, 31, 32, 33, 34, 61, 99, 103, 134}.contains(special);
+bool _isSwitchDoorSpecial(int special) =>
+    <int>{61, 99, 103, 134}.contains(special);
 bool _doorStaysOpen(int special) => <int>{31, 32, 33, 34, 61}.contains(special);
 Key? _requiredKey(int special) => switch (special) {
   26 || 32 || 99 => Key.blue,

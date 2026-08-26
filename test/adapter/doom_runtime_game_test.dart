@@ -7,6 +7,7 @@ import 'package:doompeller/adapter/adapter.dart';
 import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
+import 'package:doompeller/game/sound_playback.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 
@@ -81,6 +82,34 @@ Future<PreparedDoomLevel> fixtureExitLevel() async {
   );
 }
 
+Future<PreparedDoomLevel> fixtureSoundLevel() async {
+  final base = await fixtureLevel();
+  final source = base.map;
+  final map = MapData(
+    name: source.name,
+    vertices: source.vertices,
+    linedefs: source.linedefs,
+    sidedefs: source.sidedefs,
+    sectors: source.sectors,
+    segs: source.segs,
+    subsectors: source.subsectors,
+    nodes: source.nodes,
+    things: const <Thing>[
+      Thing(x: 220, y: 128, angle: 0, type: 1, flags: 7),
+      Thing(x: 180, y: 128, angle: 0, type: 3004, flags: 7),
+    ],
+    blockmap: source.blockmap,
+    reject: source.reject,
+  );
+  return PreparedDoomLevel(
+    content: base.content,
+    resources: base.resources,
+    map: map,
+    geometry: base.geometry,
+    game: GameState.start(map, const GameConfig(), seed: 3),
+  );
+}
+
 void main() {
   setUp(FakeGpuBackend.new);
 
@@ -94,6 +123,40 @@ void main() {
     expect(runtime.gameState.tic, 35);
     expect(runtime.tickDriver.executedTics, 35);
     expect(runtime.tickDriver.droppedTics, 0);
+  });
+
+  test('runtime routes fire, door, and death journals to backend', () async {
+    final FakeAudioBackend backend = FakeAudioBackend();
+    final runtime = DoomRuntimeGame(
+      await fixtureSoundLevel(),
+      audioBackend: backend,
+    );
+
+    runtime.input.triggerUse();
+    runtime.advanceMicrosForTest(28572);
+    runtime.input.addPointerTurn(0x8000);
+    runtime.input.press(DoomControl.attack);
+    for (var i = 0; i < 20; i++) {
+      runtime.advanceMicrosForTest(28572);
+    }
+    runtime.input.release(DoomControl.attack);
+    await runtime.soundPlaybackIdleForTest;
+
+    final List<String> sounds = <String>[
+      for (final call in backend.playCalls) call.soundId,
+    ];
+    expect(sounds, contains('DSDOROPN'));
+    expect(sounds, contains('DSPISTOL'));
+    expect(sounds, contains('DSPODTH1'));
+    expect(runtime.gameState.soundJournal, isEmpty);
+    expect(
+      backend.playCalls
+          .where((call) => call.soundId == 'DSDOROPN')
+          .single
+          .volume,
+      closeTo(1 - 36 / 1200, 1e-12),
+      reason: 'listener PlayerView fixed-point coordinates become map units',
+    );
   });
 
   test('camera interpolation never advances simulation state', () async {

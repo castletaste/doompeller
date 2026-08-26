@@ -129,6 +129,82 @@ void main() {
     expect(count, 0);
   });
 
+  test('maximum forward impulse keeps bob at the vanilla peak', () {
+    final GameState game = GameState.start(
+      testMap(),
+      const GameConfig(monsters: false),
+    );
+    game.runTic(const TicCmd(forwardMove: 50));
+    for (int i = 0; i < 4; i++) {
+      game.runTic(TicCmd.empty);
+    }
+    expect(game.player.bob, 0x7fff8);
+    for (int i = 0; i < 100; i++) {
+      game.runTic(const TicCmd(forwardMove: 50));
+      expect(game.player.bob.abs(), lessThanOrEqualTo(toFixed(8)));
+    }
+  });
+
+  test('camera stays below the current moving sector ceiling', () {
+    final MapData map = testMap(
+      sectors: twoSectors(backCeiling: 32),
+      sides: twoSides(),
+      lines: <Linedef>[portal(special: LineSpecial.doorOpenWaitClose)],
+      things: const <Thing>[
+        Thing(
+          x: 160,
+          y: 64,
+          angle: 180,
+          type: 1,
+          flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+        ),
+      ],
+    );
+    final GameState game = GameState.start(
+      map,
+      const GameConfig(monsters: false),
+    );
+    expect(game.playerSectorIndex, 1);
+    expect(game.player.viewZ, toFixed(28));
+
+    game.runTic(const TicCmd(buttons: Buttons.use));
+    game.runTic(TicCmd.empty);
+    expect(map.sectors[1].ceilingHeight, 32);
+    expect(game.sectors.elementAt(1).ceilingHeight, toFixed(36));
+    expect(game.player.viewZ, toFixed(32));
+
+    int previousCeiling = game.sectors.elementAt(1).ceilingHeight;
+    bool observedDescendingCeiling = false;
+    for (int i = 0; i < 220; i++) {
+      game.runTic(TicCmd.empty);
+      final int ceiling = game.sectors.elementAt(1).ceilingHeight;
+      if (ceiling < previousCeiling) observedDescendingCeiling = true;
+      expect(game.player.viewZ, lessThanOrEqualTo(ceiling - toFixed(4)));
+      previousCeiling = ceiling;
+    }
+    expect(observedDescendingCeiling, isTrue);
+  });
+
+  test('camera clamp also covers a static low passage', () {
+    final GameState game = GameState.start(
+      testMap(
+        sectors: const <Sector>[
+          Sector(
+            floorHeight: 0,
+            ceilingHeight: 44,
+            floorFlat: 'F',
+            ceilingFlat: 'C',
+            lightLevel: 160,
+            special: 0,
+            tag: 0,
+          ),
+        ],
+      ),
+      const GameConfig(monsters: false),
+    );
+    expect(game.player.viewZ, toFixed(40));
+  });
+
   test('fixed driver rejects a negative frame delta', () {
     final FixedTickDriver driver = FixedTickDriver();
     expect(

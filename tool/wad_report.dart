@@ -149,7 +149,7 @@ Future<void> main(List<String> arguments) async {
 
 void _printUsage() {
   stdout.writeln(
-    'Usage: dart run tool/wad_report.dart [--map E1M1] [--json] '
+    'Usage: dart run tool/wad_report.dart [--scale-fixture] [--map E1M1] [--json] '
     '<path-to-wad>',
   );
   stdout.writeln(
@@ -162,12 +162,14 @@ class _Arguments {
   const _Arguments({
     required this.map,
     required this.json,
+    required this.scaleFixture,
     required this.path,
     required this.help,
   });
 
   final String? map;
   final bool json;
+  final bool scaleFixture;
   final String? path;
   final bool help;
 
@@ -175,11 +177,14 @@ class _Arguments {
     String? map;
     String? path;
     var json = false;
+    var scaleFixture = false;
     var help = false;
     for (var i = 0; i < args.length; i++) {
       final String arg = args[i];
       if (arg == '--json') {
         json = true;
+      } else if (arg == '--scale-fixture') {
+        scaleFixture = true;
       } else if (arg == '--help' || arg == '-h') {
         help = true;
       } else if (arg == '--map') {
@@ -200,7 +205,16 @@ class _Arguments {
         return null;
       }
     }
-    return _Arguments(map: map, json: json, path: path, help: help);
+    if (scaleFixture && path != null) {
+      return null;
+    }
+    return _Arguments(
+      map: map,
+      json: json,
+      scaleFixture: scaleFixture,
+      path: path,
+      help: help,
+    );
   }
 }
 
@@ -226,15 +240,26 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
   final String? configuredPath =
       options.path ?? Platform.environment[_wadPathEnvironment]?.trim();
   final String path = configuredPath ?? '';
-  final bool fixture = path.isEmpty;
-  final String source = fixture ? 'synthetic fixture' : path;
-  final String defaultMap = fixture ? DoomFixtures.mapName : 'E1M1';
+  final bool fixture = path.isEmpty && !options.scaleFixture;
+  final bool scaleFixture = options.scaleFixture;
+  final String source = scaleFixture
+      ? 'synthetic E1M1-scale fixture'
+      : fixture
+      ? 'synthetic fixture'
+      : path;
+  final String defaultMap = scaleFixture
+      ? DoomScaleFixture.mapName
+      : fixture
+      ? DoomFixtures.mapName
+      : 'E1M1';
   final String mapName = options.map ?? defaultMap;
 
   final Stopwatch parseClock = Stopwatch()..start();
   final WadFile wad;
   try {
-    final Uint8List bytes = fixture
+    final Uint8List bytes = scaleFixture
+        ? DoomScaleFixture.pwadBytes()
+        : fixture
         ? DoomFixtures.pwadBytes()
         : readWadBytes(path, maxWadBytes: maxWadBytes);
     wad = WadFile.parse(bytes, limits: DoomLimits(maxWadBytes: maxWadBytes));
@@ -313,7 +338,11 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
 
   final Map<String, Object?> json = <String, Object?>{
     'tool': 'wad_report',
-    'source': fixture ? 'synthetic_fixture' : configuredPath,
+    'source': scaleFixture
+        ? 'synthetic_e1m1_scale_fixture'
+        : fixture
+        ? 'synthetic_fixture'
+        : configuredPath,
     'map': map.name,
     'requestedMap': mapName,
     'container': <String, Object?>{

@@ -86,7 +86,8 @@ class Mobj {
   bool get isShootable => (flags & MobjFlags.shootable) != 0;
   bool get isCorpse => (flags & MobjFlags.corpse) != 0;
 
-  /// Eye height used for line-of-sight and for the player camera.
+  /// Unbobbed eye height used for line-of-sight. The renderer-facing player
+  /// view applies camera bob and the current sector ceiling clamp separately.
   int get viewZ => z + toFixed(41);
 
   /// Sets velocity from a speed and a direction.

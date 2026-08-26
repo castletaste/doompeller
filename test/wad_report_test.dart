@@ -48,6 +48,26 @@ void main() {
     _expectNoWadContent(result);
   });
 
+  test('wad report proves the synthetic E1M1-scale fixture is READY', () async {
+    final ProcessResult result = await _run(<String>[
+      '--json',
+      '--scale-fixture',
+    ]);
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect(result.stderr, isEmpty);
+    final Map<String, Object?> report = _json(result);
+    expect(report['source'], 'synthetic_e1m1_scale_fixture');
+    expect(report['verdict'], 'READY');
+    final Map<String, Object?> counts =
+        report['mapCounts']! as Map<String, Object?>;
+    expect(counts['linedefs'], greaterThanOrEqualTo(470));
+    expect(counts['sectors'], greaterThanOrEqualTo(90));
+    final Map<String, Object?> geometry =
+        report['geometry']! as Map<String, Object?>;
+    expect(geometry['fallbackSectorCount'], 0);
+  });
+
   test('explicit existing and missing map names have clear outcomes', () async {
     final String path = _write(temp, 'fixture.wad', DoomFixtures.pwadBytes());
 

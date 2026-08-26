@@ -85,6 +85,24 @@ abstract final class DoomFixtures {
     'CHGGA0',
   ];
 
+  /// Generated DMX sounds used by the core's event vocabulary. The fixture
+  /// contains no captured or derived commercial audio.
+  static const List<String> soundNames = <String>[
+    'DSPISTOL',
+    'DSSHOTGN',
+    'DSPUNCH',
+    'DSWPNUP',
+    'DSDOROPN',
+    'DSDORCLS',
+    'DSPSTART',
+    'DSPSTOP',
+    'DSPLPAIN',
+    'DSPODTH1',
+    'DSITEMUP',
+    'DSSWTCHN',
+    'DSSWTCHX',
+  ];
+
   /// Texture names declared in TEXTURE1, in declaration order.
   static const List<String> texture1Names = <String>[
     'WALL1',
@@ -127,6 +145,12 @@ abstract final class DoomFixtures {
       for (final String name in spriteNames)
         LumpSource(name, encodeDoomPatch(buildFixtureSprite(name))),
       LumpSource.marker('S_END'),
+      for (final String name in soundNames)
+        LumpSource(name, buildFixtureSound(name)),
+      LumpSource(
+        'D_TEST',
+        Uint8List.fromList(<int>[0x4d, 0x55, 0x53, 0x1a, 0, 0]),
+      ),
     ];
     return buildWad(lumps);
   }
@@ -198,6 +222,46 @@ abstract final class DoomFixtures {
     }
     return out;
   }
+}
+
+/// Builds a deterministic synthetic DMX sound with conventional edge guards.
+///
+/// A stable FNV hash selects pitch from [name]. All sample
+/// bytes are generated here; no IWAD audio is read or transformed.
+Uint8List buildFixtureSound(String name, {int sampleRate = 11025}) {
+  const int playableSamples = 384;
+  const int guard = kDmxGuardSamples;
+  final int seed = fnv1a64(Uint8List.fromList(name.codeUnits));
+  final int period = 12 + (seed & 31);
+  final Uint8List playable = Uint8List(playableSamples);
+  for (var i = 0; i < playable.length; i++) {
+    final int phase = i % period;
+    final int wave = phase < period ~/ 2 ? 1 : -1;
+    final int envelope = 96 * (playable.length - i) ~/ playable.length;
+    playable[i] = 128 + wave * envelope;
+  }
+  final int stored = playable.length + guard * 2;
+  final Uint8List out = Uint8List(kDmxSoundHeaderBytes + stored);
+  final ByteData data = ByteData.sublistView(out);
+  data.setUint16(0, kDmxDigitalSoundType, Endian.little);
+  data.setUint16(2, sampleRate, Endian.little);
+  data.setUint32(4, stored, Endian.little);
+  out.fillRange(
+    kDmxSoundHeaderBytes,
+    kDmxSoundHeaderBytes + guard,
+    playable.first,
+  );
+  out.setRange(
+    kDmxSoundHeaderBytes + guard,
+    kDmxSoundHeaderBytes + guard + playable.length,
+    playable,
+  );
+  out.fillRange(
+    kDmxSoundHeaderBytes + guard + playable.length,
+    out.length,
+    playable.last,
+  );
+  return out;
 }
 
 class _FixtureTexture {

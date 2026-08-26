@@ -131,8 +131,14 @@ final class FrameHistogram {
       return FrameSummary.empty;
     }
     final totals = Int32List(_length);
+    final builds = Int32List(_length);
+    final rasters = Int32List(_length);
     totals.setRange(0, _length, _totals);
+    builds.setRange(0, _length, _builds);
+    rasters.setRange(0, _length, _rasters);
     _sort(totals);
+    _sort(builds);
+    _sort(rasters);
 
     var buildSum = 0;
     var rasterSum = 0;
@@ -147,6 +153,14 @@ final class FrameHistogram {
       p95Micros: _percentile(totals, 0.95),
       p99Micros: _percentile(totals, 0.99),
       maxMicros: totals[_length - 1],
+      p50BuildMicros: _percentile(builds, 0.50),
+      p95BuildMicros: _percentile(builds, 0.95),
+      p99BuildMicros: _percentile(builds, 0.99),
+      maxBuildMicros: builds[_length - 1],
+      p50RasterMicros: _percentile(rasters, 0.50),
+      p95RasterMicros: _percentile(rasters, 0.95),
+      p99RasterMicros: _percentile(rasters, 0.99),
+      maxRasterMicros: rasters[_length - 1],
       meanBuildMicros: buildSum ~/ _length,
       meanRasterMicros: rasterSum ~/ _length,
       deadlineMisses: _deadlineMisses,
@@ -181,6 +195,14 @@ final class FrameSummary {
     required this.p95Micros,
     required this.p99Micros,
     required this.maxMicros,
+    required this.p50BuildMicros,
+    required this.p95BuildMicros,
+    required this.p99BuildMicros,
+    required this.maxBuildMicros,
+    required this.p50RasterMicros,
+    required this.p95RasterMicros,
+    required this.p99RasterMicros,
+    required this.maxRasterMicros,
     required this.meanBuildMicros,
     required this.meanRasterMicros,
     required this.deadlineMisses,
@@ -195,6 +217,14 @@ final class FrameSummary {
     p95Micros: 0,
     p99Micros: 0,
     maxMicros: 0,
+    p50BuildMicros: 0,
+    p95BuildMicros: 0,
+    p99BuildMicros: 0,
+    maxBuildMicros: 0,
+    p50RasterMicros: 0,
+    p95RasterMicros: 0,
+    p99RasterMicros: 0,
+    maxRasterMicros: 0,
     meanBuildMicros: 0,
     meanRasterMicros: 0,
     deadlineMisses: 0,
@@ -208,6 +238,14 @@ final class FrameSummary {
   final int p95Micros;
   final int p99Micros;
   final int maxMicros;
+  final int p50BuildMicros;
+  final int p95BuildMicros;
+  final int p99BuildMicros;
+  final int maxBuildMicros;
+  final int p50RasterMicros;
+  final int p95RasterMicros;
+  final int p99RasterMicros;
+  final int maxRasterMicros;
   final int meanBuildMicros;
   final int meanRasterMicros;
   final int deadlineMisses;
@@ -230,6 +268,24 @@ final class FrameSummary {
     'p95_ms': p95Millis,
     'p99_ms': p99Millis,
     'max_ms': maxMillis,
+    'build_duration': <String, Object>{
+      'metric': 'flutter_frame_timing_build_duration',
+      'available': true,
+      'p50_ms': p50BuildMicros / 1000,
+      'p95_ms': p95BuildMicros / 1000,
+      'p99_ms': p99BuildMicros / 1000,
+      'max_ms': maxBuildMicros / 1000,
+      'mean_ms': meanBuildMicros / 1000,
+    },
+    'raster_duration': <String, Object>{
+      'metric': 'flutter_frame_timing_raster_duration',
+      'available': true,
+      'p50_ms': p50RasterMicros / 1000,
+      'p95_ms': p95RasterMicros / 1000,
+      'p99_ms': p99RasterMicros / 1000,
+      'max_ms': maxRasterMicros / 1000,
+      'mean_ms': meanRasterMicros / 1000,
+    },
     'mean_build_ms': meanBuildMicros / 1000,
     'mean_raster_ms': meanRasterMicros / 1000,
     'deadline_ms': deadlineMicros / 1000,

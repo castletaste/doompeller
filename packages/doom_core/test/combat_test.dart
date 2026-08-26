@@ -259,6 +259,8 @@ void main() {
       int zombieHealth() =>
           game.mobjs.firstWhere((MobjView m) => m.sprite == 'POSS').health;
       game.runTic(const TicCmd(buttons: Buttons.attack));
+      // The camera would be clamped below this opening. Keeping the attack
+      // blocked proves sight still uses each actor's unbobbed Mobj eye height.
       expect(zombieHealth(), 20);
       game.runTic(const TicCmd(buttons: Buttons.use));
       for (int i = 0; i < 25; i++) {
@@ -266,6 +268,36 @@ void main() {
       }
       game.runTic(const TicCmd(buttons: Buttons.attack));
       expect(zombieHealth(), lessThan(20));
+    });
+
+    test('monster sight keeps the unbobbed eye across a low door', () {
+      final GameState game = GameState.start(
+        testMap(
+          sectors: twoSectors(backCeiling: 32),
+          sides: twoSides(),
+          lines: <Linedef>[portal(special: LineSpecial.doorOpenStay)],
+          things: const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 180, y: 64, angle: 180, type: 3004, flags: _skills),
+          ],
+        ),
+        const GameConfig(),
+        seed: 3,
+      );
+      int zombieX() =>
+          game.mobjs.firstWhere((MobjView m) => m.sprite == 'POSS').x;
+
+      for (int i = 0; i < 40; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(zombieX(), toFixed(180));
+      expect(game.player.health, 100);
+
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      for (int i = 0; i < 25; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(zombieX(), lessThan(toFixed(180)));
     });
 
     test('imp projectile is spawned without mutating actor iteration', () {

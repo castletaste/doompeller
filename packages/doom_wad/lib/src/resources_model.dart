@@ -30,6 +30,43 @@ const String kSkyFlatName = 'F_SKY1';
 /// Texture name meaning "no texture on this surface".
 const String kNoTextureName = '-';
 
+/// Header size of a Doom DMX digital-sound lump.
+const int kDmxSoundHeaderBytes = 8;
+
+/// A decoded unsigned 8-bit mono Doom sound effect.
+class DoomSound {
+  const DoomSound({
+    required this.name,
+    required this.sampleRate,
+    required this.pcm,
+  });
+
+  /// Uppercase DS-prefixed lump name.
+  final String name;
+
+  /// Samples per second.
+  final int sampleRate;
+
+  /// Playable unsigned 8-bit mono PCM, with recognised DMX guard padding
+  /// removed.
+  final Uint8List pcm;
+
+  int get sampleCount => pcm.lengthInBytes;
+}
+
+/// Lightweight metadata for a D_* music lump.
+class DoomMusicInfo {
+  const DoomMusicInfo({
+    required this.name,
+    required this.byteLength,
+    required this.isMus,
+  });
+
+  final String name;
+  final int byteLength;
+  final bool isMus;
+}
+
 /// The 14 palettes of PLAYPAL.
 ///
 /// Index 0 is the base palette; 1..8 are damage flashes, 9..12 item pickup
@@ -115,13 +152,13 @@ class PatchImage {
 
   /// A fully transparent patch of the given size.
   factory PatchImage.empty(int width, int height) => PatchImage(
-        width: width,
-        height: height,
-        leftOffset: 0,
-        topOffset: 0,
-        indices: Uint8List(width * height),
-        coverage: Uint8List(width * height),
-      );
+    width: width,
+    height: height,
+    leftOffset: 0,
+    topOffset: 0,
+    indices: Uint8List(width * height),
+    coverage: Uint8List(width * height),
+  );
 
   final int width;
   final int height;

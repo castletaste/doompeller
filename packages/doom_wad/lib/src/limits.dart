@@ -27,6 +27,8 @@ class DoomLimits {
     this.maxIntersectionChecks = 1000000,
     this.maxTriangles = 2000000,
     this.maxAtlasPixels = 4096 * 4096,
+    this.maxSoundSamples = 16 * 1024 * 1024,
+    this.maxSoundSampleRate = 48000,
   });
 
   static const DoomLimits defaults = DoomLimits();
@@ -62,6 +64,13 @@ class DoomLimits {
   final int maxIntersectionChecks;
   final int maxTriangles;
   final int maxAtlasPixels;
+
+  /// Maximum decoded PCM bytes in one DMX sound lump. This is checked against
+  /// the declared count before a destination buffer is allocated.
+  final int maxSoundSamples;
+
+  /// Highest accepted sample rate for an unsigned 8-bit DMX sound.
+  final int maxSoundSampleRate;
 
   /// Throws [DoomLimitFailure] when [value] exceeds [limit].
   static void check(int value, int limit, String limitName) {

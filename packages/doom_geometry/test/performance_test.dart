@@ -1,4 +1,5 @@
 import 'package:doom_geometry/doom_geometry.dart';
+import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
 
 import 'support/fixtures.dart';
@@ -22,8 +23,11 @@ void main() {
 
     expect(map.sectors.length, 100);
     expect(map.linedefs.length, greaterThan(400));
-    expect(map.subsectors.length, greaterThan(50),
-        reason: 'the node builder must actually partition this map');
+    expect(
+      map.subsectors.length,
+      greaterThan(50),
+      reason: 'the node builder must actually partition this map',
+    );
 
     final Stopwatch clock = Stopwatch()..start();
     final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
@@ -33,16 +37,23 @@ void main() {
     clock.stop();
 
     final GeometryReport report = level.report;
-    expect(report.budgetExhausted, isFalse,
-        reason: 'a normal map must not exhaust the budget');
+    expect(
+      report.budgetExhausted,
+      isFalse,
+      reason: 'a normal map must not exhaust the budget',
+    );
 
     // Scale check: work must stay near-linear in map size. A quadratic
     // validator on 100 sectors and ~3000 triangles would be in the millions;
     // this bound is comfortably above the real figure and far below quadratic.
     final int checksPerSector = report.intersectionChecks ~/ map.sectors.length;
-    expect(checksPerSector, lessThan(2000),
-        reason: 'checks per sector must not grow with map size: '
-            '${report.intersectionChecks} total');
+    expect(
+      checksPerSector,
+      lessThan(2000),
+      reason:
+          'checks per sector must not grow with map size: '
+          '${report.intersectionChecks} total',
+    );
     expect(report.intersectionChecks, lessThan(200000));
 
     // Loose wall-clock guard against a catastrophic regression.
@@ -56,8 +67,11 @@ void main() {
     // Four times the map must cost far less than sixteen times the work.
     // Allowing 8x leaves room for the node tree deepening while still failing
     // loudly on genuinely quadratic behaviour.
-    expect(large, lessThan(small * 8),
-        reason: '$small -> $large for a 4x larger map');
+    expect(
+      large,
+      lessThan(small * 8),
+      reason: '$small -> $large for a 4x larger map',
+    );
   });
 
   test('the budget is a real ceiling, not a suggestion', () {
@@ -70,9 +84,11 @@ void main() {
       ),
     );
     expect(level.report.budgetExhausted, isTrue);
-    expect(level.report.intersectionChecks,
-        lessThan(500 + map.sectors.length * 4),
-        reason: 'work must stop promptly once the budget is gone');
+    expect(
+      level.report.intersectionChecks,
+      lessThan(500 + map.sectors.length * 4),
+      reason: 'work must stop promptly once the budget is gone',
+    );
   });
 
   test('a large map still agrees with the oracle', () {
@@ -88,18 +104,68 @@ void main() {
     for (final SectorFinding f in report.findings) {
       totalArea += f.loopArea;
     }
-    expect(report.totalAreaDelta / totalArea, lessThan(1e-6),
-        reason: report.summary());
+    expect(
+      report.totalAreaDelta / totalArea,
+      lessThan(1e-6),
+      reason: report.summary(),
+    );
     expect(report.tJunctionCount, 0);
     expect(report.degenerateTriangleCount, 0);
     expect(report.fallbackSectors, isEmpty);
   });
+
+  test('WAD-loaded scale fixture grows sub-quadratically', () {
+    final GeometryReport small = _scaleReport(
+      const ScaleFixtureConfig(columns: 6, rows: 5),
+    );
+    final GeometryReport medium = _scaleReport(
+      const ScaleFixtureConfig(columns: 10, rows: 6),
+    );
+    final GeometryReport large = _scaleReport(ScaleFixtureConfig.e1m1Scale);
+
+    for (final GeometryReport report in <GeometryReport>[
+      small,
+      medium,
+      large,
+    ]) {
+      expect(report.bspFirst, isTrue);
+      expect(report.validated, isTrue);
+      expect(report.budgetExhausted, isFalse, reason: report.summary());
+      expect(
+        report.intersectionChecks,
+        lessThanOrEqualTo(report.intersectionBudget),
+      );
+    }
+
+    // 30 -> 120 sectors is 4x input. Eight times the check count leaves room
+    // for deeper BSPs but decisively rejects an O(n^2) validation pass.
+    expect(
+      large.intersectionChecks,
+      lessThan(small.intersectionChecks * 8),
+      reason:
+          '${small.intersectionChecks} -> ${medium.intersectionChecks} '
+          '-> ${large.intersectionChecks}',
+    );
+    expect(
+      medium.intersectionChecks,
+      lessThan(small.intersectionChecks * 3),
+      reason: '${small.intersectionChecks} -> ${medium.intersectionChecks}',
+    );
+  });
 }
 
-int _checksFor(MapData map) =>
-    DoomGeometryCompiler.compileWithTextures(map, testTextures())
-        .report
-        .intersectionChecks;
+int _checksFor(MapData map) => DoomGeometryCompiler.compileWithTextures(
+  map,
+  testTextures(),
+).report.intersectionChecks;
+
+GeometryReport _scaleReport(ScaleFixtureConfig config) {
+  final WadSet set = DoomScaleFixture.wadSet(config);
+  return DoomGeometryCompiler.compile(
+    MapData.load(set, DoomScaleFixture.mapName),
+    WadResources.load(set),
+  ).report;
+}
 
 /// A grid of synthetic rooms used only as a scale fixture.
 ///
@@ -123,17 +189,14 @@ MapData _largeMap({required int rooms}) {
       lightLevel: 128 + (i % 5) * 16,
     );
     // Concave L so every room forces a partition.
-    b.solidLoop(
-      <int>[
-        x, y, //
-        x + 256, y,
-        x + 256, y + 128,
-        x + 128, y + 128,
-        x + 128, y + 256,
-        x, y + 256,
-      ],
-      s,
-    );
+    b.solidLoop(<int>[
+      x, y, //
+      x + 256, y,
+      x + 256, y + 128,
+      x + 128, y + 128,
+      x + 128, y + 256,
+      x, y + 256,
+    ], s);
   }
   return b.build();
 }

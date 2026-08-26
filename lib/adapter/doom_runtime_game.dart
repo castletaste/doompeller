@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:doom_core/doom_core.dart';
@@ -12,8 +13,10 @@ import '../game/doom_hud.dart';
 import '../game/doom_automap.dart';
 import '../game/doom_input.dart';
 import '../game/level_preparer.dart';
+import '../game/sound_playback.dart';
 import 'doom_scene.dart';
 import 'doom_sprite_catalog.dart';
+import 'doom_camera.dart';
 
 typedef DoomLevelCompleteCallback = void Function(bool secretExit);
 
@@ -25,6 +28,7 @@ final class DoomRuntimeGame extends FlameGame3D
     PreparedDoomLevel level, {
     DoomInputState? input,
     DoomLevelCompleteCallback? onLevelComplete,
+    AudioBackend audioBackend = const NoAudioBackend(),
   }) {
     final Set<String> availablePrefixes = <String>{
       for (final name in level.resources.spriteNames)
@@ -51,6 +55,10 @@ final class DoomRuntimeGame extends FlameGame3D
       scene,
       input ?? DoomInputState(),
       onLevelComplete,
+      SoundPlaybackManager(
+        backend: audioBackend,
+        catalog: WadSoundCatalog(level.resources),
+      ),
       camera: _cameraFor(player),
       packedSpritePrefixes: packed,
     );
@@ -60,7 +68,8 @@ final class DoomRuntimeGame extends FlameGame3D
     this.level,
     this.scene,
     this.input,
-    this._onLevelComplete, {
+    this._onLevelComplete,
+    this._soundPlayback, {
     required CameraComponent3D camera,
     required Set<String> packedSpritePrefixes,
   }) : gameState = level.game,
@@ -105,6 +114,11 @@ final class DoomRuntimeGame extends FlameGame3D
     const DoomHudSnapshot.initial(),
   );
   final DoomAutomapState _automap;
+  final SoundPlaybackManager _soundPlayback;
+  late final DoomCoreSoundJournal _soundJournal = DoomCoreSoundJournal(
+    gameState,
+  );
+  Future<void> _soundPlaybackTail = Future<void>.value();
 
   PlayerView _previousPlayer;
   PlayerView _currentPlayer;
@@ -174,6 +188,8 @@ final class DoomRuntimeGame extends FlameGame3D
 
   void renderCameraAtForTest(double alpha) => _syncCamera(alpha);
 
+  Future<void> get soundPlaybackIdleForTest => _soundPlaybackTail;
+
   ({double x, double y, double z, double targetX, double targetZ})
   get cameraSnapshot => (
     x: camera.position.x,
@@ -199,12 +215,28 @@ final class DoomRuntimeGame extends FlameGame3D
       sectorIndex: gameState.playerSectorIndex,
     );
     _consumeSectorJournal();
+    _consumeSoundJournal();
     _syncActors();
     _syncWeapon();
     if (gameState.levelComplete && !_completionReported) {
       _completionReported = true;
       _onLevelComplete?.call(gameState.usedSecretExit);
     }
+  }
+
+  void _consumeSoundJournal() {
+    final List<SoundEvent> events = _soundJournal.consumeSoundJournal().toList(
+      growable: false,
+    );
+    final AudioListener listener = audioListenerFromPlayer(_currentPlayer);
+    final int gameTic = gameState.tic;
+    _soundPlaybackTail = _soundPlaybackTail.then(
+      (_) => _soundPlayback.consumeEvents(
+        events: events,
+        listener: listener,
+        gameTic: gameTic,
+      ),
+    );
   }
 
   void _consumeSectorJournal() {
@@ -452,6 +484,10 @@ final class DoomRuntimeGame extends FlameGame3D
   @override
   void onRemove() {
     input.clear();
+    _soundPlaybackTail = _soundPlaybackTail.then(
+      (_) => _soundPlayback.dispose(),
+    );
+    unawaited(_soundPlaybackTail);
     _hud.dispose();
     _automap.dispose();
     super.onRemove();
@@ -531,7 +567,7 @@ final class DoomRuntimeGame extends FlameGame3D
     final double x = fixedToDouble(player.x);
     final double y = fixedToDouble(player.viewZ);
     final double z = -fixedToDouble(player.y);
-    return CameraComponent3D(
+    return DoomCameraComponent(
       position: Vector3(x, y, z),
       target: Vector3(x + 64, y, z),
     );

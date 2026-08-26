@@ -18,7 +18,11 @@ export 'src/bsp_builder.dart'
         kBspSubsectorBit;
 export 'src/failures.dart';
 export 'src/fixture_map.dart'
-    show FixtureGeometry, FixtureMapLumps, buildFixtureMapLumps, buildFixtureBlockmap;
+    show
+        FixtureGeometry,
+        FixtureMapLumps,
+        buildFixtureMapLumps,
+        buildFixtureBlockmap;
 export 'src/fixtures.dart'
     show
         DoomFixtures,
@@ -26,7 +30,9 @@ export 'src/fixtures.dart'
         buildFixtureFlat,
         buildFixturePatch,
         buildFixturePlaypal,
+        buildFixtureSound,
         buildFixtureSprite;
+export 'src/scale_fixture.dart' show DoomScaleFixture, ScaleFixtureConfig;
 export 'src/limits.dart';
 export 'src/map_loader.dart'
     show
@@ -42,7 +48,8 @@ export 'src/map_loader.dart'
         loadMapData,
         parseBlockmap;
 export 'src/map_model.dart';
-export 'src/resources.dart' show WadResources, decodeDoomPatch;
+export 'src/resources.dart' show WadResources, decodeDoomPatch, decodeDoomSound;
 export 'src/resources_model.dart';
 export 'src/wad.dart';
-export 'src/wad_builder.dart' show LumpSource, buildWad, encodeDoomPatch, fnv1a64;
+export 'src/wad_builder.dart'
+    show LumpSource, buildWad, encodeDoomPatch, fnv1a64;

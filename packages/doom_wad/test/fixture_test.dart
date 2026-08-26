@@ -36,14 +36,14 @@ void main() {
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      expect(DoomFixtures.hash(), 0x218fe7c78513b4cf);
+      expect(DoomFixtures.hash(), 0xf1adef0308524d5c);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(DoomFixtures.pwadBytes().lengthInBytes, 163525);
-      expect(wad.length, 57);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 169267);
+      expect(wad.length, 71);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -83,6 +83,7 @@ void main() {
       expect(res.textureNames.length, 5);
       expect(res.flatNames.length, 4);
       expect(res.spriteNames.length, DoomFixtures.spriteNames.length);
+      expect(res.soundNames.length, DoomFixtures.soundNames.length);
       for (final String name in res.textureNames) {
         expect(res.composite(name), isNotNull, reason: name);
       }
@@ -92,6 +93,10 @@ void main() {
       for (final String name in res.spriteNames) {
         expect(res.sprite(name), isNotNull, reason: name);
       }
+      for (final String name in res.soundNames) {
+        expect(res.sound(name), isNotNull, reason: name);
+      }
+      expect(res.music('D_TEST')?.isMus, isTrue);
       for (var i = 0; i < res.patchNames.length; i++) {
         expect(res.patchAt(i), isNotNull, reason: res.patchNames[i]);
       }

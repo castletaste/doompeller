@@ -39,7 +39,8 @@ class DoomLimits {
   final int maxLumpCount, maxLumpBytes, maxVertices, maxLinedefs, maxSidedefs,
             maxSectors, maxSegs, maxSubsectors, maxNodes, maxThings,
             maxTextures, maxPatchesPerTexture, maxBlockmapCells,
-            maxBlockmapEntries, maxIntersectionChecks;
+            maxBlockmapEntries, maxIntersectionChecks, maxSoundSamples,
+            maxSoundSampleRate;
 }
 
 class WadFile {
@@ -65,6 +66,8 @@ class PatchImage { int width, height, leftOffset, topOffset;
                    Uint8List indices; Uint8List coverage; }  // column-major decoded
 class FlatImage  { Uint8List indices; }                // 64x64
 class TextureDef { String name; int width, height; List<TexturePatch> patches; }
+class DoomSound { String name; int sampleRate, sampleCount; Uint8List pcm; }
+class DoomMusicInfo { String name; int byteLength; bool isMus; }
 class WadResources {
   static WadResources load(WadSet set, {DoomLimits limits});
   Playpal get playpal; Colormap get colormap;
@@ -73,6 +76,9 @@ class WadResources {
   PatchImage? sprite(String lumpName);
   TextureDef? textureDef(String name);
   List<String> get spriteNames;
+  DoomSound? sound(String lumpName);       // lazy, memoised unsigned 8-bit PCM
+  List<String> get soundNames;             // DS* lumps, sorted
+  DoomMusicInfo? music(String lumpName);   // D_* length + MUS signature only
 }
 
 /// Raw map lumps, all validated against DoomLimits.
@@ -141,6 +147,8 @@ class GameState {
   PlayerView get player;              // x, y, z, angle, viewZ, health, armor, ammo, weapon
   Iterable<MobjView> get mobjs;       // x, y, z, angle, sprite, frame, flags
   Iterable<SectorRuntime> get sectors; // current floor/ceiling heights, light, flats
+  List<SoundEvent> get soundJournal;   // retained output, excluded from hashState
+  List<SoundEvent> consumeSoundJournal();
   int hashState();                    // deterministic replay oracle
 }
 ```
@@ -181,6 +189,24 @@ make replay identity depend on renderer polling. Player bob is likewise
 excluded because it is derived renderer output from the hashed tic and
 momentum. Future-affecting input latch, actor-id allocator, activated one-shot
 lines, mutable actor flags/frame, and mover/actor state are hashed.
+
+`GameState.soundJournal` follows the same retained-until-consumed contract and
+returns immutable `SoundEvent` snapshots containing the DS lump id, fixed-point
+source position, and `world` / `player` / `nonPositional` origin. It is also
+excluded from `hashState()`: playback polling is output-only. Any state that
+decides future sound emission remains ordinary hashed simulation state; door
+and lift phase is already represented by each mover's hash words.
+
+Each event also carries `sourceId` and `tic`. Together they let a consumer
+collapse duplicates honestly: one emitter, one lump, one tic. Position alone is
+wrong, because two actors can stand on the same spot and one actor can fire
+twice across skipped tics. Actor ids are positive, the player is zero, sectors
+are `-index - 1`, and non-positional events use a single reserved id.
+
+The journal is capped so a renderer that never polls cannot grow it without
+bound. On overflow the oldest expendable event is dropped first; door, lift,
+death and exit cues are treated as critical and are preserved in preference to
+ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
 `0xc69f4dc0` for seed 7 and its documented twenty-command stream. Spawn order

@@ -62,15 +62,19 @@ void main() {
       expect(histogram.droppedByOverflow, 1);
     });
 
-    test('averages build and raster time', () {
+    test('summarizes build and raster time separately', () {
       final histogram = FrameHistogram();
       histogram
         ..addSample(totalMicros: 3000, buildMicros: 1000, rasterMicros: 2000)
-        ..addSample(totalMicros: 5000, buildMicros: 3000, rasterMicros: 2000);
+        ..addSample(totalMicros: 5000, buildMicros: 3000, rasterMicros: 4000);
 
       final summary = histogram.summarize();
       expect(summary.meanBuildMicros, 2000);
-      expect(summary.meanRasterMicros, 2000);
+      expect(summary.meanRasterMicros, 3000);
+      expect(summary.p50BuildMicros, 3000);
+      expect(summary.p95BuildMicros, 3000);
+      expect(summary.p50RasterMicros, 4000);
+      expect(summary.p95RasterMicros, 4000);
     });
 
     test('clear resets derived counters too', () {
@@ -100,6 +104,8 @@ void main() {
       );
       expect(json['p50_ms'], 1.0);
       expect(json['deadline_ms'], closeTo(16.667, 0.001));
+      expect(json['build_duration'], isA<Map<String, Object>>());
+      expect(json['raster_duration'], isA<Map<String, Object>>());
     });
   });
 

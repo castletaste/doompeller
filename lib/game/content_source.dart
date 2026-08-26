@@ -85,10 +85,16 @@ final class DoomContentSource {
   final ReadWadLength _readLength;
   final DoomLimits limits;
 
-  Future<DoomContentLoadResult> loadDeveloperIwad() async {
+  Future<DoomContentLoadResult> loadDeveloperIwad({
+    String mapName = 'E1M1',
+  }) async {
     final String? configured = _environment[kDoomWadPathEnvironment]?.trim();
     if (configured == null || configured.isEmpty) {
       return const DoomContentPathMissing();
+    }
+    final String selectedMap = mapName.trim().toUpperCase();
+    if (!RegExp(r'^(E[1-9]M[1-9]|MAP[0-9]{2})$').hasMatch(selectedMap)) {
+      return DoomContentLoadFailure('Invalid Doom map name "$selectedMap".');
     }
 
     try {
@@ -106,15 +112,15 @@ final class DoomContentSource {
       }
 
       final WadSet set = WadSet(<WadFile>[wad]);
-      if (!set.mapNames().contains('E1M1')) {
-        return const DoomContentLoadFailure(
-          'The selected IWAD does not contain E1M1.',
+      if (!set.mapNames().contains(selectedMap)) {
+        return DoomContentLoadFailure(
+          'The selected IWAD does not contain $selectedMap.',
         );
       }
       return DoomContentLoaded(
         DoomContent(
           wads: set,
-          mapName: 'E1M1',
+          mapName: selectedMap,
           origin: DoomContentOrigin.developerIwad,
           sourcePath: configured,
         ),

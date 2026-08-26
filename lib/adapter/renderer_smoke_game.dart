@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
 import 'package:flame_3d/game.dart';
@@ -7,6 +8,8 @@ import 'package:flame_3d/graphics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../game/content_source.dart';
+import 'doom_runtime_game.dart';
 import 'doom_scene.dart';
 import 'doom_camera.dart';
 import 'frame_histogram.dart';
@@ -16,33 +19,66 @@ import 'renderer_smoke_trajectory.dart';
 /// Initializes the pinned GPU backend before a FlameGame3D is constructed.
 Future<void> initializeDoomRenderer() => GpuBackend.initialize();
 
-enum RendererSmokeMap { fixture, scaleFixture }
+enum RendererSmokeMap { fixture, scaleFixture, developerIwad }
 
 /// A bounded, reproducible renderer measurement.
 final class RendererSmokeConfig {
   const RendererSmokeConfig({
     this.map = RendererSmokeMap.fixture,
-    this.warmup = const Duration(seconds: 5),
+    this.mapName = 'E1M1',
+    this.warmup = const Duration(seconds: 15),
     this.measurement = const Duration(seconds: 15),
   });
 
   final RendererSmokeMap map;
+  final String mapName;
   final Duration warmup;
   final Duration measurement;
 }
 
+/// Selects smoke content without scanning for or embedding developer assets.
+///
+/// Tests inject a [DoomContentSource] backed by the generated fixture. The live
+/// developer mode uses the same source as the app and reads only the explicit
+/// `DOOM_WAD_PATH` value.
+Future<DoomContent> resolveRendererSmokeContent(
+  RendererSmokeConfig config, {
+  DoomContentSource? contentSource,
+}) async {
+  final source = contentSource ?? DoomContentSource();
+  switch (config.map) {
+    case RendererSmokeMap.fixture:
+      return source.loadFixture();
+    case RendererSmokeMap.scaleFixture:
+      return DoomContent(
+        wads: wad.DoomScaleFixture.wadSet(),
+        mapName: wad.DoomScaleFixture.mapName,
+        origin: DoomContentOrigin.syntheticFixture,
+      );
+    case RendererSmokeMap.developerIwad:
+      final result = await source.loadDeveloperIwad(mapName: config.mapName);
+      return switch (result) {
+        DoomContentLoaded(:final content) => content,
+        DoomContentPathMissing(:final setupMessage) => throw StateError(
+          setupMessage,
+        ),
+        DoomContentLoadFailure(:final message) => throw StateError(message),
+      };
+  }
+}
+
 typedef RendererSmokeComplete = void Function(Map<String, Object?> result);
 
-/// Real synthetic-WAD performance harness kept inside the renderer boundary.
+/// WAD performance harness kept inside the renderer boundary.
 ///
-/// Both fixture modes traverse the production WAD -> resources -> geometry ->
-/// packed surfaces -> palette material -> Flame 3D path. MAP98 has no gameplay
-/// door or lift specials, so the harness labels its direct plane mutations as
-/// synthetic. They deliberately call the same [DoomScene] dynamic APIs used by
-/// the production runtime; they do not prove gameplay special activation.
+/// Fixture and developer-IWAD modes traverse the production WAD -> resources
+/// -> geometry -> packed surfaces -> palette material -> Flame 3D path. Direct
+/// plane mutations deliberately call the same [DoomScene] dynamic APIs used by
+/// the production runtime, but do not prove gameplay special activation.
 final class RendererSmokeGame extends FlameGame3D {
   RendererSmokeGame({
     this.config = const RendererSmokeConfig(),
+    this.content,
     this.onComplete,
   }) : super(
          camera: DoomCameraComponent(
@@ -52,6 +88,7 @@ final class RendererSmokeGame extends FlameGame3D {
        );
 
   final RendererSmokeConfig config;
+  final DoomContent? content;
   final RendererSmokeComplete? onComplete;
   final RenderDiagnostics diagnostics = RenderDiagnostics();
   final FrameHistogram histogram = FrameHistogram();
@@ -80,36 +117,45 @@ final class RendererSmokeGame extends FlameGame3D {
   int _drawSum = 0;
   int _maxDraws = 0;
   int _lastDraws = 0;
-  double _maxDrawCameraX = 0;
-  double _maxDrawCameraY = 0;
-  double _maxDrawCameraZ = 0;
   int _wallQuadsUpdated = 0;
+  int _animationVerticesUpdated = 0;
+  int _renderedActorSprites = 0;
   bool _measuring = false;
   bool _completed = false;
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    final wad.WadSet set;
-    final String mapName;
-    switch (config.map) {
-      case RendererSmokeMap.fixture:
-        set = wad.DoomFixtures.wadSet();
-        mapName = wad.DoomFixtures.mapName;
-      case RendererSmokeMap.scaleFixture:
-        set = wad.DoomScaleFixture.wadSet();
-        mapName = wad.DoomScaleFixture.mapName;
-    }
+    final selectedContent =
+        content ?? await resolveRendererSmokeContent(config);
+    final set = selectedContent.wads;
+    final mapName = selectedContent.mapName;
     final resources = wad.WadResources.load(set);
     final map = wad.MapData.load(set, mapName);
     final level = geometry.DoomGeometryCompiler.compile(map, resources);
+    final core.GameState? gameState =
+        config.map == RendererSmokeMap.developerIwad
+        ? core.GameState.start(map, const core.GameConfig())
+        : null;
+    final Set<String> availablePrefixes = <String>{
+      for (final name in resources.spriteNames)
+        if (name.length >= 4) name.substring(0, 4).toUpperCase(),
+    };
+    final Set<String> actorPrefixes = <String>{
+      for (final actor in gameState?.mobjs ?? const <core.MobjView>[])
+        if (actor.sprite != 'PLAY') actor.sprite.toUpperCase(),
+    }.intersection(availablePrefixes);
     final scene = DoomScene.fromCompiledLevel(
       level,
       resources,
       diagnostics: diagnostics,
-      spritePrefixes: config.map == RendererSmokeMap.fixture
-          ? const <String>{'TEST'}
-          : const <String>{},
+      spritePrefixes: <String>{
+        ...actorPrefixes,
+        if (config.map == RendererSmokeMap.fixture) 'TEST',
+        if (config.map == RendererSmokeMap.developerIwad &&
+            availablePrefixes.contains('PISG'))
+          'PISG',
+      },
     );
     if (config.map == RendererSmokeMap.fixture) {
       if (level.skyTextureEntry == null) {
@@ -131,6 +177,22 @@ final class RendererSmokeGame extends FlameGame3D {
             viewAnchorY: -0.45,
           ),
         );
+    }
+    if (gameState != null) {
+      _renderedActorSprites = _addDeveloperActors(
+        scene,
+        gameState.mobjs,
+        actorPrefixes,
+      );
+      if (resources.spriteNames.contains('PISGA0')) {
+        scene.addWeaponSprite(
+          const WeaponSpriteInstance(
+            lumpName: 'PISGA0',
+            viewAnchorX: 0,
+            viewAnchorY: -0.48,
+          ),
+        );
+      }
     }
 
     _map = map;
@@ -159,11 +221,12 @@ final class RendererSmokeGame extends FlameGame3D {
     _lastDynamicUploads = diagnostics.dynamicUploads;
     _lastDynamicUploadBytes = diagnostics.dynamicUploadBytes;
     debugPrint(
-      'doompeller-smoke: fixture=$mapName surfaces=${scene.surfaceCount} '
+      'doompeller-smoke: map=$mapName surfaces=${scene.surfaceCount} '
       'buffers=pending vertices=${_vertexCount(level)} '
       'triangles=${diagnostics.triangles} meshes=${level.meshes.length} '
       'atlasPages=${level.atlas.pageCount} '
-      'dynamic=synthetic_harness_driven',
+      'actors=$_renderedActorSprites '
+      'dynamic=map_animations_plus_synthetic_harness_planes',
     );
   }
 
@@ -179,7 +242,12 @@ final class RendererSmokeGame extends FlameGame3D {
     }
     _samplePreviousFrame();
     _elapsed += dt;
-    _applyCameraTrajectory(_measuring ? _elapsed - _measurementStartedAt : 0);
+    _applyCameraTrajectory(
+      _measuring ? _elapsed - _measurementStartedAt : _elapsed,
+    );
+    _animationVerticesUpdated += scene.updateTextureAnimations(
+      (_elapsed * core.kTicRate).floor(),
+    );
     _applyDynamicWorkload(scene, _elapsed);
 
     if (!_measuring && _elapsed >= config.warmup.inMicroseconds / 1000000) {
@@ -215,6 +283,7 @@ final class RendererSmokeGame extends FlameGame3D {
     _measurementDynamicUploadBytes = diagnostics.dynamicUploadBytes;
     _maxDynamicUploadsPerFrame = 0;
     _maxDynamicUploadBytesPerFrame = 0;
+    _animationVerticesUpdated = 0;
     _drawSamples = 0;
     _drawSum = 0;
     _maxDraws = 0;
@@ -240,9 +309,6 @@ final class RendererSmokeGame extends FlameGame3D {
     _drawSum += draws;
     if (draws > _maxDraws) {
       _maxDraws = draws;
-      _maxDrawCameraX = camera.position.x;
-      _maxDrawCameraY = camera.position.y;
-      _maxDrawCameraZ = camera.position.z;
     }
     _maxDynamicUploadsPerFrame = math.max(
       _maxDynamicUploadsPerFrame,
@@ -272,16 +338,22 @@ final class RendererSmokeGame extends FlameGame3D {
         ? 'raster_duration'
         : 'build_duration';
     final result = <String, Object?>{
-      'schema_version': 1,
+      'schema_version': 2,
       'tool': 'renderer_smoke',
       'scene': <String, Object?>{
-        'source': config.map == RendererSmokeMap.scaleFixture
-            ? 'synthetic_e1m1_scale_fixture'
-            : 'synthetic_fixture',
+        'source': switch (config.map) {
+          RendererSmokeMap.fixture => 'synthetic_fixture',
+          RendererSmokeMap.scaleFixture => 'synthetic_e1m1_scale_fixture',
+          RendererSmokeMap.developerIwad => 'developer_iwad',
+        },
         'map': map.name,
         'vertices': map.vertices.length,
         'linedefs': map.linedefs.length,
         'sectors': map.sectors.length,
+        'subsectors': map.subsectors.length,
+        'nodes': map.nodes.length,
+        'things': map.things.length,
+        'rendered_actor_sprites': _renderedActorSprites,
         'compiled_vertices': _vertexCount(level),
         'triangles': render.triangles,
         'compiled_meshes': level.meshes.length,
@@ -298,6 +370,7 @@ final class RendererSmokeGame extends FlameGame3D {
           'continuous_in_triangle_room_traversal',
           'instant_transition_between_disconnected_rooms',
         ],
+        'trajectory_floor_sectors': _cameraTrajectory.legs.length,
         'frontmost_window_required': true,
       },
       'timings': summary.toJson(),
@@ -317,19 +390,19 @@ final class RendererSmokeGame extends FlameGame3D {
           'samples': _drawSamples,
           'mean_per_frame': _drawSamples == 0 ? 0 : _drawSum / _drawSamples,
           'max_per_frame': _maxDraws,
-          'max_camera': <String, double>{
-            'x': _maxDrawCameraX,
-            'y': _maxDrawCameraY,
-            'z': _maxDrawCameraZ,
-          },
         },
       },
       'dynamic_workload': <String, Object?>{
-        'source': 'synthetic_harness_driven',
+        'source': config.map == RendererSmokeMap.developerIwad
+            ? 'developer_map_animations_plus_synthetic_harness_planes'
+            : 'synthetic_harness_driven',
+        'map_texture_animation_and_scroll_enabled': true,
+        'animation_vertices_updated_during_measurement':
+            _animationVerticesUpdated,
         'gameplay_special_activation_proven': false,
         'reason':
-            'synthetic fixtures do not provide both gameplay door and '
-            'lift activation for this renderer comparison',
+            'the renderer harness drives plane mutations directly and does '
+            'not issue gameplay commands that activate specials',
         'production_apis': const <String>[
           'DoomScene.updateSectorPlane',
           'DoomScene.updateWallsForSector',
@@ -345,8 +418,8 @@ final class RendererSmokeGame extends FlameGame3D {
         'max_uploads_per_sampled_frame': _maxDynamicUploadsPerFrame,
         'max_bytes_per_sampled_frame': _maxDynamicUploadBytesPerFrame,
       },
-      'claims': const <String, Object?>{
-        'measures': <String>[
+      'claims': <String, Object?>{
+        'measures': const <String>[
           'Flutter FrameTiming.totalSpan',
           'Flutter FrameTiming.buildDuration',
           'Flutter FrameTiming.rasterDuration',
@@ -357,7 +430,8 @@ final class RendererSmokeGame extends FlameGame3D {
           'presented frame rate',
           'Metal GPU execution time',
           'driver-side duration',
-          'real commercial E1M1',
+          if (config.map != RendererSmokeMap.developerIwad)
+            'developer IWAD content',
           'gameplay activation of door or lift specials',
         ],
       },
@@ -467,4 +541,31 @@ final class RendererSmokeGame extends FlameGame3D {
 
   static int _vertexCount(geometry.CompiledLevel level) =>
       level.meshes.fold(0, (sum, mesh) => sum + mesh.vertexCount);
+
+  static int _addDeveloperActors(
+    DoomScene scene,
+    Iterable<core.MobjView> actors,
+    Set<String> packedPrefixes,
+  ) {
+    var rendered = 0;
+    for (final actor in actors) {
+      final String prefix = actor.sprite.toUpperCase();
+      if (prefix == 'PLAY' || !packedPrefixes.contains(prefix)) continue;
+      final component = scene.acquireActorSprite(
+        ActorSpriteInstance(
+          spritePrefix: prefix,
+          x: core.fixedToDouble(actor.x),
+          y: core.fixedToDouble(actor.z),
+          z: -core.fixedToDouble(actor.y),
+          frame: actor.frame,
+          actorAngle: DoomRuntimeGame.worldActorYawForBam(actor.angle),
+          light: actor.lightLevel / 255.0,
+          fullBright: actor.fullBright,
+          fuzz: (actor.flags & core.MobjFlags.shadow) != 0,
+        ),
+      );
+      if (component != null) rendered++;
+    }
+    return rendered;
+  }
 }

@@ -10,14 +10,24 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:doompeller/adapter/adapter.dart';
+import 'package:doompeller/game/content_source.dart';
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final config = _configFromEnvironment();
+  final DoomContent content;
+  try {
+    content = await resolveRendererSmokeContent(config);
+  } on StateError catch (error) {
+    stderr.writeln('doompeller-smoke: ${error.message}');
+    exitCode = 64;
+    return;
+  }
   await initializeDoomRenderer();
-  runApp(RendererSmokeApp(config: _configFromEnvironment()));
+  runApp(RendererSmokeApp(config: config, content: content));
 }
 
 RendererSmokeConfig _configFromEnvironment() {
@@ -27,16 +37,22 @@ RendererSmokeConfig _configFromEnvironment() {
   final RendererSmokeMap map = switch (mapValue) {
     'fixture' => RendererSmokeMap.fixture,
     'scale' || 'scale-fixture' => RendererSmokeMap.scaleFixture,
+    'iwad' || 'developer' || 'developer-iwad' => RendererSmokeMap.developerIwad,
     _ => throw ArgumentError.value(
       mapValue,
       'DOOMPELLER_SMOKE_MAP',
-      'expected fixture or scale',
+      'expected fixture, scale, or iwad',
     ),
   };
   return RendererSmokeConfig(
     map: map,
+    mapName:
+        Platform.environment['DOOMPELLER_SMOKE_MAP_NAME']
+            ?.trim()
+            .toUpperCase() ??
+        'E1M1',
     warmup: Duration(
-      seconds: _positiveSeconds('DOOMPELLER_SMOKE_WARMUP_SECONDS', 5),
+      seconds: _positiveSeconds('DOOMPELLER_SMOKE_WARMUP_SECONDS', 15),
     ),
     measurement: Duration(
       seconds: _positiveSeconds('DOOMPELLER_SMOKE_MEASURE_SECONDS', 15),
@@ -61,9 +77,14 @@ int _positiveSeconds(String name, int fallback) {
 final GlobalKey captureKey = GlobalKey();
 
 class RendererSmokeApp extends StatefulWidget {
-  const RendererSmokeApp({required this.config, super.key});
+  const RendererSmokeApp({
+    required this.config,
+    required this.content,
+    super.key,
+  });
 
   final RendererSmokeConfig config;
+  final DoomContent content;
 
   @override
   State<RendererSmokeApp> createState() => _RendererSmokeAppState();
@@ -78,6 +99,7 @@ class _RendererSmokeAppState extends State<RendererSmokeApp> {
     super.initState();
     _game = RendererSmokeGame(
       config: widget.config,
+      content: widget.content,
       onComplete: _writeResultAndExit,
     );
     final target = Platform.environment['DOOMPELLER_CAPTURE'];
@@ -92,9 +114,12 @@ class _RendererSmokeAppState extends State<RendererSmokeApp> {
   Future<void> _writeResultAndExit(Map<String, Object?> result) async {
     if (_resultWritten) return;
     _resultWritten = true;
-    final defaultName = widget.config.map == RendererSmokeMap.scaleFixture
-        ? 'renderer_smoke_scale.json'
-        : 'renderer_smoke_fixture.json';
+    final defaultName = switch (widget.config.map) {
+      RendererSmokeMap.fixture => 'renderer_smoke_fixture.json',
+      RendererSmokeMap.scaleFixture => 'renderer_smoke_scale.json',
+      RendererSmokeMap.developerIwad =>
+        'renderer_smoke_${widget.config.mapName.toLowerCase()}.json',
+    };
     final requested =
         Platform.environment['DOOMPELLER_SMOKE_ARTIFACT'] ?? defaultName;
     final name = requested.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');

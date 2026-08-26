@@ -6,6 +6,7 @@ import 'fixed.dart';
 import 'map_runtime.dart';
 import 'mobj.dart';
 import 'mobj_info.dart';
+import 'mobj_states.dart';
 import 'random.dart';
 import 'sector_runtime.dart';
 import 'sound_events.dart';
@@ -20,6 +21,76 @@ const int _maxBob = 0x100000;
 const int _singleAxisMaxBobMomentum = 8 * kFracUnit;
 const int _bobAngleStep = (kFineAngles ~/ 20) << kAngleToFineShift;
 const int _ceilingViewClearance = 4 * kFracUnit;
+const int _weaponTop = 32;
+const int _weaponBottom = 128;
+const int _weaponMovePerTic = 6;
+
+enum _WeaponAction { fire, refire }
+
+final class _WeaponFlashState {
+  const _WeaponFlashState(this.frame, this.tics);
+
+  final int frame;
+  final int tics;
+}
+
+final class _WeaponFireState {
+  const _WeaponFireState(
+    this.frame,
+    this.tics, {
+    this.action,
+    this.flash = const <_WeaponFlashState>[],
+  });
+
+  final int frame;
+  final int tics;
+  final _WeaponAction? action;
+  final List<_WeaponFlashState> flash;
+}
+
+const List<_WeaponFlashState> _pistolFlash = <_WeaponFlashState>[
+  _WeaponFlashState(0, 7),
+];
+const List<_WeaponFlashState> _shotgunFlash = <_WeaponFlashState>[
+  _WeaponFlashState(0, 4),
+  _WeaponFlashState(1, 3),
+];
+const List<_WeaponFlashState> _chaingunFlashA = <_WeaponFlashState>[
+  _WeaponFlashState(0, 5),
+];
+const List<_WeaponFlashState> _chaingunFlashB = <_WeaponFlashState>[
+  _WeaponFlashState(1, 5),
+];
+
+const List<_WeaponFireState> _fistStates = <_WeaponFireState>[
+  _WeaponFireState(1, 4),
+  _WeaponFireState(2, 4, action: _WeaponAction.fire),
+  _WeaponFireState(3, 5),
+  _WeaponFireState(2, 4),
+  _WeaponFireState(1, 5, action: _WeaponAction.refire),
+];
+const List<_WeaponFireState> _pistolStates = <_WeaponFireState>[
+  _WeaponFireState(0, 4),
+  _WeaponFireState(1, 6, action: _WeaponAction.fire, flash: _pistolFlash),
+  _WeaponFireState(2, 4),
+  _WeaponFireState(1, 5, action: _WeaponAction.refire),
+];
+const List<_WeaponFireState> _shotgunStates = <_WeaponFireState>[
+  _WeaponFireState(0, 3),
+  _WeaponFireState(0, 7, action: _WeaponAction.fire, flash: _shotgunFlash),
+  _WeaponFireState(1, 5),
+  _WeaponFireState(2, 5),
+  _WeaponFireState(3, 4),
+  _WeaponFireState(2, 5),
+  _WeaponFireState(1, 5),
+  _WeaponFireState(0, 3),
+  _WeaponFireState(0, 7, action: _WeaponAction.refire),
+];
+const List<_WeaponFireState> _chaingunStates = <_WeaponFireState>[
+  _WeaponFireState(0, 4, action: _WeaponAction.fire, flash: _chaingunFlashA),
+  _WeaponFireState(1, 4, action: _WeaponAction.fire, flash: _chaingunFlashB),
+  _WeaponFireState(1, 0, action: _WeaponAction.refire),
+];
 
 /// Integer-only 35 Hz game simulation. Its iteration order is spawn order;
 /// removal is deferred to the end of each tic so callbacks cannot reorder it.
@@ -56,6 +127,16 @@ class GameState {
   late Mobj _playerMobj;
   int _health = 100, _armor = 0, _bullets = 50, _shells = 0;
   Weapon _weapon = Weapon.pistol;
+  Weapon? _pendingWeapon;
+  WeaponPhase _weaponPhase = WeaponPhase.ready;
+  int _weaponState = 0;
+  int _weaponFrame = 0;
+  int _weaponTics = -1;
+  int _weaponY = _weaponTop;
+  int _flashFrame = -1;
+  int _flashState = 0;
+  int _flashTics = 0;
+  List<_WeaponFlashState> _flashSequence = const <_WeaponFlashState>[];
   final Set<Weapon> _ownedWeapons = <Weapon>{Weapon.fist, Weapon.pistol};
   final Set<Key> _keys = <Key>{};
   final Set<int> _foundSecrets = <int>{};
@@ -148,6 +229,14 @@ class GameState {
       weapon: _weapon,
       bob: _bob,
       keys: Set<Key>.unmodifiable(_keys),
+      weaponAnimation: WeaponAnimation(
+        weapon: _weapon,
+        phase: _weaponPhase,
+        frame: _weaponFrame,
+        tics: _weaponTics,
+        y: _weaponY,
+        flashFrame: _flashFrame,
+      ),
     );
   }
 
@@ -157,7 +246,7 @@ class GameState {
     _tickMovers();
     if (_health > 0) _tickPlayer(cmd);
     _tickSectorEffects();
-    if (config.monsters) _tickActors();
+    _tickActors(runAi: config.monsters);
     _collectPickups();
     _mobjs.removeWhere((Mobj m) => m.removed);
   }
@@ -206,6 +295,8 @@ class GameState {
     );
     m.floorZ = _runtime.sectors[sector].floorHeight;
     m.ceilingZ = _runtime.sectors[sector].ceilingHeight;
+    final int? spawnState = MobjStateTable.start(info.id, MobjState.spawn);
+    if (spawnState != null) _setMobjState(m, spawnState);
     _mobjs.add(m);
     return m;
   }
@@ -237,7 +328,7 @@ class GameState {
     _bob = fixedMul(bob >> 1, Trig.sin(_tic * _bobAngleStep));
     if (cmd.using && !_useHeld) _useLine();
     _useHeld = cmd.using;
-    if (cmd.attacking) _playerAttack();
+    _tickWeapon(cmd.attacking);
   }
 
   void _selectWeapon(int slot) {
@@ -248,8 +339,20 @@ class GameState {
       3 => Weapon.chaingun,
       _ => _weapon,
     };
-    if (!_ownedWeapons.contains(requested) || requested == _weapon) return;
-    _setWeapon(requested);
+    _queueWeapon(requested);
+  }
+
+  void _queueWeapon(Weapon requested) {
+    if (!_ownedWeapons.contains(requested) ||
+        requested == _weapon ||
+        requested == _pendingWeapon) {
+      return;
+    }
+    _pendingWeapon = requested;
+    if (_weaponPhase == WeaponPhase.ready) {
+      _weaponPhase = WeaponPhase.lowering;
+      _weaponTics = 1;
+    }
   }
 
   void _setWeapon(Weapon requested) {
@@ -258,16 +361,137 @@ class GameState {
     _emitPlayerSound('DSWPNUP');
   }
 
-  void _playerAttack() {
+  void _tickWeapon(bool attacking) {
+    _tickWeaponFlash();
+    switch (_weaponPhase) {
+      case WeaponPhase.lowering:
+        _weaponY += _weaponMovePerTic;
+        if (_weaponY >= _weaponBottom) {
+          final Weapon next = _pendingWeapon ?? _weapon;
+          _pendingWeapon = null;
+          _setWeapon(next);
+          _weaponY = _weaponBottom;
+          _weaponPhase = WeaponPhase.raising;
+        }
+        return;
+      case WeaponPhase.raising:
+        _weaponY -= _weaponMovePerTic;
+        if (_weaponY <= _weaponTop) {
+          _weaponY = _weaponTop;
+          _weaponPhase = WeaponPhase.ready;
+          _weaponState = 0;
+          _weaponFrame = 0;
+          _weaponTics = -1;
+        }
+        return;
+      case WeaponPhase.firing:
+        if (--_weaponTics > 0) return;
+        _advanceWeaponFiring(attacking);
+        return;
+      case WeaponPhase.ready:
+        if (_pendingWeapon != null) {
+          _weaponPhase = WeaponPhase.lowering;
+          _weaponTics = 1;
+          return;
+        }
+        if (attacking) _beginWeaponAttack();
+    }
+  }
+
+  void _beginWeaponAttack() {
     if (_weapon == Weapon.shotgun && _shells == 0) {
-      _setWeapon(Weapon.pistol);
+      _pendingWeapon = Weapon.pistol;
+      _weaponPhase = WeaponPhase.lowering;
       return;
     }
     if ((_weapon == Weapon.pistol || _weapon == Weapon.chaingun) &&
         _bullets == 0) {
-      _setWeapon(Weapon.fist);
+      _pendingWeapon = Weapon.fist;
+      _weaponPhase = WeaponPhase.lowering;
       return;
     }
+    _weaponPhase = WeaponPhase.firing;
+    _enterWeaponState(0, attacking: false);
+  }
+
+  void _advanceWeaponFiring(bool attacking) {
+    final List<_WeaponFireState> states = _weaponFireStates(_weapon);
+    if (_weaponState + 1 < states.length) {
+      _enterWeaponState(_weaponState + 1, attacking: attacking);
+      return;
+    }
+    if (_pendingWeapon != null) {
+      _weaponPhase = WeaponPhase.lowering;
+      return;
+    }
+    if (attacking) {
+      _beginWeaponAttack();
+      return;
+    }
+    _weaponPhase = WeaponPhase.ready;
+    _weaponState = 0;
+    _weaponFrame = 0;
+    _weaponTics = -1;
+  }
+
+  List<_WeaponFireState> _weaponFireStates(Weapon weapon) => switch (weapon) {
+    Weapon.fist => _fistStates,
+    Weapon.pistol => _pistolStates,
+    Weapon.shotgun => _shotgunStates,
+    Weapon.chaingun => _chaingunStates,
+  };
+
+  void _enterWeaponState(int index, {required bool attacking}) {
+    final _WeaponFireState state = _weaponFireStates(_weapon)[index];
+    _weaponState = index;
+    _weaponFrame = state.frame;
+    _weaponTics = state.tics;
+    switch (state.action) {
+      case _WeaponAction.fire:
+        _startWeaponFlash(state.flash);
+        _fireWeapon();
+        break;
+      case _WeaponAction.refire:
+        if (_pendingWeapon != null) {
+          _weaponPhase = WeaponPhase.lowering;
+          _weaponTics = 1;
+        } else if (attacking) {
+          _beginWeaponAttack();
+        } else if (_weaponTics == 0) {
+          _weaponPhase = WeaponPhase.ready;
+          _weaponState = 0;
+          _weaponFrame = 0;
+          _weaponTics = -1;
+        }
+        break;
+      case null:
+        break;
+    }
+  }
+
+  void _startWeaponFlash(List<_WeaponFlashState> sequence) {
+    if (sequence.isEmpty) return;
+    _flashSequence = sequence;
+    _flashState = 0;
+    _flashFrame = sequence.first.frame;
+    _flashTics = sequence.first.tics;
+  }
+
+  void _tickWeaponFlash() {
+    if (_flashFrame < 0 || --_flashTics > 0) return;
+    _flashState++;
+    if (_flashState >= _flashSequence.length) {
+      _flashFrame = -1;
+      _flashTics = 0;
+      _flashSequence = const <_WeaponFlashState>[];
+      return;
+    }
+    final _WeaponFlashState state = _flashSequence[_flashState];
+    _flashFrame = state.frame;
+    _flashTics = state.tics;
+  }
+
+  void _fireWeapon() {
     switch (_weapon) {
       case Weapon.fist:
         _emitPlayerSound('DSPUNCH');
@@ -309,7 +533,89 @@ class GameState {
         best = distance;
       }
     }
-    if (target != null) _damage(target, damage, _playerMobj);
+    if (target != null) {
+      _spawnBlood(target, damage);
+      _damage(target, damage, _playerMobj);
+      return;
+    }
+    final ({int x, int y})? impact = _nearestWallImpact(angle, range);
+    if (impact != null) _spawnPuff(impact.x, impact.y);
+  }
+
+  /// Finds the nearest blocking line hit by a 16.16 ray without floating point
+  /// arithmetic. It is intentionally separate from actor targeting: the actor
+  /// path uses the existing sight policy, while this only supplies an honest
+  /// visual impact when no shootable actor was acquired.
+  ({int x, int y})? _nearestWallImpact(int angle, int range) {
+    final int startX = _playerMobj.x;
+    final int startY = _playerMobj.y;
+    final int rayX = fixedMul(range, Trig.cos(angle));
+    final int rayY = fixedMul(range, Trig.sin(angle));
+    int bestT = kFracUnit + 1;
+    ({int x, int y})? result;
+    for (int i = 0; i < _runtime.map.linedefs.length; i++) {
+      final Linedef line = _runtime.map.linedefs[i];
+      if (!_hitscanLineBlocks(i, line)) continue;
+      final MapVertex a = _runtime.map.vertices[line.v1];
+      final MapVertex b = _runtime.map.vertices[line.v2];
+      final int ax = toFixed(a.x);
+      final int ay = toFixed(a.y);
+      final int sx = toFixed(b.x - a.x);
+      final int sy = toFixed(b.y - a.y);
+      final int denom = rayX * sy - rayY * sx;
+      if (denom == 0) continue;
+      final int offsetX = ax - startX;
+      final int offsetY = ay - startY;
+      final int rayNumerator = offsetX * sy - offsetY * sx;
+      final int segmentNumerator = offsetX * rayY - offsetY * rayX;
+      final bool positive = denom > 0;
+      if ((positive &&
+              (rayNumerator < 0 ||
+                  rayNumerator > denom ||
+                  segmentNumerator < 0 ||
+                  segmentNumerator > denom)) ||
+          (!positive &&
+              (rayNumerator > 0 ||
+                  rayNumerator < denom ||
+                  segmentNumerator > 0 ||
+                  segmentNumerator < denom))) {
+        continue;
+      }
+      final int t = (rayNumerator << kFracBits) ~/ denom;
+      if (t < 0 || t > kFracUnit || t >= bestT) continue;
+      bestT = t;
+      result = (x: startX + fixedMul(rayX, t), y: startY + fixedMul(rayY, t));
+    }
+    return result;
+  }
+
+  bool _hitscanLineBlocks(int index, Linedef line) {
+    if (line.blocksMovement || !line.isTwoSided) return true;
+    final ({int bottom, int top})? opening = _runtime.openingFor(index);
+    return opening == null ||
+        opening.top <= _playerMobj.viewZ ||
+        opening.bottom >= _playerMobj.viewZ;
+  }
+
+  void _spawnPuff(int x, int y) {
+    final Mobj puff = _add(_puffInfo, fixedToInt(x), fixedToInt(y), 0, 1);
+    puff.x = x;
+    puff.y = y;
+    puff.z = _playerMobj.viewZ;
+  }
+
+  void _spawnBlood(Mobj target, int damage) {
+    final Mobj blood = _add(
+      _bloodInfo,
+      fixedToInt(target.x),
+      fixedToInt(target.y),
+      0,
+      1,
+    );
+    blood.x = target.x;
+    blood.y = target.y;
+    blood.z = target.z + (target.height ~/ 2);
+    _setMobjState(blood, MobjStateTable.bloodImpactStart(damage));
   }
 
   bool _tryMove(Mobj m, int dx, int dy, {bool allowSlide = true}) {
@@ -877,10 +1183,18 @@ class GameState {
     }
   }
 
-  void _tickActors() {
+  void _tickActors({required bool runAi}) {
     final List<Mobj> actors = List<Mobj>.of(_mobjs);
     for (final Mobj m in actors) {
-      if (m.removed || !m.info.isMonster || m.health <= 0) continue;
+      if (m.removed) continue;
+      _advanceMobjState(m);
+      if (m.removed) continue;
+      if (m.isMissile) {
+        _tickMissile(m);
+        continue;
+      }
+      if (!runAi || !m.info.isMonster || m.health <= 0) continue;
+      if (m.state != MobjState.spawn && m.state != MobjState.see) continue;
       final int distance = approxDistance(
         _playerMobj.x - m.x,
         _playerMobj.y - m.y,
@@ -889,28 +1203,26 @@ class GameState {
           distance < toFixed(512) &&
           _hasSight(m, _playerMobj)) {
         m.target = _playerMobj;
-        m.state = MobjState.see;
+        _enterMobjState(m, MobjState.see);
       }
       if (m.target == null) continue;
       m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
-      if (distance < toFixed(64)) {
-        _damagePlayer(3 + (_random.next() % 8));
+      if (distance < toFixed(64) &&
+          MobjStateTable.start(m.info.id, MobjState.melee) != null) {
+        _enterMobjState(m, MobjState.melee);
         continue;
       }
       if ((m.info.id == MobjType.possessed || m.info.id == MobjType.shotguy) &&
           distance < toFixed(1024) &&
           _tic % 20 == 0 &&
           _hasSight(m, _playerMobj)) {
-        final int pellets = m.info.id == MobjType.shotguy ? 3 : 1;
-        for (int i = 0; i < pellets; i++) {
-          _damagePlayer(3 * (1 + (_random.next() % 5)));
-        }
+        _enterMobjState(m, MobjState.missile);
         continue;
       }
       if (m.info.id == MobjType.troop &&
           distance < toFixed(384) &&
           (_tic % 20 == 0)) {
-        _spawnImpShot(m);
+        _enterMobjState(m, MobjState.missile);
         continue;
       }
       if (_tic % 4 == 0) {
@@ -922,10 +1234,70 @@ class GameState {
         );
       }
     }
-    for (final Mobj m in List<Mobj>.of(_mobjs)) {
-      if (m.isMissile && !m.removed) {
-        _tickMissile(m);
-      }
+  }
+
+  void _enterMobjState(Mobj m, MobjState phase) {
+    int? state = MobjStateTable.start(m.info.id, phase);
+    if (state == null && phase == MobjState.gibbedDeath) {
+      state = MobjStateTable.start(m.info.id, MobjState.death);
+    }
+    if (state != null) _setMobjState(m, state);
+  }
+
+  void _setMobjState(Mobj m, int stateId) {
+    final MobjFrameState state = MobjStateTable.state(stateId)!;
+    m.frameState = state.id;
+    m.state = state.phase;
+    m.spriteName = state.sprite;
+    m.spriteFrame = state.frame;
+    m.fullBright = state.fullBright;
+    m.stateTics = state.tics;
+    _runMobjStateAction(m, state.action);
+  }
+
+  void _runMobjStateAction(Mobj m, MobjStateAction? action) {
+    final Mobj? target = m.target;
+    switch (action) {
+      case MobjStateAction.monsterHitscan:
+        if (!identical(target, _playerMobj) ||
+            _health <= 0 ||
+            !_hasSight(m, _playerMobj)) {
+          return;
+        }
+        m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
+        final int pellets = m.info.id == MobjType.shotguy ? 3 : 1;
+        for (int i = 0; i < pellets; i++) {
+          _damagePlayer(3 * (1 + (_random.next() % 5)));
+        }
+      case MobjStateAction.monsterMelee:
+        if (!identical(target, _playerMobj) || _health <= 0) return;
+        m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
+        if (approxDistance(_playerMobj.x - m.x, _playerMobj.y - m.y) <
+            toFixed(64)) {
+          _damagePlayer(3 + (_random.next() % 8));
+        }
+      case MobjStateAction.monsterMissile:
+        if (target == null || target.health <= 0) return;
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        _spawnImpShot(m);
+      case MobjStateAction.barrelExplode:
+        _explodeBarrel(m, target ?? _playerMobj);
+      case null:
+        return;
+    }
+  }
+
+  void _advanceMobjState(Mobj m) {
+    if (m.frameState < 0 || m.stateTics < 0) return;
+    if (--m.stateTics > 0) return;
+    final MobjFrameState current = MobjStateTable.state(m.frameState)!;
+    final int? next = current.next;
+    if (next != null) {
+      _setMobjState(m, next);
+    } else if (current.removeOnExpiry) {
+      m.removed = true;
+    } else {
+      m.stateTics = -1;
     }
   }
 
@@ -949,15 +1321,24 @@ class GameState {
 
   void _tickMissile(Mobj m) {
     if (!_tryMove(m, m.momX, m.momY)) {
-      m.removed = true;
+      _explodeMissile(m);
       return;
     }
     if (identical(m.target, _playerMobj) &&
         approxDistance(m.x - _playerMobj.x, m.y - _playerMobj.y) <
             _playerRadius + m.radius) {
       _damagePlayer(3 + (_random.next() % 24));
-      m.removed = true;
+      _explodeMissile(m);
     }
+  }
+
+  void _explodeMissile(Mobj m) {
+    m.momX = 0;
+    m.momY = 0;
+    m.momZ = 0;
+    m.flags &= ~MobjFlags.missile;
+    _enterMobjState(m, MobjState.death);
+    if (m.state != MobjState.death) m.removed = true;
   }
 
   bool _hasSight(Mobj a, Mobj b) {
@@ -1022,20 +1403,22 @@ class GameState {
   }
 
   void _damage(Mobj target, int damage, Mobj source) {
-    target.health -= damage;
+    final int remainingHealth = target.health - damage;
+    target.health = remainingHealth;
     target.target = source;
     if (target.health <= 0) {
       target.health = 0;
       if ((target.info.flags & MobjFlags.countKill) != 0) _killCount++;
-      target.state = MobjState.death;
-      target.spriteFrame = 2;
-      target.flags |= MobjFlags.corpse;
-      target.flags &= ~MobjFlags.shootable;
+      final MobjState deathState = remainingHealth < -target.info.spawnHealth
+          ? MobjState.gibbedDeath
+          : MobjState.death;
+      target.flags |= MobjFlags.corpse | MobjFlags.dropOff;
+      target.flags &= ~(MobjFlags.shootable | MobjFlags.solid);
+      target.height ~/= 4;
+      _enterMobjState(target, deathState);
       _emitMobjSound('DSPODTH1', target);
-      if (target.info.id == MobjType.barrel) _explodeBarrel(target, source);
     } else if (_random.chance(target.info.painChance)) {
-      target.state = MobjState.pain;
-      target.spriteFrame = 1;
+      _enterMobjState(target, MobjState.pain);
     }
   }
 
@@ -1089,11 +1472,11 @@ class GameState {
         case MobjType.shotgun:
           _shells += 8;
           _ownedWeapons.add(Weapon.shotgun);
-          _setWeapon(Weapon.shotgun);
+          _queueWeapon(Weapon.shotgun);
         case MobjType.chaingun:
           _bullets += 20;
           _ownedWeapons.add(Weapon.chaingun);
-          _setWeapon(Weapon.chaingun);
+          _queueWeapon(Weapon.chaingun);
         case MobjType.megaHealth:
           _health = (_health + 100 > 200) ? 200 : _health + 100;
         case MobjType.soulSphere:
@@ -1146,10 +1529,13 @@ class GameState {
     y: m.y,
     z: m.z,
     angle: m.angle,
-    sprite: m.info.spriteName,
+    sprite: m.spriteName,
     frame: m.spriteFrame,
     flags: m.flags,
     health: m.health,
+    height: m.height,
+    fullBright: m.fullBright,
+    lightLevel: _runtime.sectors[m.sectorIndex].lightLevel,
   );
 
   void _emitPlayerSound(String soundId) {
@@ -1279,6 +1665,12 @@ class GameState {
     add(_bullets);
     add(_shells);
     add(_weapon.index);
+    add(_pendingWeapon?.index ?? -1);
+    add(_weaponPhase.index);
+    add(_weaponState);
+    add(_weaponFrame);
+    add(_weaponTics);
+    add(_weaponY);
     for (final Weapon weapon in Weapon.values) {
       add(_ownedWeapons.contains(weapon) ? 1 : 0);
     }
@@ -1326,6 +1718,7 @@ class GameState {
       add(m.angle);
       add(m.health);
       add(m.state.index);
+      add(m.frameState);
       add(m.flags);
       add(m.spriteFrame);
       add(m.momX);
@@ -1335,6 +1728,7 @@ class GameState {
       add(m.floorZ);
       add(m.ceilingZ);
       add(m.dropOffZ);
+      add(m.height);
       add(m.stateTics);
       add(m.reactionTime);
       add(m.threshold);
@@ -1577,6 +1971,34 @@ const MobjInfo _impShotInfo = MobjInfo(
   damage: 3,
   spriteName: 'BAL1',
   flags: MobjFlags.missile,
+);
+const MobjInfo _puffInfo = MobjInfo(
+  id: MobjType.puff,
+  doomEdNum: -1,
+  spawnHealth: 1,
+  radius: 0,
+  height: 0,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PUFF',
+  flags: MobjFlags.noSector | MobjFlags.noBlockmap | MobjFlags.noGravity,
+);
+const MobjInfo _bloodInfo = MobjInfo(
+  id: MobjType.blood,
+  doomEdNum: -1,
+  spawnHealth: 1,
+  radius: 0,
+  height: 0,
+  mass: 0,
+  speed: 0,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'BLUD',
+  flags: MobjFlags.noSector | MobjFlags.noBlockmap | MobjFlags.noGravity,
 );
 const MobjInfo _clipInfo = MobjInfo(
   id: MobjType.clip,

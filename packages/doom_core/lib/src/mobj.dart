@@ -1,6 +1,7 @@
 import 'angles.dart';
 import 'fixed.dart';
 import 'mobj_info.dart';
+import 'mobj_states.dart';
 
 /// A live actor in the simulation: the player, a monster, a projectile, a
 /// pickup, a decoration.
@@ -38,7 +39,7 @@ class Mobj {
   int angle;
 
   final int radius;
-  final int height;
+  int height;
 
   int flags;
   int health;
@@ -55,8 +56,12 @@ class Mobj {
   /// to walk off a drop taller than 24 units unless they are allowed to.
   int dropOffZ = 0;
 
-  /// Sprite animation state.
+  /// Sprite animation state. [frameState] is the exact table entry; [state]
+  /// is its coarse behaviour phase.
+  int frameState = -1;
+  late String spriteName = info.spriteName;
   int spriteFrame = 0;
+  bool fullBright = false;
   int stateTics = -1;
   MobjState state = MobjState.spawn;
 
@@ -119,18 +124,3 @@ const List<int> kDirAngles = <int>[
   kAng270,
   kAng270 + kAng45,
 ];
-
-/// Behaviour phase of an actor. The original expresses this as a large state
-/// table; we model the phases explicitly and drive sprite frames from a small
-/// per-actor animation description, which is far easier to verify.
-enum MobjState {
-  spawn,
-  see,
-  melee,
-  missile,
-  pain,
-  death,
-  gibbedDeath,
-  raise,
-  dead,
-}

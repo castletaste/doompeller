@@ -233,7 +233,9 @@ void main() {
     // 2001/2007/2008/2011/2018. Actor flags are hashed, so that change
     // deliberately moves this pin; the fixture contains neither a backpack
     // nor a radiation suit.
-    expect(a.hashState(), 0xc69f4dc0);
+    // Actor/weapon actions now enter on their table frames; the hash also
+    // carries the weapon cursor and mutable actor height, but no visual flash.
+    expect(a.hashState(), 0xbddfa3ff);
   });
 
   test(

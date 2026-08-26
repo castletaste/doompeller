@@ -971,8 +971,8 @@ final class DoomScene {
       entry: entry,
       pageSize: spriteAtlas.atlas.pageSize,
       light: 1,
-      fullBright: true,
-      depthLayer: -1,
+      fullBright: weapon.fullBright,
+      depthLayer: weapon.depthLayer,
     );
     final surface = PackedFlameSurface(
       vertices: vertices,
@@ -1777,26 +1777,38 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
   final DoomSpriteAtlas spriteAtlas;
   final Map<int, PaletteMaterial> materialsByPage;
   String _lumpName;
-  final double viewAnchorX;
-  final double viewAnchorY;
+  double viewAnchorX;
+  double viewAnchorY;
   final double pixelScaleX;
   final double pixelScaleY;
+  bool _visible = true;
 
   String get lumpName => _lumpName;
+  bool get visible => _visible;
 
-  bool setFrame(String lumpName) {
+  void setVisible(bool value) => _visible = value;
+
+  @override
+  bool isVisible(CameraComponent3D camera) =>
+      _visible && super.isVisible(camera);
+
+  bool setFrame(String lumpName, {double? viewAnchorX, double? viewAnchorY}) {
     final selection = spriteAtlas.catalog.exact(lumpName);
     if (selection == null) {
       throw StateError('Weapon sprite $lumpName is not packed');
     }
-    if (selection.lumpName == _lumpName) {
+    final double nextX = viewAnchorX ?? this.viewAnchorX;
+    final double nextY = viewAnchorY ?? this.viewAnchorY;
+    if (selection.lumpName == _lumpName &&
+        nextX == this.viewAnchorX &&
+        nextY == this.viewAnchorY) {
       return false;
     }
     final entry = spriteAtlas.atlas.entry(selection.lumpName)!;
     final quad = _weaponSpriteQuad(
       entry,
-      viewAnchorX: viewAnchorX,
-      viewAnchorY: viewAnchorY,
+      viewAnchorX: nextX,
+      viewAnchorY: nextY,
       pixelScaleX: pixelScaleX,
       pixelScaleY: pixelScaleY,
     );
@@ -1812,6 +1824,8 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
     mesh.updateBounds();
     markAabbDirty();
     _lumpName = selection.lumpName;
+    this.viewAnchorX = nextX;
+    this.viewAnchorY = nextY;
     return true;
   }
 }
@@ -1851,6 +1865,8 @@ final class WeaponSpriteInstance {
     required this.viewAnchorY,
     this.pixelScaleX = 1 / 320,
     this.pixelScaleY = 1 / 200,
+    this.fullBright = false,
+    this.depthLayer = -1,
   });
 
   final String lumpName;
@@ -1862,6 +1878,8 @@ final class WeaponSpriteInstance {
   /// Camera-local units per source patch pixel.
   final double pixelScaleX;
   final double pixelScaleY;
+  final bool fullBright;
+  final double depthLayer;
 }
 
 final class _GeometryBinding {

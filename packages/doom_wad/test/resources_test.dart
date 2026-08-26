@@ -566,7 +566,10 @@ void main() {
           'SPOSA0',
           'TROOA0',
           'BAR1A0',
+          'BEXPA0',
           'BAL1A0',
+          'PUFFA0',
+          'BLUDA0',
         ]) {
           final PatchImage sprite = res.sprite(name)!;
           expect((sprite.width, sprite.height), (64, 64), reason: name);

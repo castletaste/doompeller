@@ -151,8 +151,8 @@ class GameState {
   int get levelTime;
   int get killCount, totalKills, itemCount, totalItems;
   int get secretsFound, totalSecrets;
-  PlayerView get player;              // x, y, z, angle, viewZ, health, armor, ammo, weapon
-  Iterable<MobjView> get mobjs;       // x, y, z, angle, sprite, frame, flags
+  PlayerView get player;              // x, y, z, angle, viewZ, health, armor, ammo, weapon, weaponAnimation
+  Iterable<MobjView> get mobjs;       // position/height, angle, sprite/frame, flags, light/fullbright
   Iterable<SectorRuntime> get sectors; // current floor/ceiling heights, light, flats
   List<SoundEvent> get soundJournal;   // retained output, excluded from hashState
   List<SoundEvent> consumeSoundJournal();
@@ -198,6 +198,19 @@ excluded because it is derived renderer output from the hashed tic and
 momentum. Future-affecting input latch, actor-id allocator, activated one-shot
 lines, mutable actor flags/frame, and mover/actor state are hashed.
 
+`PlayerView.weaponAnimation` exposes the first-person weapon phase, body/flash
+lamps, remaining tic count and psprite Y. Phase, body-state cursor, body lamp,
+tics and Y are hashed because they gate future firing. The flash lamp and its
+visual-only lifetime are excluded. The adapter maps lamp indices to exact
+supplemental sprite names and never makes firing decisions.
+
+Actor animation uses a clean-room Dart state table. The exact table cursor is
+hashed in addition to the coarse phase, frame and remaining tics because two
+consecutive records may deliberately display the same lamp but have different
+successors. `MobjView.fullBright` and `lightLevel` carry the selected record and
+current sector light into the adapter; these renderer-facing values are derived
+from that already-hashed actor/sector state.
+
 Classic flat/wall animation ranges and switch pairs are clean-room Dart data.
 Flat ranges follow WAD directory order; wall ranges follow TEXTURE1/TEXTURE2
 declaration order. Missing endpoints or frame data degrade to static and appear
@@ -225,7 +238,7 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xc69f4dc0` for seed 7 and its documented twenty-command stream. Spawn order
+`0xbddfa3ff` for seed 7 and its documented twenty-command stream. Spawn order
 is intentionally part of deterministic identity and therefore part of the
 hash; actor hashing itself sorts by stable actor id.
 

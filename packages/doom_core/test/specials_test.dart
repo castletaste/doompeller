@@ -543,6 +543,41 @@ void main() {
       expect(game.mobjs.where((MobjView m) => m.sprite == 'BAR1'), isNotEmpty);
     });
 
+    test('closing door ignores a non-solid quarter-height corpse', () {
+      final GameState game = GameState.start(
+        testMap(
+          sectors: twoSectors(backCeiling: 32),
+          sides: twoSides(),
+          lines: <Linedef>[portal(special: LineSpecial.doorOpenWaitClose)],
+          things: const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _allSkills),
+            Thing(x: 160, y: 64, angle: 180, type: 3004, flags: _allSkills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+        seed: 3,
+      );
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      for (var tic = 0; tic < 25; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      while (game.mobjs
+              .firstWhere((MobjView actor) => actor.sprite == 'POSS')
+              .health >
+          0) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      final MobjView corpse = game.mobjs.firstWhere(
+        (MobjView actor) => actor.sprite == 'POSS',
+      );
+      expect(corpse.flags & 0x0002, 0);
+      expect(corpse.height, toFixed(14));
+      for (var tic = 0; tic < 250; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.sectors.elementAt(1).ceilingHeight, toFixed(32));
+    });
+
     test('mapped lift executes down-wait-up cycle', () {
       final List<Sector> sectors = twoSectors(backFloor: 32);
       final GameState game = GameState.start(
@@ -585,7 +620,9 @@ void main() {
         ),
         const GameConfig(monsters: false),
       );
-      game.runTic(const TicCmd(buttons: Buttons.attack));
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
       expect(game.consumeSwitchJournal().single.textureName, 'SW2COMP');
       for (int i = 0; i < 25; i++) {
         game.runTic(TicCmd.empty);
@@ -593,7 +630,9 @@ void main() {
       expect(game.sectors.elementAt(1).floorHeight, toFixed(24));
       expect(game.switchJournal, isEmpty, reason: 'gun switch never resets');
 
-      game.runTic(const TicCmd(buttons: Buttons.attack));
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
       for (int i = 0; i < 25; i++) {
         game.runTic(TicCmd.empty);
       }

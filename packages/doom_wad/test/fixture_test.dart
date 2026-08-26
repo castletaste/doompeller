@@ -36,14 +36,15 @@ void main() {
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      expect(DoomFixtures.hash(), 0x541af06eec5d95ea);
+      // Removing seven impossible weapon lamps deliberately changes the bytes.
+      expect(DoomFixtures.hash(), 0x038a0b410fcfa3aa);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(DoomFixtures.pwadBytes().lengthInBytes, 202789);
-      expect(wad.length, 79);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 434551);
+      expect(wad.length, 162);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -67,6 +68,34 @@ void main() {
       for (final String name in forbidden) {
         expect(names, isNot(contains(name)));
       }
+    });
+
+    test('weapon fixture contains only real body lamps', () {
+      expect(
+        DoomFixtures.spriteNames.where(
+          (String name) => const <String>{
+            'PUNG',
+            'PISG',
+            'SHTG',
+            'CHGG',
+          }.contains(name.substring(0, 4)),
+        ),
+        <String>[
+          'PUNGA0',
+          'PUNGB0',
+          'PUNGC0',
+          'PUNGD0',
+          'PISGA0',
+          'PISGB0',
+          'PISGC0',
+          'SHTGA0',
+          'SHTGB0',
+          'SHTGC0',
+          'SHTGD0',
+          'CHGGA0',
+          'CHGGB0',
+        ],
+      );
     });
 
     test('every lump is reachable and within bounds', () {

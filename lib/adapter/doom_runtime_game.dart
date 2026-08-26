@@ -37,6 +37,12 @@ final class DoomRuntimeGame extends FlameGame3D
     final Set<String> requested = <String>{
       ...level.initialSpritePrefixes,
       'BAL1',
+      'BEXP',
+      'PUFF',
+      'BLUD',
+      'PISF',
+      'SHTF',
+      'CHGF',
       ...DoomWeaponSprites.supportedPrefixes,
       if (level.content.isFixture) 'TEST',
     };
@@ -123,6 +129,7 @@ final class DoomRuntimeGame extends FlameGame3D
   PlayerView _previousPlayer;
   PlayerView _currentPlayer;
   ViewLockedWeaponSpriteComponent? _weaponSprite;
+  ViewLockedWeaponSpriteComponent? _weaponFlashSprite;
   bool _paused = false;
   bool _completionReported = false;
   double _fractionalMicros = 0;
@@ -137,6 +144,8 @@ final class DoomRuntimeGame extends FlameGame3D
   int get actorComponentCount => _actors.length;
   Set<int> get actorIds => Set<int>.unmodifiable(_actors.keys);
   String? get weaponFrame => _weaponSprite?.lumpName;
+  String? get weaponFlashFrame => _weaponFlashSprite?.lumpName;
+  bool get weaponFlashVisible => _weaponFlashSprite?.visible ?? false;
 
   ActorSpriteComponent? actorComponentForTest(int id) => _actors[id];
 
@@ -340,6 +349,8 @@ final class DoomRuntimeGame extends FlameGame3D
             z: z,
             frame: actor.frame,
             actorAngle: angle,
+            light: actor.lightLevel / 255.0,
+            fullBright: actor.fullBright,
           ),
         );
         if (updated) {
@@ -356,6 +367,8 @@ final class DoomRuntimeGame extends FlameGame3D
           z: z,
           frame: actor.frame,
           actorAngle: angle,
+          light: actor.lightLevel / 255.0,
+          fullBright: actor.fullBright,
         ),
       );
       if (component == null) {
@@ -372,40 +385,76 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   void _syncWeapon({bool force = false}) {
-    final String? exact = _weaponFrameFor(_currentPlayer.weapon);
+    final WeaponAnimation animation = _currentPlayer.weaponAnimation;
+    final String? exact = _weaponFrameFor(animation.weapon, animation.frame);
     if (exact == null) {
       return;
     }
+    final double anchorY =
+        -0.48 + (animation.y - 32 + fixedToDouble(_currentPlayer.bob)) / 200;
     final current = _weaponSprite;
     if (current == null) {
       _weaponSprite = scene.addWeaponSprite(
         WeaponSpriteInstance(
           lumpName: exact,
           viewAnchorX: 0,
-          viewAnchorY: -0.48,
+          viewAnchorY: anchorY,
         ),
       );
-    } else if (force || current.lumpName != exact) {
-      current.setFrame(exact);
+    } else if (force ||
+        current.lumpName != exact ||
+        current.viewAnchorY != anchorY) {
+      current.setFrame(exact, viewAnchorY: anchorY);
     }
+    _syncWeaponFlash(animation, anchorY);
   }
 
-  String? _weaponFrameFor(Weapon weapon) {
-    if (level.content.isFixture) {
-      return level.resources.spriteNames.contains('TESTB0') ? 'TESTB0' : null;
+  void _syncWeaponFlash(WeaponAnimation animation, double anchorY) {
+    final String? flash = animation.flashFrame < 0
+        ? null
+        : _weaponFlashFrameFor(animation.weapon, animation.flashFrame);
+    final current = _weaponFlashSprite;
+    if (flash == null) {
+      current?.setVisible(false);
+      return;
     }
+    if (current == null) {
+      _weaponFlashSprite = scene.addWeaponSprite(
+        WeaponSpriteInstance(
+          lumpName: flash,
+          viewAnchorX: 0,
+          viewAnchorY: anchorY,
+          fullBright: true,
+          depthLayer: -2,
+        ),
+      );
+      return;
+    }
+    current.setVisible(true);
+    current.setFrame(flash, viewAnchorY: anchorY);
+  }
+
+  String? _weaponFrameFor(Weapon weapon, int frame) {
     final String prefix = switch (weapon) {
       Weapon.fist => DoomWeaponSprites.fist,
       Weapon.pistol => DoomWeaponSprites.pistol,
       Weapon.shotgun => DoomWeaponSprites.shotgun,
       Weapon.chaingun => DoomWeaponSprites.chaingun,
     };
-    final names = <String>[
-      for (final name in level.resources.spriteNames)
-        if (name.startsWith(prefix) && (name.length == 6 || name.length == 8))
-          name,
-    ]..sort();
-    return names.isEmpty ? null : names.first;
+    final String candidate = '$prefix${String.fromCharCode(65 + frame)}0';
+    return level.resources.spriteNames.contains(candidate) ? candidate : null;
+  }
+
+  String? _weaponFlashFrameFor(Weapon weapon, int frame) {
+    final String? prefix = switch (weapon) {
+      Weapon.fist => null,
+      Weapon.pistol => 'PISF',
+      Weapon.shotgun => 'SHTF',
+      Weapon.chaingun => 'CHGF',
+    };
+    if (prefix == null) return null;
+    final String candidate = '$prefix${String.fromCharCode(65 + frame)}0';
+    return level.resources.spriteNames.contains(candidate) ? candidate : null;
   }
 
   void _syncCamera(double alpha) {

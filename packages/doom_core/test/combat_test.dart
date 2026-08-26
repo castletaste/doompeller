@@ -49,6 +49,11 @@ void main() {
       expect(game.player.ammo.shells, 8);
       expect(game.player.armor, 100);
       expect(game.player.keys, contains(Key.blue));
+      expect(game.player.weapon, Weapon.pistol);
+      expect(game.player.weaponAnimation.phase, WeaponPhase.lowering);
+      for (var tic = 0; tic < 40; tic++) {
+        game.runTic(TicCmd.empty);
+      }
       expect(game.player.weapon, Weapon.shotgun);
     });
 
@@ -150,6 +155,248 @@ void main() {
       expect(game.player.weapon, Weapon.pistol);
     });
 
+    test('weapon fire state gates refire and returns to ready', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+      game.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(game.player.weaponAnimation.phase, WeaponPhase.firing);
+      expect(game.player.weaponAnimation.frame, 0);
+      expect(game.player.weaponAnimation.flashFrame, -1);
+      expect(game.player.ammo.bullets, 50);
+      for (int i = 0; i < 3; i++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      expect(game.player.ammo.bullets, 50);
+      game.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(game.player.weaponAnimation.frame, 1);
+      expect(game.player.weaponAnimation.flashFrame, 0);
+      expect(game.player.ammo.bullets, 49);
+      for (int i = 0; i < 20; i++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      expect(game.player.ammo.bullets, lessThan(49));
+      for (int i = 0; i < 30; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.player.weaponAnimation.phase, WeaponPhase.ready);
+      expect(game.player.weaponAnimation.frame, 0);
+    });
+
+    test('weapon fire chains expose the exact lamps and durations', () {
+      GameState armed(Weapon weapon) {
+        final int? pickupType = switch (weapon) {
+          Weapon.shotgun => 2001,
+          Weapon.chaingun => 2002,
+          _ => null,
+        };
+        final GameState game = GameState.start(
+          arena(<Thing>[
+            const Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+            if (pickupType != null)
+              Thing(x: 64, y: 64, angle: 0, type: pickupType, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+        );
+        if (pickupType != null) {
+          game.runTic(TicCmd.empty);
+          for (var tic = 0; tic < 40; tic++) {
+            game.runTic(TicCmd.empty);
+          }
+        } else if (weapon == Weapon.fist) {
+          game.runTic(
+            const TicCmd(
+              buttons: Buttons.changeWeapon | (0 << Buttons.weaponShift),
+            ),
+          );
+          for (var tic = 0; tic < 40; tic++) {
+            game.runTic(TicCmd.empty);
+          }
+        }
+        expect(game.player.weapon, weapon);
+        expect(game.player.weaponAnimation.phase, WeaponPhase.ready);
+        return game;
+      }
+
+      List<(int, int)> enteredStates(GameState game) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+        final List<(int, int)> result = <(int, int)>[
+          (game.player.weaponAnimation.frame, game.player.weaponAnimation.tics),
+        ];
+        while (game.player.weaponAnimation.phase == WeaponPhase.firing) {
+          final int previousTics = game.player.weaponAnimation.tics;
+          final int previousFrame = game.player.weaponAnimation.frame;
+          game.runTic(TicCmd.empty);
+          final WeaponAnimation current = game.player.weaponAnimation;
+          if (current.phase == WeaponPhase.firing &&
+              (current.frame != previousFrame || current.tics > previousTics)) {
+            result.add((current.frame, current.tics));
+          }
+        }
+        return result;
+      }
+
+      expect(enteredStates(armed(Weapon.fist)), <(int, int)>[
+        (1, 4),
+        (2, 4),
+        (3, 5),
+        (2, 4),
+        (1, 5),
+      ]);
+      expect(enteredStates(armed(Weapon.pistol)), <(int, int)>[
+        (0, 4),
+        (1, 6),
+        (2, 4),
+        (1, 5),
+      ]);
+      expect(enteredStates(armed(Weapon.shotgun)), <(int, int)>[
+        (0, 3),
+        (0, 7),
+        (1, 5),
+        (2, 5),
+        (3, 4),
+        (2, 5),
+        (1, 5),
+        (0, 3),
+        (0, 7),
+      ]);
+
+      final GameState chaingun = armed(Weapon.chaingun);
+      final int bullets = chaingun.player.ammo.bullets;
+      chaingun.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(chaingun.player.weaponAnimation.frame, 0);
+      expect(chaingun.player.ammo.bullets, bullets - 1);
+      for (var tic = 0; tic < 3; tic++) {
+        chaingun.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      expect(chaingun.player.ammo.bullets, bullets - 1);
+      chaingun.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(chaingun.player.weaponAnimation.frame, 1);
+      expect(chaingun.player.ammo.bullets, bullets - 2);
+    });
+
+    test('muzzle flash lamps retain their full classic lifetimes', () {
+      final GameState pistol = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+      for (var tic = 0; tic < 5; tic++) {
+        pistol.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      expect(pistol.player.weaponAnimation.flashFrame, 0);
+      for (var tic = 0; tic < 6; tic++) {
+        pistol.runTic(TicCmd.empty);
+        expect(pistol.player.weaponAnimation.flashFrame, 0);
+      }
+      pistol.runTic(TicCmd.empty);
+      expect(pistol.player.weaponAnimation.flashFrame, -1);
+
+      final GameState shotgun = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2001, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+      shotgun.runTic(TicCmd.empty);
+      for (var tic = 0; tic < 40; tic++) {
+        shotgun.runTic(TicCmd.empty);
+      }
+      for (var tic = 0; tic < 4; tic++) {
+        shotgun.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+      expect(shotgun.player.weaponAnimation.flashFrame, 0);
+      for (var tic = 0; tic < 3; tic++) {
+        shotgun.runTic(TicCmd.empty);
+        expect(shotgun.player.weaponAnimation.flashFrame, 0);
+      }
+      shotgun.runTic(TicCmd.empty);
+      expect(shotgun.player.weaponAnimation.flashFrame, 1);
+      for (var tic = 0; tic < 2; tic++) {
+        shotgun.runTic(TicCmd.empty);
+        expect(shotgun.player.weaponAnimation.flashFrame, 1);
+      }
+      shotgun.runTic(TicCmd.empty);
+      expect(shotgun.player.weaponAnimation.flashFrame, -1);
+    });
+
+    test('weapon change lowers then raises before the new weapon is ready', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2001, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+      game.runTic(TicCmd.empty);
+      expect(game.player.weapon, Weapon.pistol);
+      expect(game.player.weaponAnimation.phase, WeaponPhase.lowering);
+      for (int i = 0; i < 40; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.player.weapon, Weapon.shotgun);
+      game.runTic(
+        const TicCmd(
+          buttons: Buttons.changeWeapon | (1 << Buttons.weaponShift),
+        ),
+      );
+      expect(game.player.weaponAnimation.phase, WeaponPhase.lowering);
+      expect(game.player.weapon, Weapon.shotgun);
+      for (int i = 0; i < 40; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.player.weapon, Weapon.pistol);
+      expect(game.player.weaponAnimation.phase, WeaponPhase.ready);
+    });
+
+    test(
+      'hitscan spawns finite puff on wall and blood on a shootable actor',
+      () {
+        final GameState wall = GameState.start(
+          arena(const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+        );
+        for (var tic = 0; tic < 5; tic++) {
+          wall.runTic(const TicCmd(buttons: Buttons.attack));
+        }
+        expect(
+          wall.mobjs.where((MobjView m) => m.sprite == 'PUFF'),
+          isNotEmpty,
+        );
+        for (int i = 0; i < 20; i++) {
+          wall.runTic(TicCmd.empty);
+        }
+        expect(wall.mobjs.where((MobjView m) => m.sprite == 'PUFF'), isEmpty);
+
+        final GameState target = GameState.start(
+          arena(const <Thing>[
+            Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 96, y: 64, angle: 180, type: 3004, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+          seed: 3,
+        );
+        for (var tic = 0; tic < 5; tic++) {
+          target.runTic(const TicCmd(buttons: Buttons.attack));
+        }
+        expect(
+          target.mobjs.where((MobjView m) => m.sprite == 'BLUD'),
+          isNotEmpty,
+        );
+        for (int i = 0; i < 30; i++) {
+          target.runTic(TicCmd.empty);
+        }
+        expect(target.mobjs.where((MobjView m) => m.sprite == 'BLUD'), isEmpty);
+      },
+    );
+
     test('pistol hitscan damages and kills former human', () {
       final GameState game = GameState.start(
         arena(<Thing>[
@@ -162,12 +409,14 @@ void main() {
       final int before = game.mobjs
           .firstWhere((MobjView m) => m.sprite == 'POSS')
           .health;
-      game.runTic(const TicCmd(buttons: Buttons.attack));
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
       final int after = game.mobjs
           .firstWhere((MobjView m) => m.sprite == 'POSS')
           .health;
       expect(after, lessThan(before));
-      for (int i = 0; i < 15; i++) {
+      for (int i = 0; i < 80; i++) {
         game.runTic(const TicCmd(buttons: Buttons.attack));
       }
       expect(
@@ -178,9 +427,17 @@ void main() {
         (MobjView m) => m.sprite == 'POSS',
       );
       expect(corpse.flags & 0x100000, isNot(0)); // corpse flag
-      expect(corpse.frame, 2);
-      // Pins the observable corpse flags/frame together with its stable id.
-      expect(game.hashState(), 0x44a9e574);
+      expect(corpse.flags & 0x0400, isNot(0)); // drop-off flag
+      expect(corpse.flags & 0x0002, 0); // solid flag
+      expect(corpse.height, toFixed(14));
+      expect(corpse.frame, greaterThanOrEqualTo(7));
+      // Delayed pistol actions and quarter-height non-solid corpse state are
+      // both replay-significant here.
+      expect(game.hashState(), 0x0d89f94d);
+      for (var tic = 0; tic < 10; tic++) {
+        game.runTic(const TicCmd(forwardMove: 8));
+      }
+      expect(game.player.x, greaterThan(toFixed(80)));
     });
 
     test('hitscan is occluded by a one-sided wall', () {
@@ -314,7 +571,7 @@ void main() {
         const GameConfig(),
         seed: 2,
       );
-      for (int i = 0; i < 20; i++) {
+      for (int i = 0; i < 36; i++) {
         game.runTic(TicCmd.empty);
       }
       expect(game.mobjs.where((MobjView m) => m.sprite == 'BAL1'), isNotEmpty);

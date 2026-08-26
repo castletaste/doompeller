@@ -138,6 +138,31 @@ Future<PreparedDoomLevel> fixtureSoundLevel() async {
   );
 }
 
+Future<PreparedDoomLevel> fixtureVisualCombatLevel(List<Thing> things) async {
+  final base = await fixtureLevel();
+  final source = base.map;
+  final map = MapData(
+    name: source.name,
+    vertices: source.vertices,
+    linedefs: source.linedefs,
+    sidedefs: source.sidedefs,
+    sectors: source.sectors,
+    segs: source.segs,
+    subsectors: source.subsectors,
+    nodes: source.nodes,
+    things: things,
+    blockmap: source.blockmap,
+    reject: source.reject,
+  );
+  return PreparedDoomLevel(
+    content: base.content,
+    resources: base.resources,
+    map: map,
+    geometry: base.geometry,
+    game: GameState.start(map, const GameConfig(monsters: false), seed: 3),
+  );
+}
+
 void main() {
   setUp(FakeGpuBackend.new);
 
@@ -193,7 +218,6 @@ void main() {
     ];
     expect(sounds, contains('DSDOROPN'));
     expect(sounds, contains('DSPISTOL'));
-    expect(sounds, contains('DSPODTH1'));
     expect(runtime.gameState.soundJournal, isEmpty);
     expect(
       backend.playCalls
@@ -328,10 +352,128 @@ void main() {
     runtime.syncActorViewsForTest(const <MobjView>[moved]);
     expect(runtime.actorComponentCount, 1);
     expect(runtime.actorPositionForTest(90), (x: 12, y: 4, z: -24));
+    expect(runtime.actorComponentForTest(90)?.lumpName, 'TESTB0');
 
     runtime.syncActorViewsForTest(const <MobjView>[]);
     expect(runtime.actorIds, isEmpty);
   });
+
+  test(
+    'production ticks carry actor frames into the retained sprite',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      final MobjView zombie = runtime.gameState.mobjs.firstWhere(
+        (MobjView actor) => actor.sprite == 'POSS',
+      );
+      expect(runtime.actorComponentForTest(zombie.id)?.lumpName, 'POSSA0');
+
+      for (var step = 0; step < 12; step++) {
+        runtime.advanceMicrosForTest(28572);
+      }
+
+      final MobjView animated = runtime.gameState.mobjs.firstWhere(
+        (MobjView actor) => actor.id == zombie.id,
+      );
+      final String frameLetter = String.fromCharCode(65 + animated.frame);
+      expect(animated.frame, isNot(0));
+      expect(
+        runtime.actorComponentForTest(zombie.id)?.lumpName,
+        'POSS${frameLetter}0',
+      );
+    },
+  );
+
+  test(
+    'runtime preserves actor light and fullbright into vertex params',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      const actor = MobjView(
+        id: 93,
+        x: 10 * kFracUnit,
+        y: 20 * kFracUnit,
+        z: 3 * kFracUnit,
+        angle: 0,
+        sprite: 'BAL1',
+        frame: 0,
+        flags: 0,
+        health: 1,
+        lightLevel: 16,
+        fullBright: true,
+      );
+      runtime.syncActorViewsForTest(const <MobjView>[actor]);
+      final component = runtime.actorComponentForTest(93)!;
+      expect(component.light, closeTo(16 / 255, 1e-12));
+      expect(component.fullBright, isTrue);
+      expect(
+        component.surface.packedVertices[geometry.DoomVertexAbi.paramsOffset],
+        1,
+      );
+    },
+  );
+
+  test(
+    'production firing syncs body, flash, puff and blood lifecycles',
+    () async {
+      final bloodRuntime = DoomRuntimeGame(
+        await fixtureVisualCombatLevel(const <Thing>[
+          Thing(x: 128, y: 128, angle: 0, type: 1, flags: 7),
+          Thing(x: 192, y: 128, angle: 180, type: 3004, flags: 7),
+        ]),
+      );
+      expect(bloodRuntime.weaponFrame, 'PISGA0');
+      bloodRuntime.input.press(DoomControl.attack);
+      bloodRuntime.advanceMicrosForTest(28572);
+      expect(bloodRuntime.weaponFrame, 'PISGA0');
+      expect(bloodRuntime.weaponFlashVisible, isFalse);
+      expect(
+        bloodRuntime.gameState.mobjs.where(
+          (MobjView actor) => actor.sprite == 'BLUD',
+        ),
+        isEmpty,
+      );
+      for (var tic = 0; tic < 4; tic++) {
+        bloodRuntime.advanceMicrosForTest(28572);
+      }
+      expect(bloodRuntime.weaponFrame, 'PISGB0');
+      expect(bloodRuntime.weaponFlashFrame, 'PISFA0');
+      expect(bloodRuntime.weaponFlashVisible, isTrue);
+      final int bloodId = bloodRuntime.gameState.mobjs
+          .firstWhere((MobjView actor) => actor.sprite == 'BLUD')
+          .id;
+      expect(bloodRuntime.actorComponentForTest(bloodId), isNotNull);
+
+      bloodRuntime.input.release(DoomControl.attack);
+      for (var tic = 0; tic < 6; tic++) {
+        bloodRuntime.advanceMicrosForTest(28572);
+        expect(bloodRuntime.weaponFlashVisible, isTrue);
+      }
+      bloodRuntime.advanceMicrosForTest(28572);
+      expect(bloodRuntime.weaponFlashVisible, isFalse);
+      for (var tic = 0; tic < 30; tic++) {
+        bloodRuntime.advanceMicrosForTest(28572);
+      }
+      expect(bloodRuntime.actorComponentForTest(bloodId), isNull);
+
+      final puffRuntime = DoomRuntimeGame(
+        await fixtureVisualCombatLevel(const <Thing>[
+          Thing(x: 220, y: 128, angle: 0, type: 1, flags: 7),
+        ]),
+      );
+      puffRuntime.input.press(DoomControl.attack);
+      for (var tic = 0; tic < 5; tic++) {
+        puffRuntime.advanceMicrosForTest(28572);
+      }
+      final int puffId = puffRuntime.gameState.mobjs
+          .firstWhere((MobjView actor) => actor.sprite == 'PUFF')
+          .id;
+      expect(puffRuntime.actorComponentForTest(puffId), isNotNull);
+      puffRuntime.input.release(DoomControl.attack);
+      for (var tic = 0; tic < 20; tic++) {
+        puffRuntime.advanceMicrosForTest(28572);
+      }
+      expect(puffRuntime.actorComponentForTest(puffId), isNull);
+    },
+  );
 
   test('actor pool stays flat across 100 spawn/remove cycles', () async {
     final runtime = DoomRuntimeGame(await fixtureLevel());

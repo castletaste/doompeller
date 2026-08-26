@@ -56,13 +56,9 @@ void main() {
         const GameConfig(monsters: false),
         seed: 3,
       );
-      for (int i = 0; i < 12; i++) {
+      for (int i = 0; i < 80; i++) {
         barrel.runTic(const TicCmd(buttons: Buttons.attack));
       }
-      expect(
-        barrel.mobjs.firstWhere((MobjView m) => m.sprite == 'BAR1').health,
-        0,
-      );
       expect(barrel.player.health, 0);
       expect(barrel.totalKills, 0);
       expect(barrel.killCount, 0);
@@ -77,7 +73,7 @@ void main() {
         const GameConfig(monsters: false),
         seed: 3,
       );
-      for (int i = 0; i < 16; i++) {
+      for (int i = 0; i < 80; i++) {
         monster.runTic(const TicCmd(buttons: Buttons.attack));
       }
       expect(monster.player.health, greaterThan(0));

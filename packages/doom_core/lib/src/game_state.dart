@@ -780,12 +780,13 @@ class GameState {
       return false;
     }
     final int oldX = m.x, oldY = m.y;
+    final bool wasOnFloor = m.z == m.floorZ;
     m.x = nx;
     m.y = ny;
     m.sectorIndex = sector;
     m.floorZ = dest.floorHeight;
     m.ceilingZ = dest.ceilingHeight;
-    if (m.z < m.floorZ) {
+    if (wasOnFloor || m.z < m.floorZ) {
       m.z = m.floorZ;
     }
     _crossSpecials(m, oldX, oldY, nx, ny);

@@ -709,6 +709,22 @@ void main() {
       expect(game.player.z, toFixed(24));
     });
 
+    test('a grounded player follows an inclusive 24 unit drop', () {
+      final GameState game = GameState.start(
+        testMap(
+          sectors: twoSectors(backFloor: -24),
+          sides: twoSides(),
+          lines: <Linedef>[portal()],
+        ),
+        const GameConfig(monsters: false),
+      );
+      for (int i = 0; i < 12; i++) {
+        game.runTic(const TicCmd(forwardMove: 8));
+      }
+      expect(game.player.x, greaterThan(toFixed(128)));
+      expect(game.player.z, toFixed(-24));
+    });
+
     test('a 25 unit step is rejected', () {
       final GameState game = GameState.start(
         testMap(

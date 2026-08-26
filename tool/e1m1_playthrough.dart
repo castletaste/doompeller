@@ -44,6 +44,12 @@ final class E1m1PlaythroughResult {
     required this.tics,
     required this.health,
     required this.finalSector,
+    required this.kills,
+    required this.totalKills,
+    required this.items,
+    required this.totalItems,
+    required this.secrets,
+    required this.totalSecrets,
     required this.commands,
     required this.doorOpened,
     required this.liftActivated,
@@ -61,6 +67,7 @@ final class E1m1PlaythroughResult {
   final int tics;
   final int health;
   final int finalSector;
+  final int kills, totalKills, items, totalItems, secrets, totalSecrets;
   final List<TicCmd> commands;
   final bool doorOpened;
   final bool liftActivated;
@@ -76,6 +83,8 @@ final class E1m1PlaythroughResult {
   String get summary =>
       'E1M1 ${completed ? 'COMPLETE' : 'INCOMPLETE'}: '
       'tics=$tics health=$health sector=$finalSector '
+      'kills=$kills/$totalKills items=$items/$totalItems '
+      'secrets=$secrets/$totalSecrets '
       'doors=$doorOpened lift=$liftActivated/$liftMoved '
       'damage=$damageObserved floor=$floorInvariantHeld wall=$wallInvariantHeld '
       'maxStationary=$maxStationaryTics '
@@ -134,6 +143,12 @@ final class E1m1PlaythroughRunner {
       tics: game.tic,
       health: game.player.health,
       finalSector: game.playerSectorIndex,
+      kills: game.killCount,
+      totalKills: game.totalKills,
+      items: game.itemCount,
+      totalItems: game.totalItems,
+      secrets: game.secretsFound,
+      totalSecrets: game.totalSecrets,
       commands: List<TicCmd>.unmodifiable(driver.commands),
       doorOpened: driver.doorOpened,
       liftActivated: driver.liftActivated,
@@ -330,6 +345,12 @@ final class _Planner {
       exitLine: bestExit.line,
     );
   }
+
+  List<_Point>? routeBetween(_Point start, _Point target) => _search(
+    start,
+    (point) => point.distance2(target) <= 16 * 16,
+    allowBackDoorCrossing: true,
+  );
 
   static const Set<int> _damagingSectors = <int>{5, 7, 11};
 
@@ -661,17 +682,22 @@ final class _Driver {
   void follow(List<_Point> points, {bool includeFirst = false}) {
     for (var index = includeFirst ? 0 : 1; index < points.length; index++) {
       try {
-        final int? requiredSector =
-            index > 0 &&
-                _sectorAt(points[index - 1]) != _sectorAt(points[index])
-            ? _sectorAt(points[index])
-            : null;
-        _driveTo(
-          points[index],
-          settle: requiredSector != null,
-          requiredSector: requiredSector,
-        );
+        _driveTo(points[index]);
       } on StateError catch (error) {
+        if (_nearbySolidActors() > 0) {
+          final _Point current = _Point(
+            fixedToInt(game.player.x),
+            fixedToInt(game.player.y),
+          );
+          final List<_Point>? detour = _Planner(
+            map,
+            current,
+          ).routeBetween(current, points[index]);
+          if (detour != null) {
+            follow(detour, includeFirst: true);
+            continue;
+          }
+        }
         throw StateError(
           'waypoint $index/${points.length - 1}: ${error.message}; '
           'doorOpened=$doorOpened liftActivated=$liftActivated '
@@ -819,7 +845,7 @@ final class _Driver {
       final int dx = toFixed(target.x) - game.player.x;
       final int dy = toFixed(target.y) - game.player.y;
       final int distance2 = dx * dx + dy * dy;
-      final int tolerance = settle ? 4 : 20;
+      final int tolerance = settle ? 4 : 28;
       final bool withinTarget =
           distance2 <= toFixed(tolerance) * toFixed(tolerance);
       final bool reachedSector =
@@ -844,7 +870,7 @@ final class _Driver {
       final int distance = approxDistance(dx, dy);
       final int speed = settle && withinTarget && reachedSector
           ? 0
-          : math.min(distance, toFixed(12));
+          : math.min(distance, toFixed(4));
       final int cosine = Trig.cos(desired);
       final int sine = Trig.sin(desired);
       final int impulseX = fixedMul(speed, cosine) - _estimatedMomX;
@@ -896,35 +922,10 @@ final class _Driver {
   bool _tryNearbyDoors() {
     final int before = doorOpenEvents;
     for (final int door in _nearbyDoorLines()) {
-      _driveTo(
-        _frontDoorActionPoint(door),
-        settle: true,
-        allowDoorRecovery: false,
-      );
       _tryUseDoorLine(door);
       if (doorOpenEvents > before) return true;
     }
     return false;
-  }
-
-  _Point _frontDoorActionPoint(int lineIndex) {
-    final Linedef line = map.linedefs[lineIndex];
-    final MapVertex a = map.vertices[line.v1];
-    final MapVertex b = map.vertices[line.v2];
-    final double dx = (b.x - a.x).toDouble();
-    final double dy = (b.y - a.y).toDouble();
-    final double length2 = dx * dx + dy * dy;
-    final double length = math.sqrt(length2);
-    final double along = length2 == 0
-        ? 0.5
-        : (((fixedToDouble(game.player.x) - a.x) * dx +
-                      (fixedToDouble(game.player.y) - a.y) * dy) /
-                  length2)
-              .clamp(0.1, 0.9);
-    return _Point(
-      (a.x + dx * along + dy * 32 / length).round(),
-      (a.y + dy * along - dx * 32 / length).round(),
-    );
   }
 
   void _tryUseDoorLine(int lineIndex) {
@@ -975,7 +976,7 @@ final class _Driver {
       final MapVertex a = map.vertices[line.v1];
       final MapVertex b = map.vertices[line.v2];
       final int distance2 = _Planner._distanceSquared(player, a, b);
-      if (distance2 > 80 * 80) continue;
+      if (distance2 > 64 * 64) continue;
       final int cross =
           (b.x - a.x) * (player.y - a.y) - (b.y - a.y) * (player.x - a.x);
       if (cross <= 0) candidates.add((index: index, distance2: distance2));

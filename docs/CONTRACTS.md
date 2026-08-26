@@ -161,6 +161,17 @@ class GameState {
 }
 ```
 
+`GameConfig.maxSoundPropagationVisits` bounds one weapon-noise sector walk and
+defaults to `DoomLimits.defaults.maxSectors` (65535). The ruleset value is
+future-affecting and is included in `hashState()`.
+
+Monster awareness stores the latest live sound target per reached sector.
+Traversal uses pre-indexed touching linedefs, crosses at most one
+`ML_SOUNDBLOCK` boundary, observes current two-sided openings, and caps both
+queue growth and visits at the configured budget. Sector sound targets, ambush
+state, individual reaction/threshold/move counters and actor targets are all
+hashed; death-camera descent is visual-only and excluded.
+
 ### doom_core M4/M5 supported special subset
 
 The core classifies specials by their explicit map-format values in
@@ -238,7 +249,7 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xbddfa3ff` for seed 7 and its documented twenty-command stream. Spawn order
+`0xd3e34da8` for seed 7 and its documented twenty-command stream. Spawn order
 is intentionally part of deterministic identity and therefore part of the
 hash; actor hashing itself sorts by stable actor id.
 

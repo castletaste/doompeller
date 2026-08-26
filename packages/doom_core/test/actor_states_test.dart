@@ -199,16 +199,18 @@ void main() {
         const GameConfig(),
         seed: 2,
       );
-      for (var tic = 0; tic < 20; tic++) {
+      for (var tic = 0; tic < 100 && _actor(zombie, 'POSS').frame != 4; tic++) {
         zombie.runTic(TicCmd.empty);
       }
       expect(_actor(zombie, 'POSS').frame, 4);
       expect(zombie.player.health, 100);
-      for (var tic = 0; tic < 9; tic++) {
+      while (_actor(zombie, 'POSS').frame == 4) {
+        final int before = zombie.player.health;
         zombie.runTic(TicCmd.empty);
+        if (_actor(zombie, 'POSS').frame == 4) {
+          expect(zombie.player.health, before);
+        }
       }
-      expect(zombie.player.health, 100);
-      zombie.runTic(TicCmd.empty);
       expect(_actor(zombie, 'POSS').frame, 5);
       expect(zombie.player.health, lessThan(100));
 
@@ -225,14 +227,13 @@ void main() {
         const GameConfig(),
         seed: 2,
       );
-      for (var tic = 0; tic < 35; tic++) {
+      for (var tic = 0; tic < 100 && _actor(imp, 'TROO').frame != 6; tic++) {
+        expect(
+          imp.mobjs.where((MobjView actor) => actor.sprite == 'BAL1'),
+          isEmpty,
+        );
         imp.runTic(TicCmd.empty);
       }
-      expect(
-        imp.mobjs.where((MobjView actor) => actor.sprite == 'BAL1'),
-        isEmpty,
-      );
-      imp.runTic(TicCmd.empty);
       expect(_actor(imp, 'TROO').frame, 6);
       expect(
         imp.mobjs.where((MobjView actor) => actor.sprite == 'BAL1'),

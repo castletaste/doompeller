@@ -78,6 +78,10 @@ class Mobj {
   /// Index of the actor this one is currently fighting, or null.
   Mobj? target;
 
+  /// Map-thing ambush flag. An ambush monster hears alerts, but requires sight
+  /// before it commits to the source.
+  bool ambush = false;
+
   /// Actor that spawned a projectile. Kept separate from [target] so collision
   /// never turns a projectile around onto its owner.
   Mobj? owner;

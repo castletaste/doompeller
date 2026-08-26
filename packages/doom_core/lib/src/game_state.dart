@@ -21,6 +21,10 @@ const int _maxBob = 0x100000;
 const int _singleAxisMaxBobMomentum = 8 * kFracUnit;
 const int _bobAngleStep = (kFineAngles ~/ 20) << kAngleToFineShift;
 const int _ceilingViewClearance = 4 * kFracUnit;
+const int _livingViewHeight = 41 * kFracUnit;
+const int _deadViewHeight = 6 * kFracUnit;
+const int _deathViewDropPerTic = kFracUnit;
+const int _baseMonsterThreshold = 100;
 const int _weaponTop = 32;
 const int _weaponBottom = 128;
 const int _weaponMovePerTic = 6;
@@ -141,6 +145,17 @@ class GameState {
   final Set<Key> _keys = <Key>{};
   final Set<int> _foundSecrets = <int>{};
   final Set<int> _activatedOnceLines = <int>{};
+  late final List<Mobj?> _sectorSoundTargets = List<Mobj?>.filled(
+    _runtime.sectors.length,
+    null,
+  );
+  late final List<int> _soundVisitGenerations = List<int>.filled(
+    _runtime.sectors.length,
+    0,
+  );
+  final List<int> _soundQueueSectors = <int>[];
+  final List<int> _soundQueueBlocks = <int>[];
+  int _soundVisitGeneration = 0;
   int _secrets = 0;
   int _killCount = 0;
   int _totalKills = 0;
@@ -150,6 +165,7 @@ class GameState {
   bool _levelComplete = false;
   bool _secretExit = false;
   int _bob = 0;
+  int _deathViewHeight = _livingViewHeight;
   bool _useHeld = false;
 
   int get tic => _tic;
@@ -215,7 +231,8 @@ class GameState {
   bool get usedSecretExit => _secretExit;
   PlayerView get player {
     final int ceiling = _runtime.sectors[_playerMobj.sectorIndex].ceilingHeight;
-    final int bobbedViewZ = _playerMobj.viewZ + _bob;
+    final int viewHeight = _health > 0 ? _livingViewHeight : _deathViewHeight;
+    final int bobbedViewZ = _playerMobj.z + viewHeight + _bob;
     final int highestViewZ = ceiling - _ceilingViewClearance;
     return PlayerView(
       x: _playerMobj.x,
@@ -244,7 +261,11 @@ class GameState {
     _tic++;
     _tickSwitchButtons();
     _tickMovers();
-    if (_health > 0) _tickPlayer(cmd);
+    if (_health > 0) {
+      _tickPlayer(cmd);
+    } else {
+      _tickDeathView();
+    }
     _tickSectorEffects();
     _tickActors(runAi: config.monsters);
     _collectPickups();
@@ -261,7 +282,14 @@ class GameState {
       if (thing.type == 1) {
         _playerMobj = _add(_playerInfo, thing.x, thing.y, thing.angle, 100);
       } else if (info != null) {
-        _add(info, thing.x, thing.y, thing.angle, info.spawnHealth);
+        final Mobj spawned = _add(
+          info,
+          thing.x,
+          thing.y,
+          thing.angle,
+          info.spawnHealth,
+        );
+        spawned.ambush = (thing.flags & ThingFlags.ambush) != 0;
         if ((info.flags & MobjFlags.countKill) != 0) _totalKills++;
         if ((info.flags & MobjFlags.countItem) != 0) _totalItems++;
       }
@@ -492,6 +520,9 @@ class GameState {
   }
 
   void _fireWeapon() {
+    // One alert per weapon action, never once per shotgun pellet. The bounded
+    // traversal itself consumes no RNG, so it does not perturb attack rolls.
+    _noiseAlert(_playerMobj);
     switch (_weapon) {
       case Weapon.fist:
         _emitPlayerSound('DSPUNCH');
@@ -516,6 +547,16 @@ class GameState {
         }
     }
     _shootSpecialLine();
+  }
+
+  void _tickDeathView() {
+    _bob = 0;
+    if (_deathViewHeight > _deadViewHeight) {
+      _deathViewHeight -= _deathViewDropPerTic;
+      if (_deathViewHeight < _deadViewHeight) {
+        _deathViewHeight = _deadViewHeight;
+      }
+    }
   }
 
   void _hitscan(int range, int damage, {int spread = 0}) {
@@ -1183,6 +1224,52 @@ class GameState {
     }
   }
 
+  void _noiseAlert(Mobj source) {
+    if (_runtime.sectors.isEmpty) return;
+    final int budget = config.maxSoundPropagationVisits;
+    final int generation = ++_soundVisitGeneration;
+    _soundQueueSectors
+      ..clear()
+      ..add(source.sectorIndex);
+    _soundQueueBlocks
+      ..clear()
+      ..add(0);
+    _soundVisitGenerations[source.sectorIndex] = generation;
+    var cursor = 0;
+    while (cursor < _soundQueueSectors.length && cursor < budget) {
+      final int currentSector = _soundQueueSectors[cursor];
+      final int currentBlocks = _soundQueueBlocks[cursor++];
+      _sectorSoundTargets[currentSector] = source;
+      final SectorRuntime sector = _runtime.sectors[currentSector];
+      for (final int lineIndex in sector.touchingLinedefs) {
+        if (_soundQueueSectors.length >= budget) break;
+        final Linedef line = _runtime.map.linedefs[lineIndex];
+        if (!line.isTwoSided) continue;
+        final ({int bottom, int top})? opening = _runtime.openingFor(lineIndex);
+        if (opening == null || opening.top <= opening.bottom) continue;
+        final int front = _runtime.frontSector(line);
+        final int? back = _runtime.backSector(line);
+        if (back == null) continue;
+        final int other = currentSector == front ? back : front;
+        if (other == currentSector ||
+            other < 0 ||
+            other >= _runtime.sectors.length) {
+          continue;
+        }
+        final bool blocksSound = (line.flags & LinedefFlags.soundBlock) != 0;
+        final int nextBlocks = currentBlocks + (blocksSound ? 1 : 0);
+        // A sound may pass one blocking boundary; a second one stops it. Doom
+        // maps conventionally use blocking lines in pairs around a sound zone.
+        if (nextBlocks > 1 || _soundVisitGenerations[other] == generation) {
+          continue;
+        }
+        _soundVisitGenerations[other] = generation;
+        _soundQueueSectors.add(other);
+        _soundQueueBlocks.add(nextBlocks);
+      }
+    }
+  }
+
   void _tickActors({required bool runAi}) {
     final List<Mobj> actors = List<Mobj>.of(_mobjs);
     for (final Mobj m in actors) {
@@ -1195,45 +1282,157 @@ class GameState {
       }
       if (!runAi || !m.info.isMonster || m.health <= 0) continue;
       if (m.state != MobjState.spawn && m.state != MobjState.see) continue;
-      final int distance = approxDistance(
-        _playerMobj.x - m.x,
-        _playerMobj.y - m.y,
-      );
-      if (m.target == null &&
-          distance < toFixed(512) &&
-          _hasSight(m, _playerMobj)) {
-        m.target = _playerMobj;
-        _enterMobjState(m, MobjState.see);
+      if (m.reactionTime > 0) m.reactionTime--;
+      if (m.threshold > 0) m.threshold--;
+      if (m.target != null && (m.target!.health <= 0 || m.target!.removed)) {
+        m.target = null;
+        m.threshold = 0;
       }
-      if (m.target == null) continue;
-      m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
+      if (m.target == null && !_lookForTarget(m)) continue;
+      final Mobj target = m.target!;
+      final int distance = approxDistance(target.x - m.x, target.y - m.y);
+
+      if ((m.flags & MobjFlags.justAttacked) != 0) {
+        m.flags &= ~MobjFlags.justAttacked;
+        _newChaseDir(m, target);
+        continue;
+      }
+
       if (distance < toFixed(64) &&
           MobjStateTable.start(m.info.id, MobjState.melee) != null) {
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
         _enterMobjState(m, MobjState.melee);
         continue;
       }
-      if ((m.info.id == MobjType.possessed || m.info.id == MobjType.shotguy) &&
-          distance < toFixed(1024) &&
-          _tic % 20 == 0 &&
-          _hasSight(m, _playerMobj)) {
+      if (m.moveCount == 0 && _checkMissileRange(m, target, distance)) {
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        m.flags |= MobjFlags.justAttacked;
         _enterMobjState(m, MobjState.missile);
         continue;
       }
-      if (m.info.id == MobjType.troop &&
-          distance < toFixed(384) &&
-          (_tic % 20 == 0)) {
-        _enterMobjState(m, MobjState.missile);
-        continue;
-      }
-      if (_tic % 4 == 0) {
-        m.moveDir = ((normalizeAngle(m.angle + (kAng45 ~/ 2))) >> 29) & 7;
-        _tryMove(
-          m,
-          fixedMul(toFixed(m.info.speed), Trig.cos(kDirAngles[m.moveDir])),
-          fixedMul(toFixed(m.info.speed), Trig.sin(kDirAngles[m.moveDir])),
-        );
+      _chaseMove(m, target);
+    }
+  }
+
+  bool _lookForTarget(Mobj monster) {
+    if (_health <= 0) return false;
+    final Mobj? heard = _sectorSoundTargets[monster.sectorIndex];
+    if (heard != null &&
+        heard.health > 0 &&
+        (!monster.ambush || _hasSight(monster, heard))) {
+      monster.target = heard;
+    } else if (_hasSight(monster, _playerMobj)) {
+      monster.target = _playerMobj;
+    }
+    if (monster.target == null) return false;
+    _enterMobjState(monster, MobjState.see);
+    return true;
+  }
+
+  bool _checkMissileRange(Mobj monster, Mobj target, int distance) {
+    if (monster.reactionTime > 0 || !_hasSight(monster, target)) return false;
+    if (MobjStateTable.start(monster.info.id, MobjState.missile) == null) {
+      return false;
+    }
+    int mapDistance = fixedToInt(distance) - 64;
+    if (MobjStateTable.start(monster.info.id, MobjState.melee) == null) {
+      mapDistance -= 128;
+    }
+    if (mapDistance < 0) mapDistance = 0;
+    if (mapDistance > 200) mapDistance = 200;
+
+    return _random.next() >= mapDistance;
+  }
+
+  void _chaseMove(Mobj monster, Mobj target) {
+    if (monster.moveDir != kDirNone && monster.moveCount > 0) {
+      if (_tryMonsterDirection(monster, monster.moveDir)) {
+        monster.moveCount--;
+        return;
       }
     }
+    _newChaseDir(monster, target);
+  }
+
+  void _newChaseDir(Mobj monster, Mobj target) {
+    final int oldDir = monster.moveDir;
+    final int turnaround = oldDir == kDirNone ? kDirNone : (oldDir + 4) & 7;
+    final int dx = target.x - monster.x;
+    final int dy = target.y - monster.y;
+    final int xDir = dx > toFixed(10)
+        ? kDirEast
+        : dx < -toFixed(10)
+        ? kDirWest
+        : kDirNone;
+    final int yDir = dy > toFixed(10)
+        ? kDirNorth
+        : dy < -toFixed(10)
+        ? kDirSouth
+        : kDirNone;
+    if (xDir != kDirNone && yDir != kDirNone) {
+      final int diagonal = switch ((xDir, yDir)) {
+        (kDirEast, kDirNorth) => kDirNorthEast,
+        (kDirWest, kDirNorth) => kDirNorthWest,
+        (kDirWest, kDirSouth) => kDirSouthWest,
+        _ => kDirSouthEast,
+      };
+      if (diagonal != turnaround && _tryChaseDirection(monster, diagonal)) {
+        return;
+      }
+    }
+    int firstAxis = xDir;
+    int secondAxis = yDir;
+    if (_random.next() > 200 || dy.abs() > dx.abs()) {
+      final int swap = firstAxis;
+      firstAxis = secondAxis;
+      secondAxis = swap;
+    }
+    if (firstAxis == turnaround) firstAxis = kDirNone;
+    if (secondAxis == turnaround) secondAxis = kDirNone;
+    if (firstAxis != kDirNone && _tryChaseDirection(monster, firstAxis)) {
+      return;
+    }
+    if (secondAxis != kDirNone && _tryChaseDirection(monster, secondAxis)) {
+      return;
+    }
+    if (oldDir != kDirNone && _tryChaseDirection(monster, oldDir)) return;
+
+    if ((_random.next() & 1) != 0) {
+      for (var direction = 0; direction < 8; direction++) {
+        if (direction != turnaround && _tryChaseDirection(monster, direction)) {
+          return;
+        }
+      }
+    } else {
+      for (var direction = 7; direction >= 0; direction--) {
+        if (direction != turnaround && _tryChaseDirection(monster, direction)) {
+          return;
+        }
+      }
+    }
+    if (turnaround != kDirNone && _tryChaseDirection(monster, turnaround)) {
+      return;
+    }
+    monster.moveDir = kDirNone;
+    monster.moveCount = 0;
+  }
+
+  bool _tryChaseDirection(Mobj monster, int direction) {
+    monster.moveDir = direction;
+    if (!_tryMonsterDirection(monster, direction)) return false;
+    monster.moveCount = _random.next() & 15;
+    return true;
+  }
+
+  bool _tryMonsterDirection(Mobj monster, int direction) {
+    monster.angle = kDirAngles[direction];
+    final int speed = toFixed(monster.info.speed);
+    return _tryMove(
+      monster,
+      fixedMul(speed, Trig.cos(monster.angle)),
+      fixedMul(speed, Trig.sin(monster.angle)),
+      allowSlide: false,
+    );
   }
 
   void _enterMobjState(Mobj m, MobjState phase) {
@@ -1259,22 +1458,32 @@ class GameState {
     final Mobj? target = m.target;
     switch (action) {
       case MobjStateAction.monsterHitscan:
-        if (!identical(target, _playerMobj) ||
-            _health <= 0 ||
-            !_hasSight(m, _playerMobj)) {
+        if (target == null || target.health <= 0 || !_hasSight(m, target)) {
           return;
         }
-        m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        final Mobj? struck = _monsterHitscanTarget(m, m.angle);
+        if (struck == null) return;
         final int pellets = m.info.id == MobjType.shotguy ? 3 : 1;
         for (int i = 0; i < pellets; i++) {
-          _damagePlayer(3 * (1 + (_random.next() % 5)));
+          final int damage = 3 * (1 + (_random.next() % 5));
+          if (identical(struck, _playerMobj)) {
+            _damagePlayer(damage, source: m);
+          } else if (struck.health > 0) {
+            _spawnBlood(struck, damage);
+            _damage(struck, damage, m);
+          }
         }
       case MobjStateAction.monsterMelee:
-        if (!identical(target, _playerMobj) || _health <= 0) return;
-        m.angle = Trig.atan2(_playerMobj.y - m.y, _playerMobj.x - m.x);
-        if (approxDistance(_playerMobj.x - m.x, _playerMobj.y - m.y) <
-            toFixed(64)) {
-          _damagePlayer(3 + (_random.next() % 8));
+        if (target == null || target.health <= 0) return;
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        if (approxDistance(target.x - m.x, target.y - m.y) < toFixed(64)) {
+          final int damage = 3 + (_random.next() % 8);
+          if (identical(target, _playerMobj)) {
+            _damagePlayer(damage, source: m);
+          } else {
+            _damage(target, damage, m);
+          }
         }
       case MobjStateAction.monsterMissile:
         if (target == null || target.health <= 0) return;
@@ -1285,6 +1494,28 @@ class GameState {
       case null:
         return;
     }
+  }
+
+  Mobj? _monsterHitscanTarget(Mobj shooter, int angle) {
+    Mobj? result;
+    int best = toFixed(2048);
+    for (final Mobj candidate in _mobjs) {
+      if (identical(candidate, shooter) ||
+          candidate.removed ||
+          !candidate.isShootable) {
+        continue;
+      }
+      final int dx = candidate.x - shooter.x;
+      final int dy = candidate.y - shooter.y;
+      final int distance = approxDistance(dx, dy);
+      if (distance > best) continue;
+      final int delta = angleDelta(Trig.atan2(dy, dx), angle).abs();
+      if (delta < 0x06000000 && _hasSight(shooter, candidate)) {
+        result = candidate;
+        best = distance;
+      }
+    }
+    return result;
   }
 
   void _advanceMobjState(Mobj m) {
@@ -1320,16 +1551,45 @@ class GameState {
   }
 
   void _tickMissile(Mobj m) {
+    final Mobj? struck = _missileImpactTarget(m);
+    if (struck != null) {
+      final int damage = m.info.damage * (1 + (_random.next() % 8));
+      final Mobj source = m.owner ?? m;
+      if (identical(struck, _playerMobj)) {
+        _damagePlayer(damage, source: source);
+      } else {
+        _damage(struck, damage, source);
+      }
+      _explodeMissile(m);
+      return;
+    }
     if (!_tryMove(m, m.momX, m.momY)) {
       _explodeMissile(m);
       return;
     }
-    if (identical(m.target, _playerMobj) &&
-        approxDistance(m.x - _playerMobj.x, m.y - _playerMobj.y) <
-            _playerRadius + m.radius) {
-      _damagePlayer(3 + (_random.next() % 24));
-      _explodeMissile(m);
+  }
+
+  Mobj? _missileImpactTarget(Mobj missile) {
+    final int nextX = wrap32(missile.x + missile.momX);
+    final int nextY = wrap32(missile.y + missile.momY);
+    for (final Mobj candidate in _mobjs) {
+      if (identical(candidate, missile) ||
+          identical(candidate, missile.owner) ||
+          candidate.removed ||
+          !candidate.isShootable ||
+          missile.z >= candidate.z + candidate.height ||
+          candidate.z >= missile.z + missile.height) {
+        continue;
+      }
+      final int combined = missile.radius + candidate.radius;
+      final int dx = nextX - candidate.x;
+      final int dy = nextY - candidate.y;
+      if (dx * dx + dy * dy < combined * combined &&
+          _hasSight(missile, candidate)) {
+        return candidate;
+      }
     }
+    return null;
   }
 
   void _explodeMissile(Mobj m) {
@@ -1405,7 +1665,19 @@ class GameState {
   void _damage(Mobj target, int damage, Mobj source) {
     final int remainingHealth = target.health - damage;
     target.health = remainingHealth;
-    target.target = source;
+    final bool sameSpecies =
+        target.info.isMonster &&
+        source.info.isMonster &&
+        target.info.id == source.info.id;
+    if (!identical(target, source) &&
+        (!sameSpecies || target.threshold == 0) &&
+        source.health > 0) {
+      target.target = source;
+      target.threshold = _baseMonsterThreshold;
+      if (target.state == MobjState.spawn) {
+        _enterMobjState(target, MobjState.see);
+      }
+    }
     if (target.health <= 0) {
       target.health = 0;
       if ((target.info.flags & MobjFlags.countKill) != 0) _killCount++;
@@ -1422,8 +1694,9 @@ class GameState {
     }
   }
 
-  void _damagePlayer(int damage) {
+  void _damagePlayer(int damage, {Mobj? source}) {
     final bool wasAlive = _health > 0;
+    if (!wasAlive) return;
     final int possibleSave = damage ~/ 3;
     final int saved = _armor < possibleSave ? _armor : possibleSave;
     _armor -= saved;
@@ -1436,6 +1709,29 @@ class GameState {
     if (_health == 0) {
       _playerMobj.flags &= ~MobjFlags.shootable;
       _playerMobj.state = MobjState.death;
+      _playerMobj.momX = 0;
+      _playerMobj.momY = 0;
+      _bob = 0;
+      _deathViewHeight = _livingViewHeight;
+      _pendingWeapon = null;
+      _weaponPhase = WeaponPhase.ready;
+      _weaponState = 0;
+      _weaponFrame = 0;
+      _weaponTics = -1;
+      _flashFrame = -1;
+      _flashTics = 0;
+      _flashSequence = const <_WeaponFlashState>[];
+      for (final Mobj monster in _mobjs) {
+        if (identical(monster.target, _playerMobj)) {
+          monster.target = null;
+          monster.threshold = 0;
+        }
+      }
+      for (var sector = 0; sector < _sectorSoundTargets.length; sector++) {
+        if (identical(_sectorSoundTargets[sector], _playerMobj)) {
+          _sectorSoundTargets[sector] = null;
+        }
+      }
     }
   }
 
@@ -1658,6 +1954,7 @@ class GameState {
     add(config.skill.index);
     add(config.maxCatchUpTics);
     add(config.monsters ? 1 : 0);
+    add(config.maxSoundPropagationVisits);
     add(_nextId);
     add(_useHeld ? 1 : 0);
     add(_health);
@@ -1706,6 +2003,7 @@ class GameState {
         add(word);
       }
       add(_foundSecrets.contains(s.index) ? 1 : 0);
+      add(_sectorSoundTargets[s.index]?.id ?? 0);
     }
     final List<Mobj> stableMobjs = List<Mobj>.of(_mobjs)
       ..sort((Mobj a, Mobj b) => a.id.compareTo(b.id));
@@ -1736,9 +2034,12 @@ class GameState {
       add(m.moveCount);
       add(m.target?.id ?? 0);
       add(m.owner?.id ?? 0);
+      add(m.ambush ? 1 : 0);
       add(m.removed ? 1 : 0);
     }
     // _bob is a pure function of already-hashed tic and player momentum.
+    // _deathViewHeight is renderer-only camera descent and cannot influence a
+    // future tic, so it is deliberately excluded with the output journals.
     // _changes, _sounds and _switchChanges are output journals: consuming them cannot affect simulation
     // state or future tics, so including it would make replay hashes depend on
     // renderer polling rather than seed + TicCmd stream.

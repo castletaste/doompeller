@@ -233,9 +233,11 @@ void main() {
     // 2001/2007/2008/2011/2018. Actor flags are hashed, so that change
     // deliberately moves this pin; the fixture contains neither a backpack
     // nor a radiation suit.
-    // Actor/weapon actions now enter on their table frames; the hash also
-    // carries the weapon cursor and mutable actor height, but no visual flash.
-    expect(a.hashState(), 0xbddfa3ff);
+    // Chase direction selection now consumes the shared rolling RNG for axis
+    // order and full-search order, and successful movement consumes its own
+    // move-count draw. That classic decision order intentionally moves this
+    // AI-enabled replay pin.
+    expect(a.hashState(), 0xd3e34da8);
   });
 
   test(

@@ -876,31 +876,48 @@ class GameState {
         _playerMobj.x + fixedMul(range, Trig.cos(_playerMobj.angle));
     final int rayY =
         _playerMobj.y + fixedMul(range, Trig.sin(_playerMobj.angle));
-    Linedef? selected;
-    int selectedIndex = -1;
-    int selectedDistance = 0x7fffffffffffffff;
+    final intersections = <({int index, Linedef line, int fraction})>[];
     for (int i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef line = _runtime.map.linedefs[i];
-      final MapVertex a = _runtime.map.vertices[line.v1];
-      final MapVertex b = _runtime.map.vertices[line.v2];
-      if (!_segmentsIntersect(
+      final int? fraction = _lineRayFraction(
         _playerMobj.x,
         _playerMobj.y,
         rayX,
         rayY,
-        toFixed(a.x),
-        toFixed(a.y),
-        toFixed(b.x),
-        toFixed(b.y),
-      )) {
-        continue;
+        line,
+      );
+      if (fraction != null) {
+        intersections.add((index: i, line: line, fraction: fraction));
       }
-      final int distance = _distanceSquaredToLineMidpoint(line);
-      if (distance < selectedDistance) {
-        selectedDistance = distance;
+    }
+    intersections.sort((a, b) {
+      final int byFraction = a.fraction.compareTo(b.fraction);
+      return byFraction != 0 ? byFraction : a.index.compareTo(b.index);
+    });
+
+    Linedef? selected;
+    int selectedIndex = -1;
+    for (final intersection in intersections) {
+      final Linedef line = intersection.line;
+      final _LineDispatchKind? dispatch = _lineDispatchKind(
+        line.special,
+        _LineActivation.use,
+      );
+      if (dispatch != null) {
+        if (!_isOnFrontSide(line, _playerMobj.x, _playerMobj.y)) return;
         selected = line;
-        selectedIndex = i;
+        selectedIndex = intersection.index;
+        break;
       }
+      // An unknown special is not transparent to use. For an ordinary line,
+      // continue through a currently open two-sided portal and stop at a wall
+      // or closed opening. This follows spatial ray order rather than a line's
+      // midpoint, which can select the wrong face of a paired door.
+      if (line.special != 0) return;
+      final ({int bottom, int top})? opening = _runtime.openingFor(
+        intersection.index,
+      );
+      if (opening == null || opening.top <= opening.bottom) return;
     }
     if (selected == null) return;
     final _LineDispatchKind? dispatch = _lineDispatchKind(
@@ -908,7 +925,6 @@ class GameState {
       _LineActivation.use,
     );
     if (dispatch == null) return;
-    if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
     if ((_isOneShotSwitchSpecial(selected.special) &&
             _activatedOnceLines.contains(selectedIndex)) ||
         _pressedSwitches.containsKey(selectedIndex)) {
@@ -949,6 +965,41 @@ class GameState {
       _activateSwitchTexture(selectedIndex, selected);
       _emitPlayerSound('DSSWTCHN');
     }
+  }
+
+  int? _lineRayFraction(
+    int startX,
+    int startY,
+    int endX,
+    int endY,
+    Linedef line,
+  ) {
+    final MapVertex a = _runtime.map.vertices[line.v1];
+    final MapVertex b = _runtime.map.vertices[line.v2];
+    final int rayX = endX - startX;
+    final int rayY = endY - startY;
+    final int lineX = toFixed(b.x - a.x);
+    final int lineY = toFixed(b.y - a.y);
+    final int denominator = rayX * lineY - rayY * lineX;
+    if (denominator == 0) return null;
+    final int offsetX = toFixed(a.x) - startX;
+    final int offsetY = toFixed(a.y) - startY;
+    final int rayNumerator = offsetX * lineY - offsetY * lineX;
+    final int lineNumerator = offsetX * rayY - offsetY * rayX;
+    final bool positive = denominator > 0;
+    if ((positive &&
+            (rayNumerator < 0 ||
+                rayNumerator > denominator ||
+                lineNumerator < 0 ||
+                lineNumerator > denominator)) ||
+        (!positive &&
+            (rayNumerator > 0 ||
+                rayNumerator < denominator ||
+                lineNumerator > 0 ||
+                lineNumerator < denominator))) {
+      return null;
+    }
+    return (rayNumerator << kFracBits) ~/ denominator;
   }
 
   bool _isOnFrontSide(Linedef line, int x, int y) {

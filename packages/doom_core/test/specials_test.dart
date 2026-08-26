@@ -8,13 +8,14 @@ import 'package:test/test.dart';
 const int _allSkills = ThingFlags.easy | ThingFlags.medium | ThingFlags.hard;
 
 MapData testMap({
+  List<MapVertex>? vertices,
   List<Sector>? sectors,
   List<Linedef>? lines,
   List<Sidedef>? sides,
   List<Thing>? things,
   Blockmap? blockmap,
 }) {
-  final List<MapVertex> vertices = <MapVertex>[
+  final List<MapVertex> defaultVertices = <MapVertex>[
     const MapVertex(0, 0),
     const MapVertex(128, 0),
     const MapVertex(128, 128),
@@ -24,7 +25,7 @@ MapData testMap({
   ];
   return MapData(
     name: 'TEST',
-    vertices: vertices,
+    vertices: vertices ?? defaultVertices,
     linedefs:
         lines ??
         <Linedef>[
@@ -1838,6 +1839,109 @@ void main() {
       }
       expect(game.sectors.elementAt(1).ceilingHeight, toFixed(0));
     });
+
+    test(
+      'use ray chooses the first paired door face, not nearest midpoint',
+      () {
+        final GameState game = GameState.start(
+          testMap(
+            vertices: const <MapVertex>[
+              MapVertex(100, 400),
+              MapVertex(100, 0),
+              MapVertex(120, 0),
+              MapVertex(120, 128),
+            ],
+            sectors: const <Sector>[
+              Sector(
+                floorHeight: 0,
+                ceilingHeight: 128,
+                floorFlat: 'F',
+                ceilingFlat: 'C',
+                lightLevel: 160,
+                special: 0,
+                tag: 0,
+              ),
+              Sector(
+                floorHeight: 0,
+                ceilingHeight: 0,
+                floorFlat: 'F',
+                ceilingFlat: 'C',
+                lightLevel: 160,
+                special: 0,
+                tag: 0,
+              ),
+              Sector(
+                floorHeight: 0,
+                ceilingHeight: 128,
+                floorFlat: 'F',
+                ceilingFlat: 'C',
+                lightLevel: 160,
+                special: 0,
+                tag: 0,
+              ),
+            ],
+            sides: const <Sidedef>[
+              Sidedef(
+                xOffset: 0,
+                yOffset: 0,
+                upperTexture: '-',
+                lowerTexture: '-',
+                middleTexture: '-',
+                sector: 0,
+              ),
+              Sidedef(
+                xOffset: 0,
+                yOffset: 0,
+                upperTexture: '-',
+                lowerTexture: '-',
+                middleTexture: '-',
+                sector: 1,
+              ),
+              Sidedef(
+                xOffset: 0,
+                yOffset: 0,
+                upperTexture: '-',
+                lowerTexture: '-',
+                middleTexture: '-',
+                sector: 2,
+              ),
+            ],
+            lines: const <Linedef>[
+              Linedef(
+                v1: 0,
+                v2: 1,
+                flags: LinedefFlags.twoSided,
+                special: LineSpecial.doorOpenWaitClose,
+                tag: 0,
+                rightSidedef: 0,
+                leftSidedef: 1,
+              ),
+              Linedef(
+                v1: 2,
+                v2: 3,
+                flags: LinedefFlags.twoSided,
+                special: LineSpecial.doorOpenWaitClose,
+                tag: 0,
+                rightSidedef: 2,
+                leftSidedef: 1,
+              ),
+            ],
+            things: const <Thing>[
+              Thing(x: 64, y: 64, angle: 0, type: 1, flags: _allSkills),
+            ],
+          ),
+          const GameConfig(monsters: false),
+        );
+
+        game.runTic(const TicCmd(buttons: Buttons.use));
+
+        expect(game.sectors.elementAt(1).hasMover, isTrue);
+        expect(
+          game.consumeSoundJournal().map((event) => event.soundId),
+          contains('DSDOROPN'),
+        );
+      },
+    );
 
     test('door stay-open completes without closing', () {
       final GameState game = GameState.start(

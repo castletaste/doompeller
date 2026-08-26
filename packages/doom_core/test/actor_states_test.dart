@@ -1,5 +1,6 @@
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_core/src/mobj_states.dart';
+import 'package:doom_core/src/replay_identity.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
 
@@ -13,6 +14,40 @@ MobjView _actor(GameState game, String sprite) =>
 
 void main() {
   group('actor state table', () {
+    test('semantic actor type identities ignore enum layout', () {
+      final List<String> shiftedNames = <String>[
+        'unusedActorType',
+        ...MobjType.values.map((MobjType type) => type.name),
+      ];
+      for (var index = 0; index < MobjType.values.length; index++) {
+        expect(
+          stableReplayIdentity(shiftedNames[index + 1]),
+          MobjType.values[index].replayIdentity,
+        );
+      }
+    });
+
+    test('different actor frame records have different replay identities', () {
+      final int first = MobjStateTable.start(
+        MobjType.possessed,
+        MobjState.spawn,
+      )!;
+      expect(
+        MobjStateTable.state(first)!.replayIdentity,
+        isNot(MobjStateTable.state(first + 1)!.replayIdentity),
+      );
+      expect(
+        MobjStateTable.state(
+          MobjStateTable.start(MobjType.misc62, MobjState.spawn)!,
+        )!.replayIdentity,
+        isNot(
+          MobjStateTable.state(
+            MobjStateTable.start(MobjType.misc68, MobjState.spawn)!,
+          )!.replayIdentity,
+        ),
+      );
+    });
+
     test('former-human walk chain cycles A A B B C C D D', () {
       final int first = MobjStateTable.start(
         MobjType.possessed,
@@ -93,7 +128,164 @@ void main() {
       expect(actionFrame(MobjType.shotguy, MobjState.missile), 5);
       expect(actionFrame(MobjType.troop, MobjState.melee), 6);
       expect(actionFrame(MobjType.troop, MobjState.missile), 6);
+      expect(actionFrame(MobjType.sergeant, MobjState.melee), 6);
+      expect(actionFrame(MobjType.spectre, MobjState.melee), 6);
       expect(actionFrame(MobjType.barrel, MobjState.death), 3);
+    });
+
+    test('demon and spectre share the complete SARG state graph', () {
+      for (final MobjType type in <MobjType>[
+        MobjType.sergeant,
+        MobjType.spectre,
+      ]) {
+        for (final MobjState phase in <MobjState>[
+          MobjState.spawn,
+          MobjState.see,
+          MobjState.melee,
+          MobjState.pain,
+          MobjState.death,
+          MobjState.raise,
+        ]) {
+          expect(
+            MobjStateTable.start(type, phase),
+            isNotNull,
+            reason: '$type $phase',
+          );
+        }
+        expect(MobjStateTable.start(type, MobjState.missile), isNull);
+        expect(MobjStateTable.start(type, MobjState.gibbedDeath), isNull);
+      }
+      final int attack = MobjStateTable.start(
+        MobjType.sergeant,
+        MobjState.melee,
+      )!;
+      expect(
+        MobjStateTable.state(attack + 2)!.action,
+        MobjStateAction.demonMelee,
+      );
+    });
+
+    test('map decorations use their exact permanent lamps', () {
+      const List<(int, MobjType, String, int, bool)> cases =
+          <(int, MobjType, String, int, bool)>[
+            (2028, MobjType.misc31, 'COLU', 0, true),
+            (48, MobjType.misc48, 'ELEC', 0, false),
+            (34, MobjType.misc49, 'CAND', 0, true),
+            (35, MobjType.misc50, 'CBRA', 0, true),
+            (15, MobjType.misc62, 'PLAY', 12, false),
+            (18, MobjType.misc63, 'POSS', 11, false),
+            (21, MobjType.misc64, 'SARG', 13, false),
+            (20, MobjType.misc66, 'TROO', 12, false),
+            (19, MobjType.misc67, 'SPOS', 11, false),
+            (10, MobjType.misc68, 'PLAY', 21, false),
+            (12, MobjType.misc69, 'PLAY', 21, false),
+          ];
+      for (final (
+            int edNum,
+            MobjType type,
+            String sprite,
+            int frame,
+            bool fullBright,
+          )
+          in cases) {
+        final int stateId = MobjStateTable.start(type, MobjState.spawn)!;
+        final MobjFrameState state = MobjStateTable.state(stateId)!;
+        expect(state.sprite, sprite, reason: 'thing $edNum sprite');
+        expect(state.frame, frame, reason: 'thing $edNum frame');
+        expect(state.fullBright, fullBright, reason: 'thing $edNum lighting');
+        expect(state.tics, -1, reason: 'thing $edNum must remain forever');
+        expect(state.next, isNull, reason: 'thing $edNum must be static');
+      }
+    });
+  });
+
+  group('E1 actor catalog', () {
+    test('every added ed-num spawns with the published tuning and flags', () {
+      const List<(int, String, int, int, int)> cases =
+          <(int, String, int, int, int)>[
+            (
+              3002,
+              'SARG',
+              30,
+              56,
+              MobjFlags.solid | MobjFlags.shootable | MobjFlags.countKill,
+            ),
+            (
+              58,
+              'SARG',
+              30,
+              56,
+              MobjFlags.solid |
+                  MobjFlags.shootable |
+                  MobjFlags.shadow |
+                  MobjFlags.countKill,
+            ),
+            (2028, 'COLU', 16, 16, MobjFlags.solid),
+            (48, 'ELEC', 16, 16, MobjFlags.solid),
+            (34, 'CAND', 20, 16, 0),
+            (35, 'CBRA', 16, 16, MobjFlags.solid),
+            (15, 'PLAY', 20, 16, 0),
+            (18, 'POSS', 20, 16, 0),
+            (21, 'SARG', 20, 16, 0),
+            (20, 'TROO', 20, 16, 0),
+            (19, 'SPOS', 20, 16, 0),
+            (10, 'PLAY', 20, 16, 0),
+            (12, 'PLAY', 20, 16, 0),
+          ];
+      for (final (int edNum, String sprite, int radius, int height, int flags)
+          in cases) {
+        final MobjInfo info = DoomCoreCatalog.infoForEdNum(edNum)!;
+        expect(info.doomEdNum, edNum);
+        expect(info.spriteName, sprite, reason: 'thing $edNum sprite');
+        expect(info.radius, radius, reason: 'thing $edNum radius');
+        expect(info.height, height, reason: 'thing $edNum height');
+        expect(info.flags, flags, reason: 'thing $edNum flags');
+        final GameState game = GameState.start(
+          arena(<Thing>[
+            const Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 160, y: 64, angle: 0, type: edNum, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+        );
+        expect(
+          game.mobjs.where((MobjView actor) => actor.sprite == sprite),
+          isNotEmpty,
+          reason: 'thing $edNum spawn',
+        );
+      }
+    });
+
+    test('solid decorations block movement and non-solid corpses do not', () {
+      const List<(int, bool)> cases = <(int, bool)>[
+        (2028, true),
+        (48, true),
+        (34, false),
+        (35, true),
+        (15, false),
+        (18, false),
+        (21, false),
+        (20, false),
+        (19, false),
+        (10, false),
+        (12, false),
+      ];
+      for (final (int edNum, bool blocks) in cases) {
+        final GameState game = GameState.start(
+          arena(<Thing>[
+            const Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 72, y: 64, angle: 0, type: edNum, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+        );
+        for (var tic = 0; tic < 10; tic++) {
+          game.runTic(const TicCmd(forwardMove: 8));
+        }
+        expect(
+          game.player.x > toFixed(72),
+          !blocks,
+          reason: 'thing $edNum movement blocking',
+        );
+      }
     });
   });
 
@@ -238,6 +430,30 @@ void main() {
         imp.mobjs.where((MobjView actor) => actor.sprite == 'BAL1'),
         isNotEmpty,
       );
+    });
+
+    test('demon melee uses the dedicated close-range damage action', () {
+      for (final int edNum in <int>[3002, 58]) {
+        final GameState game = GameState.start(
+          arena(<Thing>[
+            const Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 80, y: 64, angle: 180, type: edNum, flags: _skills),
+          ]),
+          const GameConfig(),
+          seed: 2,
+        );
+        for (var tic = 0; tic < 100 && game.player.health == 100; tic++) {
+          game.runTic(TicCmd.empty);
+        }
+        final int damage = 100 - game.player.health;
+        expect(damage, inInclusiveRange(4, 40), reason: 'thing $edNum damage');
+        expect(damage % 4, 0, reason: 'thing $edNum damage quantum');
+        expect(
+          game.soundJournal.map((SoundEvent event) => event.soundId),
+          contains('DSSGTATK'),
+          reason: 'thing $edNum attack sound',
+        );
+      }
     });
   });
 }

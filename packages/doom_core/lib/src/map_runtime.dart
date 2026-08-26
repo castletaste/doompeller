@@ -11,6 +11,11 @@ class MapRuntime {
         map.sectors.length,
         (int i) => SectorRuntime(index: i, staticData: map.sectors[i]),
       ) {
+    for (var sector = 0; sector < map.sectors.length; sector++) {
+      _sectorIndicesByTag
+          .putIfAbsent(map.sectors[sector].tag, () => <int>[])
+          .add(sector);
+    }
     for (int i = 0; i < map.linedefs.length; i++) {
       final Linedef line = map.linedefs[i];
       sectors[map.sidedefs[line.rightSidedef].sector].touchingLinedefs.add(i);
@@ -21,6 +26,15 @@ class MapRuntime {
   }
   final MapData map;
   final List<SectorRuntime> sectors;
+  final Map<int, List<int>> _sectorIndicesByTag = <int, List<int>>{};
+
+  /// Sector indices carrying [tag], in canonical map order.
+  ///
+  /// Tagged specials call this instead of rescanning every sector. The lists
+  /// are built once with the other level-derived indices and never mutated
+  /// after construction, preserving deterministic activation order.
+  Iterable<int> sectorsWithTag(int tag) =>
+      _sectorIndicesByTag[tag] ?? const <int>[];
 
   int frontSector(Linedef line) => map.sidedefs[line.rightSidedef].sector;
   int? backSector(Linedef line) => line.leftSidedef == kNoSidedef

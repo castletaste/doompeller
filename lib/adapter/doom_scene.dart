@@ -584,10 +584,27 @@ final class DoomScene {
     if (compiled == null) {
       throw StateError('updateTextureAnimations requires fromCompiledLevel');
     }
+    final Set<(int, int, int)> planeRanges = <(int, int, int)>{};
+    final List<geometry.SectorPlaneRef> planes = <geometry.SectorPlaneRef>[
+      ...compiled.floorPlanes,
+      ...compiled.ceilingPlanes,
+    ];
+    for (final plane in planes) {
+      for (final range in plane.ranges) {
+        planeRanges.add((
+          range.meshIndex,
+          range.firstVertex,
+          range.vertexCount,
+        ));
+      }
+    }
+
     var touched = 0;
-    for (final animation in compiled.animations) {
-      final entry = animation.frames[animation.frameAt(levelTime)];
-      for (final range in animation.ranges) {
+    void updateRanges(
+      Iterable<geometry.VertexRange> ranges,
+      geometry.AtlasEntry entry,
+    ) {
+      for (final range in ranges) {
         final mesh = compiled.meshes[range.meshIndex];
         final int rectOffset =
             range.firstVertex * geometry.DoomVertexAbi.floatsPerVertex +
@@ -617,12 +634,72 @@ final class DoomScene {
         touched += range.vertexCount;
       }
     }
+
+    // Plane texture names are mutable. Resolve their current animation base
+    // each frame so transferring onto or away from an animated flat cannot
+    // leave the old range binding alive.
+    for (final plane in planes) {
+      geometry.AnimatedSurfaceRef? selected;
+      for (final animation in compiled.animations) {
+        if (animation.frames[animation.initialFrame].name ==
+            plane.textureName) {
+          selected = animation;
+          break;
+        }
+      }
+      if (selected != null) {
+        updateRanges(
+          plane.ranges,
+          selected.frames[selected.frameAt(levelTime)],
+        );
+      }
+    }
+    for (final animation in compiled.animations) {
+      final entry = animation.frames[animation.frameAt(levelTime)];
+      updateRanges(
+        animation.ranges.where(
+          (geometry.VertexRange range) => !planeRanges.contains((
+            range.meshIndex,
+            range.firstVertex,
+            range.vertexCount,
+          )),
+        ),
+        entry,
+      );
+    }
     if (touched > 0) diagnostics.onDynamicUpdate();
     return touched;
   }
 
   int updateAnimationFrames(int levelTime) =>
       updateTextureAnimations(levelTime);
+
+  int updateSectorFloorFlat({
+    required int sectorIndex,
+    required String flatName,
+  }) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('updateSectorFloorFlat requires fromCompiledLevel');
+    }
+    geometry.SectorPlaneRef? target;
+    for (final plane in compiled.floorPlanes) {
+      if (plane.sector == sectorIndex) {
+        target = plane;
+        break;
+      }
+    }
+    if (target == null || target.textureName == flatName) return 0;
+    final int touched = compiled.setFloorFlat(sectorIndex, flatName);
+    for (final range in target.ranges) {
+      _geometryBindings[range.meshIndex]!.surface.markVertexRangeDirty(
+        range.firstVertex,
+        range.vertexCount,
+      );
+    }
+    if (touched > 0) diagnostics.onDynamicUpdate();
+    return touched;
+  }
 
   int updateSwitchTexture(core.SwitchTextureChange change) {
     final compiled = _compiledLevel;
@@ -793,6 +870,76 @@ final class DoomScene {
     return touched;
   }
 
+  /// Restores every runtime-mutated world surface to the source map state.
+  ///
+  /// This rewrites retained vertex buffers in place. It does not rebuild a
+  /// mesh, material, texture, surface, component, or GPU buffer.
+  void resetDynamicState(wad.MapData map) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('resetDynamicState requires fromCompiledLevel');
+    }
+    if (map.sectors.length != _sectorLights.length) {
+      throw StateError('prepared map and retained scene sector counts differ');
+    }
+
+    final floors = <double>[
+      for (final sector in map.sectors) sector.floorHeight.toDouble(),
+    ];
+    final ceilings = <double>[
+      for (final sector in map.sectors) sector.ceilingHeight.toDouble(),
+    ];
+    for (var sector = 0; sector < map.sectors.length; sector++) {
+      updateSectorPlane(
+        sectorIndex: sector,
+        height: floors[sector],
+        isCeiling: false,
+      );
+      updateSectorPlane(
+        sectorIndex: sector,
+        height: ceilings[sector],
+        isCeiling: true,
+      );
+      updateSectorFloorFlat(
+        sectorIndex: sector,
+        flatName: map.sectors[sector].floorFlat,
+      );
+      updateSectorLight(
+        sectorIndex: sector,
+        lightLevel: map.sectors[sector].lightLevel,
+      );
+    }
+    for (var sector = 0; sector < map.sectors.length; sector++) {
+      updateWallsForSector(
+        sectorIndex: sector,
+        floorHeight: floors[sector],
+        ceilingHeight: ceilings[sector],
+        sectorFloors: floors,
+        sectorCeilings: ceilings,
+      );
+    }
+
+    for (final band in compiled.wallBands) {
+      final geometry.AtlasEntry? entry = compiled.atlas.entry(band.textureName);
+      if (entry == null ||
+          compiled.meshes[band.meshIndex].atlasPage != entry.page) {
+        continue;
+      }
+      _writeAtlasRect(
+        compiled.meshes[band.meshIndex].vertices,
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+        entry,
+        compiled.atlas.pageSize,
+      );
+      _geometryBindings[band.meshIndex]!.surface.markVertexRangeDirty(
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+      );
+    }
+    updateTextureAnimations(0);
+  }
+
   /// Adds one upright actor billboard from the bounded supplemental atlas.
   ActorSpriteComponent addActorSprite(ActorSpriteInstance actor) {
     final component = acquireActorSprite(actor);
@@ -857,6 +1004,7 @@ final class DoomScene {
       pageSize: spriteAtlas.atlas.pageSize,
       light: actor.light,
       fullBright: actor.fullBright,
+      alpha: actor.fuzz ? 0.5 : 1,
     );
     final surface = PackedFlameSurface(
       vertices: vertices,
@@ -881,6 +1029,7 @@ final class DoomScene {
       height: actor.height,
       light: actor.light,
       fullBright: actor.fullBright,
+      fuzz: actor.fuzz,
       lumpName: selection.lumpName,
       mirrored: selection.mirrored,
     );
@@ -927,6 +1076,7 @@ final class DoomScene {
       actorAngle: actor.actorAngle,
       light: actor.light,
       fullBright: actor.fullBright,
+      fuzz: actor.fuzz,
     );
     if (frameChanged) {
       component.applySelection(selection);
@@ -1258,6 +1408,7 @@ Float32List _spriteQuad({
   required int pageSize,
   required double light,
   required bool fullBright,
+  double alpha = 1,
   double depthLayer = 0,
 }) {
   final vertices = DoomVertexAbi.allocate(4);
@@ -1276,6 +1427,7 @@ Float32List _spriteQuad({
       v: v,
       nz: 1,
       light: light,
+      alpha: alpha,
       atlasLeft: u0,
       atlasTop: v0,
       atlasRight: u1,
@@ -1633,6 +1785,7 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
     required this.height,
     required this.light,
     required this.fullBright,
+    required this.fuzz,
     required this._lumpName,
     required this._mirrored,
   });
@@ -1647,6 +1800,7 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
   final double? height;
   double light;
   bool fullBright;
+  bool fuzz;
 
   String _lumpName;
   bool _mirrored;
@@ -1668,6 +1822,7 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
       actorAngle: actor.actorAngle,
       light: actor.light,
       fullBright: actor.fullBright,
+      fuzz: actor.fuzz,
     );
     applySelection(selection);
   }
@@ -1681,19 +1836,24 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
     required double actorAngle,
     required double light,
     required bool fullBright,
+    bool fuzz = false,
   }) {
     position.setValues(x, y, z);
     this.frame = frame;
     this.actorAngle = actorAngle;
-    if (this.light == light && this.fullBright == fullBright) {
+    if (this.light == light &&
+        this.fullBright == fullBright &&
+        this.fuzz == fuzz) {
       return;
     }
     this.light = light;
     this.fullBright = fullBright;
+    this.fuzz = fuzz;
     surface.updateVertices((vertices) {
       for (var vertex = 0; vertex < 4; vertex++) {
         final offset = DoomVertexAbi.floatOffsetOf(vertex);
         vertices[offset + DoomVertexAbi.lightOffset] = light;
+        vertices[offset + DoomVertexAbi.alphaOffset] = fuzz ? 0.5 : 1;
         vertices[offset + DoomVertexAbi.paramsOffset] = fullBright ? 1 : 0;
       }
       surface.markVertexRangeDirty(0, 4);
@@ -1843,6 +2003,7 @@ final class ActorSpriteInstance {
     this.height,
     this.light = 1,
     this.fullBright = false,
+    this.fuzz = false,
   });
 
   final String spritePrefix;
@@ -1855,6 +2016,7 @@ final class ActorSpriteInstance {
   final double? height;
   final double light;
   final bool fullBright;
+  final bool fuzz;
 }
 
 /// One exact first-person weapon frame in the supplemental sprite atlas.

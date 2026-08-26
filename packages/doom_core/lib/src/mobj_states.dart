@@ -1,4 +1,9 @@
+import 'dart:async';
+
+import 'package:meta/meta.dart';
+
 import 'mobj_info.dart';
+import 'replay_identity.dart';
 
 /// Behaviour phase exposed by a live actor.
 enum MobjState {
@@ -17,6 +22,7 @@ enum MobjState {
 enum MobjStateAction {
   monsterHitscan,
   monsterMelee,
+  demonMelee,
   monsterMissile,
   barrelExplode,
 }
@@ -24,7 +30,8 @@ enum MobjStateAction {
 /// One clean-room actor animation record.
 ///
 /// Frame zero is sprite lamp A. A negative [tics] value keeps the frame
-/// forever. [next] is the stable table id of the following record.
+/// forever. [id] and [next] are runtime table cursors; [replayIdentity] is the
+/// stable semantic identity used by the replay oracle.
 final class MobjFrameState {
   const MobjFrameState({
     required this.id,
@@ -49,6 +56,9 @@ final class MobjFrameState {
   final int? next;
   final MobjStateAction? action;
   final bool removeOnExpiry;
+
+  /// Stable semantic identity used by the deterministic replay oracle.
+  int get replayIdentity => stableReplayIdentity(name);
 }
 
 /// State records for the E1M1 monsters and the projectile/effect actors the
@@ -59,10 +69,28 @@ final class MobjFrameState {
 abstract final class MobjStateTable {
   static final _Catalog _catalog = _buildCatalog();
 
-  static MobjFrameState? state(int id) => _catalog.states[id];
+  static _Catalog get _activeCatalog =>
+      Zone.current[_catalogZoneKey] as _Catalog? ?? _catalog;
+
+  static MobjFrameState? state(int id) => _activeCatalog.states[id];
 
   static int? start(MobjType type, MobjState phase) =>
-      _catalog.starts[(type, phase)];
+      _activeCatalog.starts[(type, phase)];
+
+  /// Runs [body] against an equivalent table with one unregistered state
+  /// inserted at [before]. This mutation seam exists only to prove that replay
+  /// identity is independent of physical table layout.
+  @visibleForTesting
+  static T withUnusedStateInsertedForTesting<T>({
+    required int before,
+    required T Function() body,
+  }) {
+    final _Catalog shifted = _catalog.withUnusedStateInserted(before);
+    return runZoned<T>(
+      body,
+      zoneValues: <Object, Object>{_catalogZoneKey: shifted},
+    );
+  }
 
   /// Selects the first blood frame from impact damage without consuming RNG.
   /// Light hits skip directly to the later, shorter part of the same chain.
@@ -91,7 +119,55 @@ final class _Catalog {
 
   final List<MobjFrameState> states;
   final Map<(MobjType, MobjState), int> starts;
+
+  _Catalog withUnusedStateInserted(int before) {
+    RangeError.checkValueInInterval(before, 0, states.length, 'before');
+
+    int shift(int cursor) => cursor < before ? cursor : cursor + 1;
+
+    MobjFrameState unusedState() => MobjFrameState(
+      id: before,
+      name: 'TEST_UNUSED_STATE',
+      phase: MobjState.spawn,
+      sprite: 'TST0',
+      frame: 0,
+      tics: -1,
+      fullBright: false,
+      next: null,
+    );
+
+    final List<MobjFrameState> shiftedStates = <MobjFrameState>[];
+    for (final MobjFrameState state in states) {
+      if (state.id == before) shiftedStates.add(unusedState());
+      shiftedStates.add(
+        MobjFrameState(
+          id: shift(state.id),
+          name: state.name,
+          phase: state.phase,
+          sprite: state.sprite,
+          frame: state.frame,
+          tics: state.tics,
+          fullBright: state.fullBright,
+          next: state.next == null ? null : shift(state.next!),
+          action: state.action,
+          removeOnExpiry: state.removeOnExpiry,
+        ),
+      );
+    }
+    if (before == states.length) shiftedStates.add(unusedState());
+    return _Catalog(
+      List<MobjFrameState>.unmodifiable(shiftedStates),
+      Map<(MobjType, MobjState), int>.unmodifiable(
+        starts.map(
+          ((MobjType, MobjState) key, int cursor) =>
+              MapEntry<(MobjType, MobjState), int>(key, shift(cursor)),
+        ),
+      ),
+    );
+  }
 }
+
+final Object _catalogZoneKey = Object();
 
 final class _TableBuilder {
   final List<MobjFrameState> states = <MobjFrameState>[];
@@ -133,6 +209,17 @@ final class _TableBuilder {
       );
     }
     return first;
+  }
+
+  void alias({
+    required MobjType type,
+    required MobjType source,
+    required Iterable<MobjState> phases,
+  }) {
+    for (final MobjState phase in phases) {
+      final int? start = starts[(source, phase)];
+      if (start != null) starts[(type, phase)] = start;
+    }
   }
 }
 
@@ -210,13 +297,15 @@ _Catalog _buildCatalog() {
       sprite: sprite,
       frames: death,
     );
-    b.chain(
-      type: type,
-      phase: MobjState.gibbedDeath,
-      name: '${sprite}_GIB',
-      sprite: sprite,
-      frames: gibbedDeath,
-    );
+    if (gibbedDeath.isNotEmpty) {
+      b.chain(
+        type: type,
+        phase: MobjState.gibbedDeath,
+        name: '${sprite}_GIB',
+        sprite: sprite,
+        frames: gibbedDeath,
+      );
+    }
     b.chain(
       type: type,
       phase: MobjState.raise,
@@ -340,6 +429,74 @@ _Catalog _buildCatalog() {
       _Frame(8, 6),
     ],
   );
+  monster(
+    type: MobjType.sergeant,
+    sprite: 'SARG',
+    walkTics: 2,
+    melee: const <_Frame>[
+      _Frame(4, 8),
+      _Frame(5, 8),
+      _Frame(6, 8, action: MobjStateAction.demonMelee),
+    ],
+    missile: const <_Frame>[],
+    pain: const <_Frame>[_Frame(7, 2), _Frame(7, 2)],
+    death: const <_Frame>[
+      _Frame(8, 8),
+      _Frame(9, 8),
+      _Frame(10, 4),
+      _Frame(11, 4),
+      _Frame(12, 4),
+      _Frame(13, -1),
+    ],
+    gibbedDeath: const <_Frame>[],
+    raise: const <_Frame>[
+      _Frame(13, 5),
+      _Frame(12, 5),
+      _Frame(11, 5),
+      _Frame(10, 5),
+      _Frame(9, 5),
+      _Frame(8, 5),
+    ],
+  );
+  b.alias(
+    type: MobjType.spectre,
+    source: MobjType.sergeant,
+    phases: const <MobjState>[
+      MobjState.spawn,
+      MobjState.see,
+      MobjState.melee,
+      MobjState.pain,
+      MobjState.death,
+      MobjState.raise,
+    ],
+  );
+
+  void decoration({
+    required MobjType type,
+    required String sprite,
+    required int frame,
+    bool fullBright = false,
+  }) {
+    b.chain(
+      type: type,
+      phase: MobjState.spawn,
+      name: '${type.name}_${sprite}_DECORATION',
+      sprite: sprite,
+      frames: <_Frame>[_Frame(frame, -1, fullBright: fullBright)],
+    );
+  }
+
+  decoration(type: MobjType.misc31, sprite: 'COLU', frame: 0, fullBright: true);
+  decoration(type: MobjType.misc48, sprite: 'ELEC', frame: 0);
+  decoration(type: MobjType.misc49, sprite: 'CAND', frame: 0, fullBright: true);
+  decoration(type: MobjType.misc50, sprite: 'CBRA', frame: 0, fullBright: true);
+  decoration(type: MobjType.misc62, sprite: 'PLAY', frame: 12);
+  decoration(type: MobjType.misc63, sprite: 'POSS', frame: 11);
+  decoration(type: MobjType.misc64, sprite: 'SARG', frame: 13);
+  decoration(type: MobjType.misc66, sprite: 'TROO', frame: 12);
+  decoration(type: MobjType.misc67, sprite: 'SPOS', frame: 11);
+  decoration(type: MobjType.misc68, sprite: 'PLAY', frame: 21);
+  decoration(type: MobjType.misc69, sprite: 'PLAY', frame: 21);
 
   b.chain(
     type: MobjType.barrel,
@@ -410,8 +567,19 @@ _Catalog _buildCatalog() {
     removeOnExpiry: true,
   );
 
-  return _Catalog(
+  final _Catalog catalog = _Catalog(
     List<MobjFrameState>.unmodifiable(b.states),
     Map<(MobjType, MobjState), int>.unmodifiable(b.starts),
   );
+  final Map<int, String> namesByIdentity = <int, String>{};
+  for (final MobjFrameState state in catalog.states) {
+    final String? existing = namesByIdentity[state.replayIdentity];
+    if (existing != null) {
+      throw StateError(
+        'MobjFrameState replay identity collision: $existing and ${state.name}',
+      );
+    }
+    namesByIdentity[state.replayIdentity] = state.name;
+  }
+  return catalog;
 }

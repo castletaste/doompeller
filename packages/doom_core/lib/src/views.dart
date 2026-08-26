@@ -71,13 +71,19 @@ class MobjView {
   final bool fullBright;
 }
 
-enum PlaneKind { floor, ceiling, light }
+enum PlaneKind { floor, ceiling, light, floorFlat }
 
 /// One record per sector property that changed during a tic. The adapter can
 /// apply these directly to existing geometry buffers without rebuilding them.
 class SectorChange {
-  const SectorChange(this.sector, this.kind, this.value);
+  const SectorChange(this.sector, this.kind, this.value) : flatName = '';
+
+  const SectorChange.floorFlat(this.sector, this.flatName)
+    : kind = PlaneKind.floorFlat,
+      value = 0;
+
   final int sector;
   final PlaneKind kind;
   final int value;
+  final String flatName;
 }

@@ -21,7 +21,7 @@ void main() {
         a.mobjs.map((MobjView mobj) => mobj.sprite).toSet(),
         containsAll(<String>{'POSS', 'TROO', 'SPOS'}),
       );
-      expect(a.mobjs.length, 12);
+      expect(a.mobjs.length, 25);
       final int initialHash = a.hashState();
       for (var tic = 0; tic < 140; tic++) {
         a.runTic(TicCmd.empty);
@@ -431,11 +431,9 @@ void main() {
       expect(corpse.flags & 0x0002, 0); // solid flag
       expect(corpse.height, toFixed(14));
       expect(corpse.frame, greaterThanOrEqualTo(7));
-      // Monsters are disabled in this scenario. The pistol alert still stores
-      // its persistent sector target, but AI direction/attack RNG is never
-      // consumed, so the chase-order correction deliberately leaves this pin
-      // unchanged.
-      expect(game.hashState(), 0x8a4407a8);
+      // Actor and exact frame-state identities are semantic, so unrelated enum
+      // or table insertions cannot move this pin.
+      expect(game.hashState(), 0xfb2f66ba);
       for (var tic = 0; tic < 10; tic++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }

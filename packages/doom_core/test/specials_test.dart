@@ -183,9 +183,17 @@ MapData taggedSpecialMap({
   List<Thing> extraThings = const <Thing>[],
   int playerX = 64,
   int playerAngle = 0,
+  String sourceFloorFlat = 'STAIR',
+  int sourceSpecial = 0,
+  String targetFloorFlat = 'STAIR',
+  int targetSpecial = 0,
+  List<String> neighborFloorFlats = const <String>['STAIR', 'STAIR'],
+  List<int> neighborSpecials = const <int>[0, 0],
 }) {
   assert(neighborFloors.length == 2);
   assert(neighborCeilings.length == 2);
+  assert(neighborFloorFlats.length == 2);
+  assert(neighborSpecials.length == 2);
   const List<MapVertex> vertices = <MapVertex>[
     MapVertex(128, 128),
     MapVertex(128, 0),
@@ -202,16 +210,21 @@ MapData taggedSpecialMap({
     middleTexture: '-',
     sector: sector,
   );
-  Sector sector({required int floor, required int ceiling, int tag = 0}) =>
-      Sector(
-        floorHeight: floor,
-        ceilingHeight: ceiling,
-        floorFlat: 'STAIR',
-        ceilingFlat: 'C',
-        lightLevel: 160,
-        special: 0,
-        tag: tag,
-      );
+  Sector sector({
+    required int floor,
+    required int ceiling,
+    int tag = 0,
+    String floorFlat = 'STAIR',
+    int special = 0,
+  }) => Sector(
+    floorHeight: floor,
+    ceilingHeight: ceiling,
+    floorFlat: floorFlat,
+    ceilingFlat: 'C',
+    lightLevel: 160,
+    special: special,
+    tag: tag,
+  );
   return MapData(
     name: 'TAGGED',
     vertices: vertices,
@@ -252,11 +265,32 @@ MapData taggedSpecialMap({
       side(4),
     ],
     sectors: <Sector>[
+      sector(
+        floor: 0,
+        ceiling: 128,
+        floorFlat: sourceFloorFlat,
+        special: sourceSpecial,
+      ),
       sector(floor: 0, ceiling: 128),
-      sector(floor: 0, ceiling: 128),
-      sector(floor: targetFloor, ceiling: targetCeiling, tag: 7),
-      sector(floor: neighborFloors[0], ceiling: neighborCeilings[0]),
-      sector(floor: neighborFloors[1], ceiling: neighborCeilings[1]),
+      sector(
+        floor: targetFloor,
+        ceiling: targetCeiling,
+        tag: 7,
+        floorFlat: targetFloorFlat,
+        special: targetSpecial,
+      ),
+      sector(
+        floor: neighborFloors[0],
+        ceiling: neighborCeilings[0],
+        floorFlat: neighborFloorFlats[0],
+        special: neighborSpecials[0],
+      ),
+      sector(
+        floor: neighborFloors[1],
+        ceiling: neighborCeilings[1],
+        floorFlat: neighborFloorFlats[1],
+        special: neighborSpecials[1],
+      ),
     ],
     segs: const <Seg>[],
     subsectors: const <Subsector>[],
@@ -338,6 +372,282 @@ MapData withThings(MapData base, List<Thing> things) => MapData(
   blockmap: base.blockmap,
   reject: base.reject,
 );
+
+MapData crusherStopMap(int stopSpecial) {
+  final MapData base = taggedSpecialMap(special: LineSpecial.walkCrusherRepeat);
+  return MapData(
+    name: 'CRUSHSTOP',
+    vertices: <MapVertex>[
+      ...base.vertices,
+      const MapVertex(160, 128),
+      const MapVertex(160, 0),
+    ],
+    linedefs: <Linedef>[
+      ...base.linedefs,
+      Linedef(
+        v1: 6,
+        v2: 7,
+        flags: LinedefFlags.twoSided,
+        special: stopSpecial,
+        tag: 7,
+        rightSidedef: 0,
+        leftSidedef: 1,
+      ),
+    ],
+    sidedefs: base.sidedefs,
+    sectors: base.sectors,
+    segs: base.segs,
+    subsectors: base.subsectors,
+    nodes: base.nodes,
+    things: base.things,
+    blockmap: null,
+    reject: null,
+  );
+}
+
+MapData donutMap({int extraTaggedSectors = 0}) {
+  const List<MapVertex> vertices = <MapVertex>[
+    MapVertex(128, 128),
+    MapVertex(128, 0),
+    MapVertex(0, 320),
+    MapVertex(128, 320),
+    MapVertex(0, 384),
+    MapVertex(128, 384),
+  ];
+  const List<Sidedef> sides = <Sidedef>[
+    Sidedef(
+      xOffset: 0,
+      yOffset: 0,
+      upperTexture: 'SW1COMP',
+      lowerTexture: '-',
+      middleTexture: '-',
+      sector: 0,
+    ),
+    Sidedef(
+      xOffset: 0,
+      yOffset: 0,
+      upperTexture: '-',
+      lowerTexture: '-',
+      middleTexture: '-',
+      sector: 1,
+    ),
+    Sidedef(
+      xOffset: 0,
+      yOffset: 0,
+      upperTexture: '-',
+      lowerTexture: '-',
+      middleTexture: '-',
+      sector: 2,
+    ),
+    Sidedef(
+      xOffset: 0,
+      yOffset: 0,
+      upperTexture: '-',
+      lowerTexture: '-',
+      middleTexture: '-',
+      sector: 3,
+    ),
+    Sidedef(
+      xOffset: 0,
+      yOffset: 0,
+      upperTexture: '-',
+      lowerTexture: '-',
+      middleTexture: '-',
+      sector: 4,
+    ),
+  ];
+  Sector sector(int floor, String flat, {int tag = 0, int special = 0}) =>
+      Sector(
+        floorHeight: floor,
+        ceilingHeight: 128,
+        floorFlat: flat,
+        ceilingFlat: 'C',
+        lightLevel: 160,
+        special: special,
+        tag: tag,
+      );
+  return MapData(
+    name: 'DONUT',
+    vertices: vertices,
+    linedefs: const <Linedef>[
+      Linedef(
+        v1: 0,
+        v2: 1,
+        flags: LinedefFlags.twoSided,
+        special: LineSpecial.switchDonutOnce,
+        tag: 7,
+        rightSidedef: 0,
+        leftSidedef: 1,
+      ),
+      Linedef(
+        v1: 2,
+        v2: 3,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 2,
+        leftSidedef: 3,
+      ),
+      Linedef(
+        v1: 4,
+        v2: 5,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 3,
+        leftSidedef: 4,
+      ),
+    ],
+    sidedefs: sides,
+    sectors: <Sector>[
+      sector(0, 'SOURCE'),
+      sector(0, 'PLAYER'),
+      sector(32, 'HOLE', tag: 7),
+      sector(-16, 'RING', special: SectorSpecial.damage5),
+      sector(0, 'OUTER'),
+      for (var i = 0; i < extraTaggedSectors; i++)
+        sector(32, 'HOSTILE', tag: 7),
+    ],
+    segs: const <Seg>[],
+    subsectors: const <Subsector>[],
+    nodes: const <BspNode>[],
+    things: const <Thing>[
+      Thing(x: 64, y: 64, angle: 0, type: 1, flags: _allSkills),
+    ],
+    blockmap: null,
+    reject: null,
+  );
+}
+
+MapData donutLookupMap(int sectorCount, {required bool hasTag}) {
+  if (sectorCount < 5) throw ArgumentError.value(sectorCount, 'sectorCount');
+  Sector sector(int floor, String flat, {int tag = 0}) => Sector(
+    floorHeight: floor,
+    ceilingHeight: 128,
+    floorFlat: flat,
+    ceilingFlat: 'C',
+    lightLevel: 160,
+    special: 0,
+    tag: tag,
+  );
+  final int hole = sectorCount - 1;
+  return MapData(
+    name: 'DONUT_LOOKUP',
+    vertices: const <MapVertex>[
+      MapVertex(128, 128),
+      MapVertex(128, 0),
+      MapVertex(0, 320),
+      MapVertex(128, 320),
+      MapVertex(0, 384),
+      MapVertex(128, 384),
+    ],
+    linedefs: <Linedef>[
+      const Linedef(
+        v1: 0,
+        v2: 1,
+        flags: LinedefFlags.twoSided,
+        special: LineSpecial.switchDonutOnce,
+        tag: 7,
+        rightSidedef: 0,
+        leftSidedef: 1,
+      ),
+      const Linedef(
+        v1: 2,
+        v2: 3,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 2,
+        leftSidedef: 3,
+      ),
+      const Linedef(
+        v1: 4,
+        v2: 5,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 3,
+        leftSidedef: 4,
+      ),
+    ],
+    sidedefs: <Sidedef>[
+      const Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: 'SW1COMP',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: 0,
+      ),
+      const Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: '-',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: 1,
+      ),
+      Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: '-',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: hole,
+      ),
+      const Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: '-',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: 2,
+      ),
+      const Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: '-',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: 3,
+      ),
+    ],
+    sectors: <Sector>[
+      sector(0, 'SOURCE'),
+      sector(0, 'PLAYER'),
+      sector(-16, 'RING'),
+      sector(0, 'OUTER'),
+      for (var i = 4; i < hole; i++) sector(0, 'FILLER'),
+      sector(32, 'HOLE', tag: hasTag ? 7 : 0),
+    ],
+    segs: const <Seg>[],
+    subsectors: const <Subsector>[],
+    nodes: const <BspNode>[],
+    things: const <Thing>[
+      Thing(x: 64, y: 64, angle: 0, type: 1, flags: _allSkills),
+    ],
+    blockmap: null,
+    reject: null,
+  );
+}
+
+double donutLookupMicros(GameState game) {
+  for (var i = 0; i < 1000; i++) {
+    game_state_internal.activateDonutForTesting(game, 0);
+  }
+  var iterations = 1024;
+  while (true) {
+    final Stopwatch watch = Stopwatch()..start();
+    for (var i = 0; i < iterations; i++) {
+      game_state_internal.activateDonutForTesting(game, 0);
+    }
+    watch.stop();
+    if (watch.elapsedMicroseconds >= 10000 || iterations >= 1048576) {
+      return watch.elapsedMicroseconds / iterations;
+    }
+    iterations *= 2;
+  }
+}
 
 void crossEast(GameState game) {
   for (var tic = 0; tic < 100 && game.player.x <= toFixed(128); tic++) {
@@ -583,6 +893,11 @@ void main() {
           LineSpecial.walkDoorOpenStayOnce,
           LineSpecial.walkFloorLowerToHighestOnce,
           LineSpecial.walkBuildStairs8Once,
+          LineSpecial.walkFastCrusherOnce,
+          LineSpecial.walkCrusherStopRepeat,
+          LineSpecial.switchFloorRaiseToNextHigherAndChangeOnce,
+          LineSpecial.walkFloorLowerToLowestAndChangeOnce,
+          LineSpecial.switchDonutOnce,
         ]),
       );
       expect(
@@ -698,6 +1013,199 @@ void main() {
           repeat.sectors.elementAt(2).hasMover,
           isTrue,
           reason: '$special',
+        );
+      }
+    });
+
+    test('crusher specials activate with distinct normal and fast speeds', () {
+      for (final (int special, int speed, bool use) in <(int, int, bool)>[
+        (LineSpecial.walkFastCrusherOnce, 2, false),
+        (LineSpecial.walkCrusherOnce, 1, false),
+        (LineSpecial.switchCrusherOnce, 1, true),
+        (LineSpecial.walkCrusherRepeat, 1, false),
+        (LineSpecial.walkFastCrusherRepeat, 2, false),
+      ]) {
+        final GameState game = GameState.start(
+          taggedSpecialMap(special: special, switchTexture: use),
+          const GameConfig(monsters: false),
+        );
+        if (use) {
+          game.runTic(const TicCmd(buttons: Buttons.use));
+        } else {
+          crossEast(game);
+        }
+        final sector = game.sectors.elementAt(2);
+        expect(sector.hasMover, isTrue, reason: '$special activation');
+        final int before = sector.ceilingHeight;
+        game.runTic(TicCmd.empty);
+        expect(
+          before - sector.ceilingHeight,
+          toFixed(speed),
+          reason: '$special downward speed',
+        );
+        var sawBottom = false;
+        for (var tic = 0; tic < 300; tic++) {
+          game.runTic(TicCmd.empty);
+          if (sector.ceilingHeight == toFixed(8)) sawBottom = true;
+        }
+        expect(sawBottom, isTrue, reason: '$special floor+8 target');
+        expect(sector.hasMover, isTrue, reason: 'crusher cycles forever');
+      }
+    });
+
+    test(
+      'normal crusher slows to one eighth on contact while fast does not',
+      () {
+        GameState game(int special) => GameState.start(
+          taggedSpecialMap(
+            special: special,
+            extraThings: const <Thing>[
+              Thing(x: 64, y: 300, angle: 0, type: 3004, flags: _allSkills),
+            ],
+          ),
+          const GameConfig(monsters: false),
+        );
+
+        final GameState normal = game(LineSpecial.walkCrusherOnce);
+        final GameState fast = game(LineSpecial.walkFastCrusherOnce);
+        crossEast(normal);
+        crossEast(fast);
+        while (normal.sectors.elementAt(2).ceilingHeight > toFixed(56)) {
+          normal.runTic(TicCmd.empty);
+        }
+        while (fast.sectors.elementAt(2).ceilingHeight > toFixed(56)) {
+          fast.runTic(TicCmd.empty);
+        }
+        normal.runTic(TicCmd.empty);
+        fast.runTic(TicCmd.empty);
+        final int normalBefore = normal.sectors.elementAt(2).ceilingHeight;
+        final int fastBefore = fast.sectors.elementAt(2).ceilingHeight;
+        normal.runTic(TicCmd.empty);
+        fast.runTic(TicCmd.empty);
+        expect(
+          normalBefore - normal.sectors.elementAt(2).ceilingHeight,
+          kFracUnit ~/ 8,
+        );
+        expect(
+          fastBefore - fast.sectors.elementAt(2).ceilingHeight,
+          toFixed(2),
+        );
+      },
+    );
+
+    test('crusher damages every four tics and gibs the crushed monster', () {
+      final GameState game = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkCrusherOnce,
+          extraThings: const <Thing>[
+            Thing(x: 64, y: 300, angle: 0, type: 3004, flags: _allSkills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(game);
+      MobjView monster() =>
+          game.mobjs.firstWhere((MobjView m) => m.sprite == 'POSS');
+      while (game.sectors.elementAt(2).ceilingHeight > toFixed(56)) {
+        game.runTic(TicCmd.empty);
+      }
+      final List<int> damagedAt = <int>[];
+      var previous = monster().health;
+      for (var tic = 0; tic < 40 && monster().health > 0; tic++) {
+        game.runTic(TicCmd.empty);
+        final int health = monster().health;
+        if (health != previous) {
+          expect(previous - health, 10, reason: 'crusher damage portion');
+          damagedAt.add(game.tic);
+        }
+        previous = health;
+      }
+      expect(damagedAt.length, greaterThanOrEqualTo(2));
+      for (var i = 1; i < damagedAt.length; i++) {
+        expect(damagedAt[i] - damagedAt[i - 1], 4);
+      }
+      for (var tic = 0; tic < 500 && monster().height != 0; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(monster().health, 0);
+      expect(monster().height, 0, reason: 'corpse becomes gib puddle');
+      expect(monster().flags & MobjFlags.solid, 0);
+    });
+
+    test('crusher deals ten damage per portion to the player', () {
+      final MapData base = taggedSpecialMap(special: 0);
+      final List<Linedef> lines = List<Linedef>.of(base.linedefs);
+      final Linedef trigger = lines[1];
+      lines[1] = Linedef(
+        v1: trigger.v1,
+        v2: trigger.v2,
+        flags: trigger.flags,
+        special: LineSpecial.switchCrusherOnce,
+        tag: 7,
+        rightSidedef: trigger.rightSidedef,
+        leftSidedef: trigger.leftSidedef,
+      );
+      final GameState game = GameState.start(
+        MapData(
+          name: base.name,
+          vertices: base.vertices,
+          linedefs: lines,
+          sidedefs: base.sidedefs,
+          sectors: base.sectors,
+          segs: base.segs,
+          subsectors: base.subsectors,
+          nodes: base.nodes,
+          things: const <Thing>[
+            Thing(x: 64, y: 300, angle: 90, type: 1, flags: _allSkills),
+          ],
+          blockmap: null,
+          reject: null,
+        ),
+        const GameConfig(monsters: false),
+      );
+      expect(game.playerSectorIndex, 2);
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      expect(game.sectors.elementAt(2).hasMover, isTrue);
+      final int before = game.player.health;
+      for (var tic = 0; tic < 200 && game.player.health == before; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(before - game.player.health, 10);
+    });
+
+    test('crusher stop 57/74 enters stasis without becoming a door', () {
+      for (final int stopSpecial in <int>[
+        LineSpecial.walkCrusherStopOnce,
+        LineSpecial.walkCrusherStopRepeat,
+      ]) {
+        final GameState game = GameState.start(
+          crusherStopMap(stopSpecial),
+          const GameConfig(monsters: false),
+        );
+        crossEast(game);
+        final sector = game.sectors.elementAt(2);
+        final int moving = sector.ceilingHeight;
+        game.runTic(TicCmd.empty);
+        expect(sector.ceilingHeight, lessThan(moving));
+        while (game.player.x <= toFixed(160)) {
+          game.runTic(const TicCmd(forwardMove: 10));
+        }
+        final int stopped = sector.ceilingHeight;
+        for (var tic = 0; tic < 20; tic++) {
+          game.runTic(TicCmd.empty);
+        }
+        expect(sector.ceilingHeight, stopped, reason: '$stopSpecial stasis');
+        expect(sector.hasMover, isTrue, reason: 'stopped thinker retained');
+        game.runTic(const TicCmd(angleTurn: 0x8000));
+        while (game.player.x >= toFixed(128)) {
+          game.runTic(const TicCmd(forwardMove: 10));
+        }
+        final int restarted = sector.ceilingHeight;
+        game.runTic(TicCmd.empty);
+        expect(
+          sector.ceilingHeight,
+          isNot(restarted),
+          reason: 'repeat crusher trigger restarts $stopSpecial stasis',
         );
       }
     });
@@ -840,6 +1348,244 @@ void main() {
         await reaches(LineSpecial.switchFloorLowerToLowestOnce, 16, use: true);
       },
     );
+
+    test(
+      '20/22 raise half-speed and transfer front flat with special zero',
+      () {
+        for (final (int special, bool use) in <(int, bool)>[
+          (LineSpecial.switchFloorRaiseToNextHigherAndChangeOnce, true),
+          (LineSpecial.walkFloorRaiseToNextHigherAndChangeOnce, false),
+        ]) {
+          final GameState game = GameState.start(
+            taggedSpecialMap(
+              special: special,
+              targetFloor: 0,
+              neighborFloors: const <int>[24, 48],
+              switchTexture: use,
+              sourceFloorFlat: 'MODEL',
+              sourceSpecial: SectorSpecial.damage10,
+              targetFloorFlat: 'OLD',
+              targetSpecial: SectorSpecial.damage5,
+            ),
+            const GameConfig(monsters: false),
+          );
+          if (use) {
+            game.runTic(const TicCmd(buttons: Buttons.use));
+          } else {
+            crossEast(game);
+          }
+          final sector = game.sectors.elementAt(2);
+          expect(sector.floorFlat, 'MODEL', reason: '$special source flat');
+          expect(sector.special, 0, reason: '$special clears damage special');
+          expect(
+            game.changeJournal
+                .where((SectorChange c) => c.kind == PlaneKind.floorFlat)
+                .single
+                .flatName,
+            'MODEL',
+          );
+          final int before = sector.floorHeight;
+          game.runTic(TicCmd.empty);
+          expect(sector.floorHeight - before, kFracUnit ~/ 2);
+          for (var tic = 0; tic < 100; tic++) {
+            game.runTic(TicCmd.empty);
+          }
+          expect(sector.floorHeight, toFixed(24));
+        }
+      },
+    );
+
+    test(
+      '37 transfers lowest-neighbor flat and special only at destination',
+      () {
+        final GameState game = GameState.start(
+          taggedSpecialMap(
+            special: LineSpecial.walkFloorLowerToLowestAndChangeOnce,
+            targetFloor: 32,
+            neighborFloors: const <int>[0, 16],
+            targetFloorFlat: 'OLD',
+            targetSpecial: SectorSpecial.damage10,
+            neighborFloorFlats: const <String>['LOW', 'OTHER'],
+            neighborSpecials: const <int>[
+              SectorSpecial.damage5,
+              SectorSpecial.glow,
+            ],
+          ),
+          const GameConfig(monsters: false),
+        );
+        crossEast(game);
+        final sector = game.sectors.elementAt(2);
+        expect(sector.floorFlat, 'OLD');
+        while (sector.floorHeight > 0) {
+          game.runTic(TicCmd.empty);
+        }
+        expect(sector.floorFlat, 'LOW');
+        expect(sector.special, SectorSpecial.damage5);
+        expect(
+          game.changeJournal
+              .where((SectorChange c) => c.kind == PlaneKind.floorFlat)
+              .single
+              .flatName,
+          'LOW',
+        );
+      },
+    );
+
+    test('59 raises 24 and transfers the front model immediately', () {
+      final GameState game = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkFloorRaise24AndChangeOnce,
+          targetFloor: 8,
+          sourceFloorFlat: 'MODEL59',
+          sourceSpecial: SectorSpecial.glow,
+          targetFloorFlat: 'OLD59',
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(game);
+      final sector = game.sectors.elementAt(2);
+      expect((sector.floorFlat, sector.special), ('MODEL59', 8));
+      for (var tic = 0; tic < 40; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(sector.floorHeight, toFixed(32));
+      expect(
+        game.changeJournal
+            .where((SectorChange c) => c.kind == PlaneKind.floorFlat)
+            .single
+            .flatName,
+        'MODEL59',
+      );
+    });
+
+    test('donut lowers hole, raises ring, and transfers outer flat', () {
+      final GameState game = GameState.start(
+        donutMap(),
+        const GameConfig(monsters: false),
+      );
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      expect(game.switchJournal.single.textureName, 'SW2COMP');
+      final hole = game.sectors.elementAt(2);
+      final ring = game.sectors.elementAt(3);
+      expect(hole.floorHeight, toFixed(32));
+      expect(ring.floorHeight, toFixed(-16));
+      game.runTic(TicCmd.empty);
+      expect(hole.floorHeight, toFixed(32) - kFracUnit ~/ 2);
+      expect(ring.floorHeight, toFixed(-16) + kFracUnit ~/ 2);
+      for (var tic = 0; tic < 100; tic++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(hole.floorHeight, 0);
+      expect(ring.floorHeight, 0);
+      expect((ring.floorFlat, ring.special), ('OUTER', 0));
+      expect(
+        game.changeJournal
+            .where((SectorChange c) => c.kind == PlaneKind.floorFlat)
+            .single
+            .flatName,
+        'OUTER',
+      );
+    });
+
+    test('hostile donut topology stops at budget and remains fast', () {
+      final Stopwatch watch = Stopwatch()..start();
+      final GameState game = GameState.start(
+        donutMap(extraTaggedSectors: 4000),
+        const GameConfig(monsters: false, maxDonutBuildVisits: 2),
+      );
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      watch.stop();
+      expect(game.sectors.elementAt(2).hasMover, isFalse);
+      expect(watch.elapsedMilliseconds, lessThan(500));
+      expect(
+        game.hashState(),
+        isNot(
+          GameState.start(
+            donutMap(extraTaggedSectors: 4000),
+            const GameConfig(monsters: false, maxDonutBuildVisits: 3),
+          ).hashState(),
+        ),
+      );
+    });
+
+    test('donut lookup handles an absent tag and a last-sector tag', () {
+      final GameState absent = GameState.start(
+        donutLookupMap(16000, hasTag: false),
+        const GameConfig(monsters: false, maxDonutBuildVisits: 2),
+      );
+      expect(game_state_internal.activateDonutForTesting(absent, 0), isFalse);
+
+      final GameState last = GameState.start(
+        donutLookupMap(16000, hasTag: true),
+        const GameConfig(monsters: false, maxDonutBuildVisits: 3),
+      );
+      expect(game_state_internal.activateDonutForTesting(last, 0), isTrue);
+      expect(last.sectors.elementAt(15999).hasMover, isTrue);
+    });
+
+    test('absent donut tag lookup cost stays flat as the map grows', () {
+      const List<int> sizes = <int>[100, 1000, 4000, 16000];
+      final Map<int, GameState> games = <int, GameState>{
+        for (final int sectors in sizes)
+          sectors: GameState.start(
+            donutLookupMap(sectors, hasTag: false),
+            const GameConfig(monsters: false, maxDonutBuildVisits: 2),
+          ),
+      };
+      final Map<int, List<double>> samples = <int, List<double>>{
+        for (final int sectors in sizes) sectors: <double>[],
+      };
+      for (var sample = 0; sample < 5; sample++) {
+        final Iterable<int> order = sample.isEven ? sizes : sizes.reversed;
+        for (final int sectors in order) {
+          samples[sectors]!.add(donutLookupMicros(games[sectors]!));
+        }
+      }
+      final Map<int, double> medians = <int, double>{
+        for (final int sectors in sizes)
+          sectors: (samples[sectors]!..sort())[2],
+      };
+      final double ratio = medians[16000]! / medians[100]!;
+      // Kept in the test output because this is a performance regression
+      // contract, and the absolute samples help diagnose a noisy host.
+      print(
+        'donut absent-tag us/activation: '
+        '${sizes.map((int sectors) {
+          return '$sectors=${medians[sectors]!.toStringAsFixed(3)}';
+        }).join(', ')}; ratio=${ratio.toStringAsFixed(3)}',
+      );
+      expect(
+        ratio,
+        lessThan(1.5),
+        reason:
+            'median lookup ratio must remain close to one, got $ratio '
+            '(${medians[100]} vs ${medians[16000]} us/activation)',
+      );
+    });
+
+    test('mutable floor model is hashed while its journal is output-only', () {
+      final MapData map = taggedSpecialMap(
+        special: LineSpecial.walkFloorRaise24AndChangeOnce,
+        sourceFloorFlat: 'HASHMODEL',
+        sourceSpecial: SectorSpecial.glow,
+        targetFloorFlat: 'HASHOLD',
+      );
+      final GameState a = GameState.start(
+        map,
+        const GameConfig(monsters: false),
+      );
+      final GameState b = GameState.start(
+        map,
+        const GameConfig(monsters: false),
+      );
+      crossEast(a);
+      crossEast(b);
+      expect(a.hashState(), b.hashState());
+      final int beforeConsume = a.hashState();
+      expect(a.consumeChangeJournal(), isNotEmpty);
+      expect(a.hashState(), beforeConsume);
+      expect(a.sectors.elementAt(2).floorFlat, 'HASHMODEL');
+    });
 
     test('all use specials reject the directed line back side', () {
       final GameState front = GameState.start(

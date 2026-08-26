@@ -244,6 +244,50 @@ void main() {
     expect(backend.buffers.length, buffers);
   });
 
+  test(
+    'floor-flat transfer dirties exact ranges without recreating buffers',
+    () {
+      final scene = DoomScene.fromCompiledLevel(level, resources);
+      for (final surface in scene.surfaces) {
+        surface.resource;
+      }
+      final int buffers = backend.buffers.length;
+      final geometry.SectorPlaneRef plane = level.floorPlanes.firstWhere(
+        (geometry.SectorPlaneRef item) => level.atlas.entries.values.any(
+          (geometry.AtlasEntry entry) =>
+              entry.name != item.textureName &&
+              entry.tiling &&
+              entry.width == 64 &&
+              entry.height == 64 &&
+              entry.page == level.meshes[item.ranges.first.meshIndex].atlasPage,
+        ),
+      );
+      final geometry.AtlasEntry replacement = level.atlas.entries.values
+          .firstWhere(
+            (geometry.AtlasEntry entry) =>
+                entry.name != plane.textureName &&
+                entry.tiling &&
+                entry.width == 64 &&
+                entry.height == 64 &&
+                entry.page ==
+                    level.meshes[plane.ranges.first.meshIndex].atlasPage,
+          );
+
+      expect(
+        scene.updateSectorFloorFlat(
+          sectorIndex: plane.sector,
+          flatName: replacement.name,
+        ),
+        plane.vertexCount,
+      );
+      for (final geometry.VertexRange range in plane.ranges) {
+        expectPackedAtlasRect(level, range, replacement);
+      }
+      expect(scene.flushPendingUploads(), plane.ranges.length);
+      expect(backend.buffers.length, buffers, reason: 'no buffer recreation');
+    },
+  );
+
   test('external plane and wall mutations keep cached positions coherent', () {
     final scene = DoomScene.fromCompiledLevel(level, resources);
     for (final surface in scene.surfaces) {

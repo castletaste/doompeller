@@ -22,7 +22,8 @@ Future<PreparedDoomLevel> fixtureLevel() async {
     resources: resources,
     map: map,
     geometry: DoomGeometryCompiler.compile(map, resources),
-    game: core.GameState.start(map, const core.GameConfig()),
+    gameConfig: const core.GameConfig(),
+    seed: 0,
   );
 }
 
@@ -48,12 +49,19 @@ final class FakeRuntime implements DoomRuntimeView {
   ValueListenable<DoomAutomapSnapshot> get automap => automapNotifier;
 
   int clearInputCalls = 0;
+  int restartCalls = 0;
 
   @override
   void addPointerYaw(double deltaX) {}
 
   @override
   void clearInput() => clearInputCalls++;
+
+  @override
+  void restartLevel() {
+    restartCalls++;
+    notifier.value = const DoomHudSnapshot.initial();
+  }
 
   @override
   void setPointerAttack(bool pressed) {}
@@ -204,6 +212,53 @@ void main() {
     expect(find.byKey(const Key('pause-overlay')), findsNothing);
   });
 
+  testWidgets('death overlay is exclusive to a dead player and restarts', (
+    tester,
+  ) async {
+    final level = await fixtureLevel();
+    final runtime = FakeRuntime();
+    final controller = DoomAppController(
+      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      DoomApp(
+        controller: controller,
+        autoStart: false,
+        runtimeFactory: (_) => runtime,
+        gameSurfaceBuilder: testSurface,
+      ),
+    );
+
+    expect(find.byKey(const Key('death-overlay')), findsNothing);
+    runtime.notifier.value = const DoomHudSnapshot(
+      health: 0,
+      armor: 0,
+      bullets: 12,
+      shells: 0,
+      weapon: core.Weapon.pistol,
+      keys: <core.Key>{},
+      kills: 0,
+      totalKills: 1,
+      items: 0,
+      totalItems: 0,
+      secrets: 0,
+      totalSecrets: 0,
+      levelTime: 70,
+      paused: false,
+      levelComplete: false,
+      diagnostics: DoomFrameDiagnosticsSnapshot(),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('death-overlay')), findsOneWidget);
+    expect(find.text('YOU DIED'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('overlay-action')));
+    await tester.pump();
+    expect(runtime.restartCalls, 1);
+    expect(find.byKey(const Key('death-overlay')), findsNothing);
+  });
+
   testWidgets('intermission shows final percentages and time after skip', (
     tester,
   ) async {
@@ -247,6 +302,10 @@ void main() {
     expect(find.text('40%'), findsOneWidget);
     expect(find.text('50%'), findsOneWidget);
     expect(find.text('1:45'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('intermission-restart')));
+    await tester.pump();
+    expect(runtime.restartCalls, 1);
+    expect(find.byKey(const Key('completion-overlay')), findsNothing);
   });
 
   testWidgets('intermission treats empty totals as 100 percent', (

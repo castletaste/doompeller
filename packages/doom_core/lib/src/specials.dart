@@ -26,20 +26,33 @@ abstract final class LineSpecial {
   static const int walkDoorCloseRepeat = 75;
   static const int walkDoorOpenStayRepeat = 86;
   static const int walkDoorOpenWaitCloseRepeat = 90;
+  // Ceiling crushers and their in-stasis controls.
+  static const int walkFastCrusherOnce = 6;
+  static const int walkCrusherOnce = 25;
+  static const int switchCrusherOnce = 49;
+  static const int walkCrusherStopOnce = 57;
+  static const int walkCrusherRepeat = 73;
+  static const int walkCrusherStopRepeat = 74;
+  static const int walkFastCrusherRepeat = 77;
   // Floors/lifts.
   static const int floorRaiseToLowestCeiling = 5;
   static const int floorRaise24 = 24;
   static const int switchFloorRaiseToNextHigherOnce = 18;
   static const int walkFloorLowerToHighestOnce = 19;
   static const int switchFloorLowerToLowestOnce = 23;
+  static const int switchFloorRaiseToNextHigherAndChangeOnce = 20;
+  static const int walkFloorRaiseToNextHigherAndChangeOnce = 22;
   static const int walkFloorLowerTurboOnce = 36;
   static const int walkFloorLowerToLowestOnce = 38;
+  static const int walkFloorLowerToLowestAndChangeOnce = 37;
   static const int walkFloorRaise24Once = 58;
+  static const int walkFloorRaise24AndChangeOnce = 59;
   static const int walkFloorLowerToLowestRepeat = 82;
   static const int walkFloorRaiseToLowestCeilingRepeat = 91;
   static const int walkFloorRaiseToNextHigherOnce = 119;
   static const int walkFloorRaiseToNextHigherRepeat = 128;
   static const int switchBuildStairs8Once = 7;
+  static const int switchDonutOnce = 9;
   static const int walkBuildStairs8Once = 8;
   static const int liftDownWaitUp = 10;
   static const int liftDownWaitUpSwitch = 21;

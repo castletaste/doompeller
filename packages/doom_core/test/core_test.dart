@@ -1,4 +1,5 @@
 import 'package:doom_core/doom_core.dart';
+import 'package:doom_core/src/mobj_states.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
 
@@ -239,15 +240,44 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    // The count-item parity correction changes flags on fixture types
-    // 2001/2007/2008/2011/2018. Actor flags are hashed, so that change
-    // deliberately moves this pin; the fixture contains neither a backpack
-    // nor a radiation suit.
-    // Chase direction selection now consumes the shared rolling RNG for axis
-    // order and full-search order, and successful movement consumes its own
-    // move-count draw. That classic decision order intentionally moves this
-    // AI-enabled replay pin.
-    expect(a.hashState(), 0x35ec969a);
+    // The generated fixture now includes demon, spectre and decoration things.
+    // Their ordered actor ids/state records are future-affecting and hashed;
+    // the two extra monsters also start with their published reaction delay
+    // and then consume the shared chase RNG in map order.
+    expect(a.hashState(), 0xc8b5532e);
+  });
+
+  test('replay hash ignores an unused actor-state table insertion', () {
+    int replayHash() {
+      final List<TicCmd> commands = List<TicCmd>.generate(
+        20,
+        (int i) => TicCmd(
+          forwardMove: i.isEven ? 10 : 0,
+          angleTurn: 0x200,
+          buttons: i % 5 == 0 ? Buttons.attack : 0,
+        ),
+      );
+      final GameState game = GameState.start(
+        fixture(),
+        const GameConfig(),
+        seed: 7,
+      );
+      CommandReplay(seed: 7, commands: commands).run(game);
+      return game.hashState();
+    }
+
+    final int baseline = replayHash();
+    final int shifted = MobjStateTable.withUnusedStateInsertedForTesting(
+      before: 0,
+      body: replayHash,
+    );
+
+    print(
+      'replay insertion probe: '
+      'baseline=0x${baseline.toRadixString(16).padLeft(8, '0')} '
+      'shifted=0x${shifted.toRadixString(16).padLeft(8, '0')}',
+    );
+    expect(shifted, baseline);
   });
 
   test(

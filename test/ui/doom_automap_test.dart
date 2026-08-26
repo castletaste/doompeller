@@ -262,7 +262,8 @@ Future<PreparedDoomLevel> _fixtureLevel() async {
     resources: resources,
     map: map,
     geometry: geometry.DoomGeometryCompiler.compile(map, resources),
-    game: GameState.start(map, const GameConfig()),
+    gameConfig: const GameConfig(),
+    seed: 0,
   );
 }
 

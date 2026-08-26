@@ -8,6 +8,7 @@ import 'mobj.dart';
 import 'mobj_info.dart';
 import 'mobj_states.dart';
 import 'random.dart';
+import 'replay_identity.dart';
 import 'sector_runtime.dart';
 import 'sound_events.dart';
 import 'specials.dart';
@@ -24,6 +25,7 @@ const int _ceilingViewClearance = 4 * kFracUnit;
 const int _livingViewHeight = 41 * kFracUnit;
 const int _deadViewHeight = 6 * kFracUnit;
 const int _deathViewDropPerTic = kFracUnit;
+final int _deathViewTurnPerTic = degreesToAngle(5);
 const int _baseMonsterThreshold = 100;
 const int _weaponTop = 32;
 const int _weaponBottom = 128;
@@ -106,10 +108,10 @@ class GameState {
   /// Every discard increments [droppedSoundEventCount], so loss is observable.
   static const int maxSoundJournalLength = 256;
 
-  GameState._(this._runtime, this.config, int seed)
-    : _random = DoomRandom(index: seed) {
+  GameState._(this._runtime, this.config, this.initialSeed)
+    : _random = DoomRandom(index: initialSeed) {
     _totalSecrets = _runtime.sectors
-        .where((SectorRuntime sector) => sector.staticData.special == 9)
+        .where((SectorRuntime sector) => sector.special == 9)
         .length;
     _spawnMapThings();
   }
@@ -119,6 +121,7 @@ class GameState {
 
   final MapRuntime _runtime;
   final GameConfig config;
+  final int initialSeed;
   final DoomRandom _random;
   final List<Mobj> _mobjs = <Mobj>[];
   final List<SectorChange> _changes = <SectorChange>[];
@@ -157,10 +160,15 @@ class GameState {
     _runtime.sectors.length,
     0,
   );
+  late final List<int> _topologyVisitGenerations = List<int>.filled(
+    _runtime.sectors.length,
+    0,
+  );
   final List<int> _soundQueueSectors = <int>[];
   final List<int> _soundQueueBlocks = <int>[];
   int _soundVisitGeneration = 0;
   int _stairVisitGeneration = 0;
+  int _topologyVisitGeneration = 0;
   int _secrets = 0;
   int _killCount = 0;
   int _totalKills = 0;
@@ -171,6 +179,8 @@ class GameState {
   bool _secretExit = false;
   int _bob = 0;
   int _deathViewHeight = _livingViewHeight;
+  int _deathViewAngle = 0;
+  Mobj? _deathViewTarget;
   bool _useHeld = false;
 
   int get tic => _tic;
@@ -243,7 +253,7 @@ class GameState {
       x: _playerMobj.x,
       y: _playerMobj.y,
       z: _playerMobj.z,
-      angle: _playerMobj.angle,
+      angle: _health > 0 ? _playerMobj.angle : _deathViewAngle,
       viewZ: bobbedViewZ < highestViewZ ? bobbedViewZ : highestViewZ,
       health: _health,
       armor: _armor,
@@ -328,6 +338,7 @@ class GameState {
     );
     m.floorZ = _runtime.sectors[sector].floorHeight;
     m.ceilingZ = _runtime.sectors[sector].ceilingHeight;
+    m.reactionTime = info.reactionTime;
     final int? spawnState = MobjStateTable.start(info.id, MobjState.spawn);
     if (spawnState != null) _setMobjState(m, spawnState);
     _mobjs.add(m);
@@ -560,6 +571,22 @@ class GameState {
       _deathViewHeight -= _deathViewDropPerTic;
       if (_deathViewHeight < _deadViewHeight) {
         _deathViewHeight = _deadViewHeight;
+      }
+    }
+    final Mobj? target = _deathViewTarget;
+    if (target != null && !identical(target, _playerMobj)) {
+      final int desired = Trig.atan2(
+        target.y - _playerMobj.y,
+        target.x - _playerMobj.x,
+      );
+      final int delta = angleDelta(desired, _deathViewAngle);
+      if (delta.abs() <= _deathViewTurnPerTic) {
+        _deathViewAngle = desired;
+      } else {
+        _deathViewAngle = normalizeAngle(
+          _deathViewAngle +
+              (delta < 0 ? -_deathViewTurnPerTic : _deathViewTurnPerTic),
+        );
       }
     }
   }
@@ -816,6 +843,10 @@ class GameState {
       switch (dispatch) {
         case _LineDispatchKind.walkDoor:
           _activateDoor(line, allowTagZeroBack: false);
+        case _LineDispatchKind.walkCrusher:
+          _activateCrusher(line);
+        case _LineDispatchKind.walkCrusherStop:
+          _stopCrushers(line);
         case _LineDispatchKind.walkLift:
           _activateLift(line);
         case _LineDispatchKind.walkFloor:
@@ -891,6 +922,10 @@ class GameState {
           _activateSwitchTexture(selectedIndex, selected);
           _emitPlayerSound('DSSWTCHN');
         }
+      case _LineDispatchKind.useCrusher:
+        activated = _activateCrusher(selected);
+      case _LineDispatchKind.useDonut:
+        activated = _activateDonut(selected);
       case _LineDispatchKind.useLift:
         activated = _activateLift(selected);
       case _LineDispatchKind.useFloor:
@@ -1065,12 +1100,9 @@ class GameState {
     // tag 0 manual doors affect the adjacent back sector; classification comes
     // from special, never from the tag.
     final int? back = _runtime.backSector(line);
-    final List<int> targets = line.tag == 0 && allowTagZeroBack
+    final Iterable<int> targets = line.tag == 0 && allowTagZeroBack
         ? (back == null ? <int>[] : <int>[back])
-        : <int>[
-            for (int i = 0; i < _runtime.sectors.length; i++)
-              if (_runtime.sectors[i].staticData.tag == line.tag) i,
-          ];
+        : _runtime.sectorsWithTag(line.tag);
     var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
@@ -1101,12 +1133,9 @@ class GameState {
 
   bool _activateLift(Linedef line) {
     final int? back = _runtime.backSector(line);
-    final List<int> targets = line.tag == 0
+    final Iterable<int> targets = line.tag == 0
         ? (back == null ? <int>[] : <int>[back])
-        : <int>[
-            for (int i = 0; i < _runtime.sectors.length; i++)
-              if (_runtime.sectors[i].staticData.tag == line.tag) i,
-          ];
+        : _runtime.sectorsWithTag(line.tag);
     var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
@@ -1122,32 +1151,58 @@ class GameState {
   bool _activateFloor(Linedef line) {
     final _FloorTargetKind? targetKind = _floorTargetKinds[line.special];
     if (targetKind == null) return false;
-    final List<int> targets = <int>[
-      for (int i = 0; i < _runtime.sectors.length; i++)
-        if (_runtime.sectors[i].staticData.tag == line.tag && line.tag != 0) i,
-    ];
     var activated = false;
-    for (final int index in targets) {
+    if (line.tag == 0) return false;
+    for (final int index in _runtime.sectorsWithTag(line.tag)) {
       final SectorRuntime sector = _runtime.sectors[index];
       final int target = switch (targetKind) {
         _FloorTargetKind.raise24 => sector.floorHeight + toFixed(24),
+        _FloorTargetKind.raise24AndChange => sector.floorHeight + toFixed(24),
         _FloorTargetKind.raiseToLowestCeilingMinus8 =>
           _lowestNeighborCeiling(index) - toFixed(8),
         _FloorTargetKind.raiseToLowestCeiling => _lowestNeighborCeiling(index),
         _FloorTargetKind.raiseToNextHigher => _nextHigherNeighborFloor(index),
+        _FloorTargetKind.raiseToNextHigherAndChange => _nextHigherNeighborFloor(
+          index,
+        ),
         _FloorTargetKind.lowerToHighest => _highestNeighborFloor(index),
         _FloorTargetKind.lowerToLowest => _lowestNeighborFloor(index),
+        _FloorTargetKind.lowerToLowestAndChange => _lowestNeighborFloor(index),
         _FloorTargetKind.lowerTurbo => _turboLowerTarget(index),
       };
       if (sector.activeMover == null) {
+        String? deferredFlat;
+        int? deferredSpecial;
+        if (targetKind == _FloorTargetKind.lowerToLowestAndChange) {
+          final _SectorModel? model = _neighborModelAtFloor(index, target);
+          deferredFlat = model?.floorFlat ?? sector.floorFlat;
+          deferredSpecial = model?.special ?? sector.special;
+        } else if (targetKind == _FloorTargetKind.raiseToNextHigherAndChange ||
+            targetKind == _FloorTargetKind.raise24AndChange) {
+          final int source = _runtime.frontSector(line);
+          final SectorRuntime model = _runtime.sectors[source];
+          _setSectorFloorModel(
+            sector,
+            model.floorFlat,
+            targetKind == _FloorTargetKind.raiseToNextHigherAndChange
+                ? 0
+                : model.special,
+          );
+        }
         sector.activeMover = _FloorMover(
           sector,
           target,
-          speed: line.special == LineSpecial.walkFloorLowerTurboOnce
-              ? toFixed(4)
-              : kFracUnit,
+          speed: switch (line.special) {
+            LineSpecial.walkFloorLowerTurboOnce => toFixed(4),
+            LineSpecial.switchFloorRaiseToNextHigherAndChangeOnce ||
+            LineSpecial.walkFloorRaiseToNextHigherAndChangeOnce =>
+              kFracUnit ~/ 2,
+            _ => kFracUnit,
+          },
           obstructed: (int nextFloor) =>
               _sectorObstructed(index, floor: nextFloor),
+          transferFlat: deferredFlat,
+          transferSpecial: deferredSpecial,
         );
         activated = true;
       }
@@ -1155,15 +1210,172 @@ class GameState {
     return activated;
   }
 
+  bool _activateCrusher(Linedef line) {
+    final bool fast =
+        line.special == LineSpecial.walkFastCrusherOnce ||
+        line.special == LineSpecial.walkFastCrusherRepeat;
+    var activated = false;
+    if (line.tag == 0) return false;
+    for (final int index in _runtime.sectorsWithTag(line.tag)) {
+      final SectorRuntime sector = _runtime.sectors[index];
+      final SectorMover? active = sector.activeMover;
+      if (active is _CrusherMover && active.stopped) {
+        active.restart();
+        activated = true;
+      } else if (active == null) {
+        sector.activeMover = _CrusherMover(
+          sector,
+          top: sector.ceilingHeight,
+          bottom: sector.floorHeight + toFixed(8),
+          baseSpeed: fast ? toFixed(2) : kFracUnit,
+          slowsOnContact: !fast,
+          crush: (int nextCeiling) => _crushSector(index, nextCeiling),
+        );
+        activated = true;
+      }
+    }
+    return activated;
+  }
+
+  bool _stopCrushers(Linedef line) {
+    var stopped = false;
+    if (line.tag == 0) return false;
+    for (final int index in _runtime.sectorsWithTag(line.tag)) {
+      final SectorRuntime sector = _runtime.sectors[index];
+      final SectorMover? mover = sector.activeMover;
+      if (mover is _CrusherMover && !mover.stopped) {
+        mover.stop();
+        stopped = true;
+      }
+    }
+    return stopped;
+  }
+
+  bool _activateDonut(Linedef line) {
+    final int generation = ++_topologyVisitGeneration;
+    var visits = 0;
+
+    bool visit(int sector) {
+      if (sector < 0 || sector >= _runtime.sectors.length) return false;
+      if (_topologyVisitGenerations[sector] == generation) return true;
+      if (visits >= config.maxDonutBuildVisits) return false;
+      _topologyVisitGenerations[sector] = generation;
+      visits++;
+      return true;
+    }
+
+    int? firstNeighbor(int sector, {int? excluding}) {
+      for (final int lineIndex in _runtime.sectors[sector].touchingLinedefs) {
+        final int? other = _neighborAcross(sector, lineIndex);
+        if (other == null || other == excluding) continue;
+        if (!visit(other)) return null;
+        return other;
+      }
+      return null;
+    }
+
+    var activated = false;
+    if (line.tag == 0) return false;
+    for (final int inner in _runtime.sectorsWithTag(line.tag)) {
+      if (visits >= config.maxDonutBuildVisits) break;
+      final SectorRuntime hole = _runtime.sectors[inner];
+      if (!visit(inner) || hole.activeMover != null) continue;
+      final int? ring = firstNeighbor(inner);
+      if (ring == null) continue;
+      final SectorRuntime ringSector = _runtime.sectors[ring];
+      if (ringSector.activeMover != null) continue;
+      final int? outer = firstNeighbor(ring, excluding: inner);
+      if (outer == null) continue;
+      final SectorRuntime model = _runtime.sectors[outer];
+      hole.activeMover = _FloorMover(
+        hole,
+        model.floorHeight,
+        speed: kFracUnit ~/ 2,
+        obstructed: (int nextFloor) =>
+            _sectorObstructed(inner, floor: nextFloor),
+      );
+      ringSector.activeMover = _FloorMover(
+        ringSector,
+        model.floorHeight,
+        speed: kFracUnit ~/ 2,
+        obstructed: (int nextFloor) =>
+            _sectorObstructed(ring, floor: nextFloor),
+        transferFlat: model.floorFlat,
+        transferSpecial: 0,
+      );
+      activated = true;
+    }
+    return activated;
+  }
+
+  _SectorModel? _neighborModelAtFloor(int index, int floor) {
+    final int generation = ++_topologyVisitGeneration;
+    var visits = 0;
+    _topologyVisitGenerations[index] = generation;
+    visits++;
+    for (final int lineIndex in _runtime.sectors[index].touchingLinedefs) {
+      if (visits >= config.maxDonutBuildVisits) break;
+      final int? other = _neighborAcross(index, lineIndex);
+      if (other == null || _topologyVisitGenerations[other] == generation) {
+        continue;
+      }
+      _topologyVisitGenerations[other] = generation;
+      visits++;
+      final SectorRuntime model = _runtime.sectors[other];
+      if (model.floorHeight == floor) {
+        return _SectorModel(model.floorFlat, model.special);
+      }
+    }
+    return null;
+  }
+
+  void _setSectorFloorModel(
+    SectorRuntime sector,
+    String floorFlat,
+    int special,
+  ) {
+    if (sector.floorFlat != floorFlat) {
+      sector.floorFlat = floorFlat;
+      _changes.add(SectorChange.floorFlat(sector.index, floorFlat));
+    }
+    sector.special = special;
+  }
+
+  bool _crushSector(int index, int nextCeiling) {
+    var contact = false;
+    final List<Mobj> actors = List<Mobj>.of(_mobjs);
+    for (final Mobj m in actors) {
+      if (m.removed || m.sectorIndex != index) continue;
+      m.ceilingZ = nextCeiling;
+      if (m.z + m.height <= nextCeiling) continue;
+      contact = true;
+      if (m.health <= 0 || m.isCorpse) {
+        if (m.info.isMonster && m.state != MobjState.gibbedDeath) {
+          m.height = 0;
+          m.flags &= ~MobjFlags.solid;
+          _enterMobjState(m, MobjState.gibbedDeath);
+        }
+        continue;
+      }
+      if (!m.isShootable || (_tic & 3) != 0) continue;
+      if (identical(m, _playerMobj)) {
+        _damagePlayer(10);
+      } else {
+        _damage(m, 10, null);
+        _spawnBlood(m, 10);
+      }
+    }
+    return contact;
+  }
+
   bool _activateStairs(Linedef line) {
     final int generation = ++_stairVisitGeneration;
     var visits = 0;
     var activated = false;
-    for (int start = 0; start < _runtime.sectors.length; start++) {
+    if (line.tag == 0) return false;
+    for (final int start in _runtime.sectorsWithTag(line.tag)) {
       if (visits >= config.maxStairBuildVisits) break;
-      if (line.tag == 0 ||
-          _runtime.sectors[start].staticData.tag != line.tag ||
-          _stairVisitGenerations[start] == generation) {
+      if (_stairVisitGenerations[start] == generation) {
         continue;
       }
       final String floorFlat = _runtime.sectors[start].floorFlat;
@@ -1341,6 +1553,13 @@ class GameState {
           );
         }
         if (mover.finished) {
+          if (mover is _FloorMover && mover.transferFlat != null) {
+            _setSectorFloorModel(
+              s,
+              mover.transferFlat!,
+              mover.transferSpecial ?? s.special,
+            );
+          }
           if (mover is _LiftMover) _emitSectorSound('DSPSTOP', s.index);
           s.activeMover = null;
         }
@@ -1350,7 +1569,7 @@ class GameState {
 
   void _tickSectorEffects() {
     final SectorRuntime sector = _runtime.sectors[_playerMobj.sectorIndex];
-    switch (sector.staticData.special) {
+    switch (sector.special) {
       case SectorSpecial.damage5:
         if (_tic % 32 == 0) _damagePlayer(5);
       case SectorSpecial.damage10:
@@ -1362,7 +1581,7 @@ class GameState {
     }
     for (final SectorRuntime item in _runtime.sectors) {
       final int old = item.lightLevel;
-      final int special = item.staticData.special;
+      final int special = item.special;
       if (!_supportedSectorSpecials.contains(special)) continue;
       if (special == SectorSpecial.lightFlicker ||
           special == SectorSpecial.lightFlickerSync) {
@@ -1490,6 +1709,8 @@ class GameState {
     }
     if (monster.target == null) return false;
     _enterMobjState(monster, MobjState.see);
+    final String? seeSound = monster.info.seeSound;
+    if (seeSound != null) _emitMobjSound(seeSound, monster);
     return true;
   }
 
@@ -1643,6 +1864,19 @@ class GameState {
         m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
         if (approxDistance(target.x - m.x, target.y - m.y) < toFixed(64)) {
           final int damage = 3 + (_random.next() % 8);
+          if (identical(target, _playerMobj)) {
+            _damagePlayer(damage, source: m);
+          } else {
+            _damage(target, damage, m);
+          }
+        }
+      case MobjStateAction.demonMelee:
+        if (target == null || target.health <= 0) return;
+        final String? attackSound = m.info.attackSound;
+        if (attackSound != null) _emitMobjSound(attackSound, m);
+        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        if (approxDistance(target.x - m.x, target.y - m.y) < toFixed(64)) {
+          final int damage = 4 * (1 + (_random.next() % 10));
           if (identical(target, _playerMobj)) {
             _damagePlayer(damage, source: m);
           } else {
@@ -1826,14 +2060,16 @@ class GameState {
     return true;
   }
 
-  void _damage(Mobj target, int damage, Mobj source) {
+  void _damage(Mobj target, int damage, Mobj? source) {
     final int remainingHealth = target.health - damage;
     target.health = remainingHealth;
     final bool sameSpecies =
         target.info.isMonster &&
+        source != null &&
         source.info.isMonster &&
         target.info.id == source.info.id;
-    if (!identical(target, source) &&
+    if (source != null &&
+        !identical(target, source) &&
         (!sameSpecies || target.threshold == 0) &&
         source.health > 0) {
       target.target = source;
@@ -1852,9 +2088,11 @@ class GameState {
       target.flags &= ~(MobjFlags.shootable | MobjFlags.solid);
       target.height ~/= 4;
       _enterMobjState(target, deathState);
-      _emitMobjSound('DSPODTH1', target);
+      _emitMobjSound(target.info.deathSound ?? 'DSPODTH1', target);
     } else if (_random.chance(target.info.painChance)) {
       _enterMobjState(target, MobjState.pain);
+      final String? painSound = target.info.painSound;
+      if (painSound != null) _emitMobjSound(painSound, target);
     }
   }
 
@@ -1877,6 +2115,8 @@ class GameState {
       _playerMobj.momY = 0;
       _bob = 0;
       _deathViewHeight = _livingViewHeight;
+      _deathViewAngle = _playerMobj.angle;
+      _deathViewTarget = source;
       _pendingWeapon = null;
       _weaponPhase = WeaponPhase.ready;
       _weaponState = 0;
@@ -2123,6 +2363,10 @@ class GameState {
     add(config.monsters ? 1 : 0);
     add(config.maxSoundPropagationVisits);
     add(config.maxStairBuildVisits);
+    if (config.maxDonutBuildVisits != 65535) {
+      add(0x444f4e55); // "DONU": preserve the default replay schema.
+      add(config.maxDonutBuildVisits);
+    }
     add(_nextId);
     add(_useHeld ? 1 : 0);
     add(_health);
@@ -2166,6 +2410,12 @@ class GameState {
       add(s.floorHeight);
       add(s.ceilingHeight);
       add(s.lightLevel);
+      if (s.floorFlat != s.staticData.floorFlat ||
+          s.special != s.staticData.special) {
+        add(0x464d4f44); // "FMOD": mutable floor model follows.
+        add(stableReplayIdentity(s.floorFlat));
+        add(s.special);
+      }
       add(s.activeMover == null ? 0 : 1);
       for (final int word in s.activeMover?.hashWords ?? const <int>[]) {
         add(word);
@@ -2177,14 +2427,18 @@ class GameState {
       ..sort((Mobj a, Mobj b) => a.id.compareTo(b.id));
     for (final Mobj m in stableMobjs) {
       add(m.id);
-      add(m.info.id.index);
+      add(m.info.id.replayIdentity);
       add(m.x);
       add(m.y);
       add(m.z);
       add(m.angle);
       add(m.health);
       add(m.state.index);
-      add(m.frameState);
+      add(
+        m.frameState < 0
+            ? -1
+            : MobjStateTable.state(m.frameState)!.replayIdentity,
+      );
       add(m.flags);
       add(m.spriteFrame);
       add(m.momX);
@@ -2206,8 +2460,8 @@ class GameState {
       add(m.removed ? 1 : 0);
     }
     // _bob is a pure function of already-hashed tic and player momentum.
-    // _deathViewHeight is renderer-only camera descent and cannot influence a
-    // future tic, so it is deliberately excluded with the output journals.
+    // Death-view height, angle and target are renderer-only camera state and
+    // cannot influence a future tic, so they are excluded with the journals.
     // _changes, _sounds and _switchChanges are output journals: consuming them cannot affect simulation
     // state or future tics, so including it would make replay hashes depend on
     // renderer polling rather than seed + TicCmd stream.
@@ -2349,10 +2603,14 @@ class _FloorMover extends SectorMover {
     this.target, {
     required this.obstructed,
     this.speed = kFracUnit,
+    this.transferFlat,
+    this.transferSpecial,
   });
   final int target;
   final int speed;
   final bool Function(int nextFloor) obstructed;
+  final String? transferFlat;
+  final int? transferSpecial;
 
   @override
   bool tick() {
@@ -2372,7 +2630,85 @@ class _FloorMover extends SectorMover {
   }
 
   @override
-  Iterable<int> get hashWords => <int>[3, target, speed];
+  Iterable<int> get hashWords => <int>[
+    3,
+    target,
+    speed,
+    if (transferFlat != null) ...<int>[
+      0x464c4154,
+      stableReplayIdentity(transferFlat!),
+      transferSpecial ?? sector.special,
+    ],
+  ];
+}
+
+class _CrusherMover extends SectorMover {
+  _CrusherMover(
+    super.sector, {
+    required this.top,
+    required this.bottom,
+    required this.baseSpeed,
+    required this.slowsOnContact,
+    required this.crush,
+  }) : _speed = baseSpeed;
+
+  final int top;
+  final int bottom;
+  final int baseSpeed;
+  final bool slowsOnContact;
+  final bool Function(int nextCeiling) crush;
+  int _speed;
+  int _direction = -1;
+  bool stopped = false;
+
+  void stop() => stopped = true;
+  void restart() => stopped = false;
+
+  @override
+  bool tick() {
+    if (stopped) return false;
+    if (_direction < 0) {
+      int next = sector.ceilingHeight - _speed;
+      if (next < bottom) next = bottom;
+      sector.ceilingHeight = next;
+      final bool contacted = crush(next);
+      if (contacted && slowsOnContact && next > bottom) {
+        _speed = kFracUnit ~/ 8;
+      }
+      if (next <= bottom) {
+        _direction = 1;
+        _speed = baseSpeed;
+      }
+      return true;
+    }
+    int next = sector.ceilingHeight + _speed;
+    if (next > top) next = top;
+    sector.ceilingHeight = next;
+    if (next >= top) {
+      _direction = -1;
+      _speed = baseSpeed;
+    }
+    return true;
+  }
+
+  @override
+  Iterable<int> get hashWords => <int>[
+    4,
+    top,
+    bottom,
+    baseSpeed,
+    _speed,
+    slowsOnContact ? 1 : 0,
+    _direction,
+    stopped ? 1 : 0,
+  ];
+}
+
+class _SectorModel {
+  const _SectorModel(this.floorFlat, this.special);
+
+  final String floorFlat;
+  final int special;
 }
 
 enum _DoorKind { openWaitClose, openStay, close, closeWaitOpen }
@@ -2381,11 +2717,15 @@ enum _LineActivation { use, cross, shoot }
 
 enum _LineDispatchKind {
   useDoor,
+  useCrusher,
+  useDonut,
   useLift,
   useFloor,
   useStair,
   useExit,
   walkDoor,
+  walkCrusher,
+  walkCrusherStop,
   walkLift,
   walkFloor,
   walkStair,
@@ -2395,11 +2735,14 @@ enum _LineDispatchKind {
 
 enum _FloorTargetKind {
   raise24,
+  raise24AndChange,
   raiseToLowestCeilingMinus8,
   raiseToLowestCeiling,
   raiseToNextHigher,
+  raiseToNextHigherAndChange,
   lowerToHighest,
   lowerToLowest,
+  lowerToLowestAndChange,
   lowerTurbo,
 }
 
@@ -2418,11 +2761,28 @@ const Set<int> _useDoorSpecials = <int>{
   134,
 };
 const Set<int> _walkDoorSpecials = <int>{2, 3, 4, 16, 75, 86, 90};
+const Set<int> _useCrusherSpecials = <int>{49};
+const Set<int> _walkCrusherSpecials = <int>{6, 25, 73, 77};
+const Set<int> _walkCrusherStopSpecials = <int>{57, 74};
+const Set<int> _useDonutSpecials = <int>{9};
 const Set<int> _switchDoorSpecials = <int>{61, 99, 103, 134};
 const Set<int> _walkLiftSpecials = <int>{10, 88, 120, 121};
 const Set<int> _useLiftSpecials = <int>{21, 62, 122, 123};
-const Set<int> _walkFloorSpecials = <int>{5, 19, 36, 38, 58, 82, 91, 119, 128};
-const Set<int> _useFloorSpecials = <int>{18, 23};
+const Set<int> _walkFloorSpecials = <int>{
+  5,
+  19,
+  22,
+  36,
+  37,
+  38,
+  58,
+  59,
+  82,
+  91,
+  119,
+  128,
+};
+const Set<int> _useFloorSpecials = <int>{18, 20, 23};
 const Set<int> _walkStairSpecials = <int>{8};
 const Set<int> _useStairSpecials = <int>{7};
 const Set<int> _walkExitSpecials = <int>{52, 124};
@@ -2433,11 +2793,15 @@ const Map<int, _FloorTargetKind> _floorTargetKinds = <int, _FloorTargetKind>{
   5: _FloorTargetKind.raiseToLowestCeilingMinus8,
   18: _FloorTargetKind.raiseToNextHigher,
   19: _FloorTargetKind.lowerToHighest,
+  20: _FloorTargetKind.raiseToNextHigherAndChange,
+  22: _FloorTargetKind.raiseToNextHigherAndChange,
   23: _FloorTargetKind.lowerToLowest,
   24: _FloorTargetKind.raise24,
   36: _FloorTargetKind.lowerTurbo,
+  37: _FloorTargetKind.lowerToLowestAndChange,
   38: _FloorTargetKind.lowerToLowest,
   58: _FloorTargetKind.raise24,
+  59: _FloorTargetKind.raise24AndChange,
   82: _FloorTargetKind.lowerToLowest,
   91: _FloorTargetKind.raiseToLowestCeiling,
   119: _FloorTargetKind.raiseToNextHigher,
@@ -2446,6 +2810,10 @@ const Map<int, _FloorTargetKind> _floorTargetKinds = <int, _FloorTargetKind>{
 final Set<int> _supportedLineSpecials = Set<int>.unmodifiable(<int>{
   ..._useDoorSpecials,
   ..._walkDoorSpecials,
+  ..._useCrusherSpecials,
+  ..._walkCrusherSpecials,
+  ..._walkCrusherStopSpecials,
+  ..._useDonutSpecials,
   ..._switchDoorSpecials,
   ..._walkLiftSpecials,
   ..._useLiftSpecials,
@@ -2474,6 +2842,8 @@ const Set<int> _supportedSectorSpecials = <int>{
 const Set<String> _coreSoundIds = <String>{
   'DSDORCLS',
   'DSDOROPN',
+  'DSDMPAIN',
+  'DSDMACT',
   'DSITEMUP',
   'DSPISTOL',
   'DSPLPAIN',
@@ -2482,6 +2852,9 @@ const Set<String> _coreSoundIds = <String>{
   'DSPSTOP',
   'DSPUNCH',
   'DSSHOTGN',
+  'DSSGTATK',
+  'DSSGTDTH',
+  'DSSGTSIT',
   'DSSWTCHN',
   'DSSWTCHX',
   'DSWPNUP',
@@ -2513,17 +2886,40 @@ Key? _keyForMobjType(MobjType type) => switch (type) {
   MobjType.misc4 => Key.red,
   _ => null,
 };
-bool _isOneShotWalkSpecial(int special) =>
-    <int>{2, 3, 4, 5, 8, 10, 16, 19, 36, 38, 58, 119, 121}.contains(special);
+bool _isOneShotWalkSpecial(int special) => <int>{
+  2,
+  3,
+  4,
+  5,
+  6,
+  8,
+  10,
+  16,
+  19,
+  22,
+  25,
+  36,
+  37,
+  38,
+  57,
+  58,
+  59,
+  119,
+  121,
+}.contains(special);
 bool _isRepeatableSwitchSpecial(int special) =>
     <int>{61, 62, 99, 123, 134}.contains(special);
 bool _isOneShotSwitchSpecial(int special) =>
-    <int>{7, 11, 18, 21, 23, 24, 51, 103, 122}.contains(special);
+    <int>{7, 9, 11, 18, 20, 21, 23, 24, 49, 51, 103, 122}.contains(special);
 
 _LineDispatchKind? _lineDispatchKind(int special, _LineActivation activation) =>
     switch (activation) {
       _LineActivation.use when _useDoorSpecials.contains(special) =>
         _LineDispatchKind.useDoor,
+      _LineActivation.use when _useCrusherSpecials.contains(special) =>
+        _LineDispatchKind.useCrusher,
+      _LineActivation.use when _useDonutSpecials.contains(special) =>
+        _LineDispatchKind.useDonut,
       _LineActivation.use when _useLiftSpecials.contains(special) =>
         _LineDispatchKind.useLift,
       _LineActivation.use when _useFloorSpecials.contains(special) =>
@@ -2534,6 +2930,10 @@ _LineDispatchKind? _lineDispatchKind(int special, _LineActivation activation) =>
         _LineDispatchKind.useExit,
       _LineActivation.cross when _walkDoorSpecials.contains(special) =>
         _LineDispatchKind.walkDoor,
+      _LineActivation.cross when _walkCrusherSpecials.contains(special) =>
+        _LineDispatchKind.walkCrusher,
+      _LineActivation.cross when _walkCrusherStopSpecials.contains(special) =>
+        _LineDispatchKind.walkCrusherStop,
       _LineActivation.cross when _walkLiftSpecials.contains(special) =>
         _LineDispatchKind.walkLift,
       _LineActivation.cross when _walkFloorSpecials.contains(special) =>
@@ -2556,6 +2956,8 @@ List<String> linedefDispatcherCoverageIssuesForTesting() {
       <_LineActivation, List<Set<int>>>{
         _LineActivation.use: <Set<int>>[
           _useDoorSpecials,
+          _useCrusherSpecials,
+          _useDonutSpecials,
           _useLiftSpecials,
           _useFloorSpecials,
           _useStairSpecials,
@@ -2563,6 +2965,8 @@ List<String> linedefDispatcherCoverageIssuesForTesting() {
         ],
         _LineActivation.cross: <Set<int>>[
           _walkDoorSpecials,
+          _walkCrusherSpecials,
+          _walkCrusherStopSpecials,
           _walkLiftSpecials,
           _walkFloorSpecials,
           _walkStairSpecials,
@@ -2605,6 +3009,23 @@ List<String> linedefDispatcherCoverageIssuesForTesting() {
     issues.add('monster walk classifier contains an unsupported special');
   }
   return List<String>.unmodifiable(issues);
+}
+
+/// Internal test seam for timing donut candidate lookup without including the
+/// unrelated whole-map work performed by a simulation tic.
+bool activateDonutForTesting(GameState game, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= game._runtime.map.linedefs.length) {
+    throw RangeError.index(lineIndex, game._runtime.map.linedefs, 'lineIndex');
+  }
+  final Linedef line = game._runtime.map.linedefs[lineIndex];
+  if (line.special != LineSpecial.switchDonutOnce) {
+    throw ArgumentError.value(
+      line.special,
+      'lineIndex',
+      'must identify a donut special',
+    );
+  }
+  return game._activateDonut(line);
 }
 
 /// One stable public entry point for format-data capability auditing.
@@ -2682,6 +3103,48 @@ const MobjInfo _impInfo = MobjInfo(
   damage: 3,
   spriteName: 'TROO',
   flags: MobjFlags.solid | MobjFlags.shootable | MobjFlags.countKill,
+);
+const MobjInfo _demonInfo = MobjInfo(
+  id: MobjType.sergeant,
+  doomEdNum: 3002,
+  spawnHealth: 150,
+  radius: 30,
+  height: 56,
+  mass: 400,
+  speed: 10,
+  reactionTime: 8,
+  painChance: 180,
+  damage: 0,
+  spriteName: 'SARG',
+  flags: MobjFlags.solid | MobjFlags.shootable | MobjFlags.countKill,
+  seeSound: 'DSSGTSIT',
+  attackSound: 'DSSGTATK',
+  painSound: 'DSDMPAIN',
+  deathSound: 'DSSGTDTH',
+  activeSound: 'DSDMACT',
+);
+const MobjInfo _spectreInfo = MobjInfo(
+  id: MobjType.spectre,
+  doomEdNum: 58,
+  spawnHealth: 150,
+  radius: 30,
+  height: 56,
+  mass: 400,
+  speed: 10,
+  reactionTime: 8,
+  painChance: 180,
+  damage: 0,
+  spriteName: 'SARG',
+  flags:
+      MobjFlags.solid |
+      MobjFlags.shootable |
+      MobjFlags.shadow |
+      MobjFlags.countKill,
+  seeSound: 'DSSGTSIT',
+  attackSound: 'DSSGTATK',
+  painSound: 'DSDMPAIN',
+  deathSound: 'DSSGTDTH',
+  activeSound: 'DSDMACT',
 );
 const MobjInfo _impShotInfo = MobjInfo(
   id: MobjType.troopshot,
@@ -3033,11 +3496,167 @@ const MobjInfo _barrelInfo = MobjInfo(
   spriteName: 'BAR1',
   flags: MobjFlags.solid | MobjFlags.shootable,
 );
+const MobjInfo _floorLampInfo = MobjInfo(
+  id: MobjType.misc31,
+  doomEdNum: 2028,
+  spawnHealth: 1000,
+  radius: 16,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'COLU',
+  flags: MobjFlags.solid,
+);
+const MobjInfo _techPillarInfo = MobjInfo(
+  id: MobjType.misc48,
+  doomEdNum: 48,
+  spawnHealth: 1000,
+  radius: 16,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'ELEC',
+  flags: MobjFlags.solid,
+);
+const MobjInfo _candleInfo = MobjInfo(
+  id: MobjType.misc49,
+  doomEdNum: 34,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'CAND',
+  flags: 0,
+);
+const MobjInfo _candelabraInfo = MobjInfo(
+  id: MobjType.misc50,
+  doomEdNum: 35,
+  spawnHealth: 1000,
+  radius: 16,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'CBRA',
+  flags: MobjFlags.solid,
+);
+const MobjInfo _deadPlayerInfo = MobjInfo(
+  id: MobjType.misc62,
+  doomEdNum: 15,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PLAY',
+  flags: 0,
+);
+const MobjInfo _deadZombieInfo = MobjInfo(
+  id: MobjType.misc63,
+  doomEdNum: 18,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'POSS',
+  flags: 0,
+);
+const MobjInfo _deadDemonInfo = MobjInfo(
+  id: MobjType.misc64,
+  doomEdNum: 21,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'SARG',
+  flags: 0,
+);
+const MobjInfo _deadImpInfo = MobjInfo(
+  id: MobjType.misc66,
+  doomEdNum: 20,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'TROO',
+  flags: 0,
+);
+const MobjInfo _deadShotgunGuyInfo = MobjInfo(
+  id: MobjType.misc67,
+  doomEdNum: 19,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'SPOS',
+  flags: 0,
+);
+const MobjInfo _bloodyMess1Info = MobjInfo(
+  id: MobjType.misc68,
+  doomEdNum: 10,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PLAY',
+  flags: 0,
+);
+const MobjInfo _bloodyMess2Info = MobjInfo(
+  id: MobjType.misc69,
+  doomEdNum: 12,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'PLAY',
+  flags: 0,
+);
 MobjInfo? _infoForEdNum(int n) => switch (n) {
   1 => _playerInfo,
   3004 => _possessedInfo,
   9 => _shotguyInfo,
   3001 => _impInfo,
+  3002 => _demonInfo,
+  58 => _spectreInfo,
   2007 => _clipInfo,
   2001 => _shotgunInfo,
   2002 => _chaingunInfo,
@@ -3060,5 +3679,16 @@ MobjInfo? _infoForEdNum(int n) => switch (n) {
   2026 => _computerMapInfo,
   2045 => _lightAmplificationInfo,
   2035 => _barrelInfo,
+  2028 => _floorLampInfo,
+  48 => _techPillarInfo,
+  34 => _candleInfo,
+  35 => _candelabraInfo,
+  15 => _deadPlayerInfo,
+  18 => _deadZombieInfo,
+  21 => _deadDemonInfo,
+  20 => _deadImpInfo,
+  19 => _deadShotgunGuyInfo,
+  10 => _bloodyMess1Info,
+  12 => _bloodyMess2Info,
   _ => null,
 };

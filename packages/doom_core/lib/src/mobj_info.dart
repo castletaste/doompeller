@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'replay_identity.dart';
+
 /// Static description of an actor class.
 ///
 /// These are the tuning constants that make Doom feel like Doom: how much
@@ -202,4 +204,29 @@ enum MobjType {
   radiationSuit,
   computerMap,
   lightAmplification,
+
+  /// Demon gameplay with the classic shadow-rendering flag.
+  spectre,
+}
+
+final Map<MobjType, int> _mobjTypeReplayIdentities = () {
+  final Map<MobjType, int> identities = <MobjType, int>{};
+  final Map<int, String> namesByIdentity = <int, String>{};
+  for (final MobjType type in MobjType.values) {
+    final int identity = stableReplayIdentity(type.name);
+    final String? existing = namesByIdentity[identity];
+    if (existing != null) {
+      throw StateError(
+        'MobjType replay identity collision: $existing and ${type.name}',
+      );
+    }
+    namesByIdentity[identity] = type.name;
+    identities[type] = identity;
+  }
+  return Map<MobjType, int>.unmodifiable(identities);
+}();
+
+extension MobjTypeReplayIdentity on MobjType {
+  /// Stable semantic identity used by the deterministic replay oracle.
+  int get replayIdentity => _mobjTypeReplayIdentities[this]!;
 }

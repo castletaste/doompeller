@@ -45,4 +45,12 @@ void main() {
     expect(shader, contains('gl_Position.z = gl_Position.w * 0.999999;'));
     expect(shader, contains('gl_Position.z = -gl_Position.w * 0.999999;'));
   });
+
+  test('palette shader uses dithered COLORMAP approximation for spectres', () {
+    final shader = File('shaders/doom_palette.frag').readAsStringSync();
+    expect(shader, contains('bool fuzz = abs(fragAlpha - 0.5) < 0.01;'));
+    expect(shader, contains('gl_FragCoord'));
+    expect(shader, contains('lightRow = max(lightRow'));
+    expect(shader, contains('float alpha = fuzz ? 1.0'));
+  });
 }

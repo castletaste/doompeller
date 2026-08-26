@@ -64,6 +64,18 @@ class CompiledLevel {
   int setFloorHeight(int sector, double height) =>
       _applyPlane(floorPlanes, sector, height);
 
+  /// Changes a compiled floor's atlas rectangle without rebuilding geometry.
+  int setFloorFlat(int sector, String flatName) {
+    final AtlasEntry? entry = atlas.entry(flatName);
+    if (entry == null) throw DoomMissingLumpFailure(flatName);
+    for (final SectorPlaneRef plane in floorPlanes) {
+      if (plane.sector == sector) {
+        return plane.applyTexture(meshes, entry, atlas.pageSize);
+      }
+    }
+    return 0;
+  }
+
   /// Moves a sector's ceiling.
   int setCeilingHeight(int sector, double height) =>
       _applyPlane(ceilingPlanes, sector, height);
@@ -352,6 +364,7 @@ class _Compiler {
 
     // 5. Atlas.
     final AtlasBuilder atlasBuilder = AtlasBuilder(textures, options);
+    final List<List<String>> flatTransferGroups = _flatTransferGroups();
     var usesSky = false;
     for (var s = 0; s < sectorCount; s++) {
       usesSky =
@@ -383,6 +396,12 @@ class _Compiler {
       }
       atlasBuilder.addCoLocated(animation.frames);
     }
+    for (final List<String> group in flatTransferGroups) {
+      for (final String flat in group) {
+        atlasBuilder.addFlat(flat);
+      }
+      atlasBuilder.addCoLocated(group);
+    }
     for (final DoomSwitchPair pair in textures.switchPairs) {
       if (!usedPictures.contains(pair.offName) &&
           !usedPictures.contains(pair.onName)) {
@@ -403,6 +422,18 @@ class _Compiler {
         limitName: 'maxAtlasPixels',
         limit: options.limits.maxAtlasPixels,
       );
+    }
+    for (final List<String> group in flatTransferGroups) {
+      final List<AtlasEntry> entries = <AtlasEntry>[
+        for (final String name in group)
+          if (atlas.entry(name) case final AtlasEntry entry) entry,
+      ];
+      if (entries.length > 1) {
+        atlas.requireSamePage(
+          entries,
+          description: 'floor transfer ${group.join('->')}',
+        );
+      }
     }
     final Set<String> missingTextures = <String>{...walls.missingTextures};
     for (var s = 0; s < sectorCount; s++) {
@@ -850,6 +881,117 @@ class _Compiler {
       }
     }
     return result;
+  }
+
+  List<List<String>> _flatTransferGroups() {
+    const Set<int> frontModelSpecials = <int>{20, 22, 59};
+    final List<List<int>> touching = List<List<int>>.generate(
+      map.sectors.length,
+      (_) => <int>[],
+      growable: false,
+    );
+    for (var lineIndex = 0; lineIndex < map.linedefs.length; lineIndex++) {
+      final Linedef line = map.linedefs[lineIndex];
+      touching[map.sidedefs[line.rightSidedef].sector].add(lineIndex);
+      if (line.leftSidedef != kNoSidedef) {
+        touching[map.sidedefs[line.leftSidedef].sector].add(lineIndex);
+      }
+    }
+
+    int? neighbor(int sector, int lineIndex) {
+      final Linedef line = map.linedefs[lineIndex];
+      if (line.leftSidedef == kNoSidedef) return null;
+      final int front = map.sidedefs[line.rightSidedef].sector;
+      final int back = map.sidedefs[line.leftSidedef].sector;
+      if (front == sector) return back;
+      if (back == sector) return front;
+      return null;
+    }
+
+    final List<List<String>> groups = <List<String>>[];
+    final Map<int, List<int>> sectorsByTag = <int, List<int>>{};
+    for (var sector = 0; sector < map.sectors.length; sector++) {
+      final int tag = map.sectors[sector].tag;
+      if (tag != 0) {
+        sectorsByTag.putIfAbsent(tag, () => <int>[]).add(sector);
+      }
+    }
+    final List<int> generations = List<int>.filled(map.sectors.length, 0);
+    var generation = 0;
+    for (final Linedef trigger in map.linedefs) {
+      if (frontModelSpecials.contains(trigger.special)) {
+        final int source = map.sidedefs[trigger.rightSidedef].sector;
+        for (final int target in sectorsByTag[trigger.tag] ?? const <int>[]) {
+          groups.add(<String>[
+            map.sectors[target].floorFlat,
+            map.sectors[source].floorFlat,
+          ]);
+        }
+      } else if (trigger.special == 37) {
+        for (final int target in sectorsByTag[trigger.tag] ?? const <int>[]) {
+          int? model;
+          var lowest = map.sectors[target].floorHeight;
+          for (final int lineIndex in touching[target]) {
+            final int? other = neighbor(target, lineIndex);
+            if (other != null && map.sectors[other].floorHeight < lowest) {
+              lowest = map.sectors[other].floorHeight;
+            }
+          }
+          for (final int lineIndex in touching[target]) {
+            final int? other = neighbor(target, lineIndex);
+            if (other != null && map.sectors[other].floorHeight == lowest) {
+              model = other;
+              break;
+            }
+          }
+          if (model != null) {
+            groups.add(<String>[
+              map.sectors[target].floorFlat,
+              map.sectors[model].floorFlat,
+            ]);
+          }
+        }
+      } else if (trigger.special == 9) {
+        generation++;
+        var visits = 0;
+        bool visit(int sector) {
+          if (generations[sector] == generation) return true;
+          if (visits >= options.limits.maxSectors) return false;
+          generations[sector] = generation;
+          visits++;
+          return true;
+        }
+
+        for (final int inner in sectorsByTag[trigger.tag] ?? const <int>[]) {
+          if (visits >= options.limits.maxSectors) break;
+          if (!visit(inner)) break;
+          int? ring;
+          for (final int lineIndex in touching[inner]) {
+            final int? candidate = neighbor(inner, lineIndex);
+            if (candidate != null && visit(candidate)) {
+              ring = candidate;
+              break;
+            }
+          }
+          if (ring == null) continue;
+          int? outer;
+          for (final int lineIndex in touching[ring]) {
+            final int? candidate = neighbor(ring, lineIndex);
+            if (candidate != null && candidate != inner && visit(candidate)) {
+              outer = candidate;
+              break;
+            }
+          }
+          if (outer != null) {
+            groups.add(<String>[
+              map.sectors[ring].floorFlat,
+              map.sectors[outer].floorFlat,
+            ]);
+          }
+        }
+      }
+    }
+    return groups;
   }
 
   static double _length(double dx, double dy) {

@@ -665,11 +665,11 @@ void main() {
     );
   });
 
-  test('dead player ignores movement, turn and attack while view descends', () {
+  test('dead player ignores input while view descends and faces killer', () {
     final GameState game = GameState.start(
       testMap(
         things: const <Thing>[
-          Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 32, y: 64, angle: 180, type: 1, flags: _skills),
           Thing(x: 72, y: 64, angle: 180, type: 3001, flags: _skills),
           Thing(x: 76, y: 40, angle: 180, type: 3001, flags: _skills),
           Thing(x: 76, y: 88, angle: 180, type: 3001, flags: _skills),
@@ -683,7 +683,7 @@ void main() {
     }
     expect(game.player.health, 0);
     final PlayerView dead = game.player;
-    for (var tic = 0; tic < 20; tic++) {
+    for (var tic = 0; tic < 40; tic++) {
       game.runTic(
         const TicCmd(
           forwardMove: 50,
@@ -695,7 +695,14 @@ void main() {
     }
     expect(game.player.x, dead.x);
     expect(game.player.y, dead.y);
-    expect(game.player.angle, dead.angle);
+    expect(
+      game.player.angle,
+      isIn(<int>{
+        0,
+        Trig.atan2(toFixed(-24), toFixed(44)),
+        Trig.atan2(toFixed(24), toFixed(44)),
+      }),
+    );
     expect(game.player.ammo.bullets, dead.ammo.bullets);
     expect(game.player.viewZ, lessThan(dead.viewZ));
   });

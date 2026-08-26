@@ -24,7 +24,10 @@ void main() {
     expect(prepared.geometry.report.fallbackSectors, isEmpty);
     expect(prepared.geometry.report.geometryHash, 0x50a4e123);
     expect(prepared.geometry.meshes, isNotEmpty);
-    expect(prepared.game.player.health, 100);
+    final first = prepared.createGame();
+    final second = prepared.createGame();
+    expect(first.player.health, 100);
+    expect(second, isNot(same(first)));
     expect(
       prepared.initialSpritePrefixes,
       containsAll(<String>{'PLAY', 'POSS', 'TROO', 'SPOS'}),

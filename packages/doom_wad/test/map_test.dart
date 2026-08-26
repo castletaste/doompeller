@@ -32,7 +32,7 @@ void main() {
 
       expect(map.name, 'MAP01');
       expect(map.sectors.length, 5);
-      expect(map.things.length, 13);
+      expect(map.things.length, 26);
       expect(map.vertices, isNotEmpty);
       expect(map.linedefs, isNotEmpty);
       expect(map.sidedefs, isNotEmpty);

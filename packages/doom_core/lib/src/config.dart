@@ -13,8 +13,10 @@ class GameConfig {
     // cannot use an instance-field read as a default parameter expression.
     this.maxSoundPropagationVisits = 65535,
     this.maxStairBuildVisits = 65535,
+    this.maxDonutBuildVisits = 65535,
   }) : assert(maxSoundPropagationVisits > 0),
-       assert(maxStairBuildVisits > 0);
+       assert(maxStairBuildVisits > 0),
+       assert(maxDonutBuildVisits > 0);
 
   final Skill skill;
   final int maxCatchUpTics;
@@ -28,6 +30,9 @@ class GameConfig {
   /// Maximum sectors one stair-building activation may inspect and schedule.
   /// This protects the tic from cyclic or adversarial sector graphs.
   final int maxStairBuildVisits;
+
+  /// Maximum sectors one donut/flat-model topology walk may inspect.
+  final int maxDonutBuildVisits;
 }
 
 enum Weapon { fist, pistol, shotgun, chaingun }

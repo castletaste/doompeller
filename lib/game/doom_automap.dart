@@ -99,6 +99,32 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
   @visibleForTesting
   int publicationCount = 0;
 
+  /// Restores the same UI-only state used when this notifier was constructed.
+  /// The notifier itself is retained so widget listeners never accumulate.
+  void reset(PlayerView player) {
+    _visitedLines
+      ..clear()
+      ..addAll(<int>{
+        for (var index = 0; index < _map.linedefs.length; index++)
+          if ((_map.linedefs[index].flags & LinedefFlags.mapped) != 0) index,
+      });
+    for (var index = 0; index < _map.sectors.length; index++) {
+      _sectorFloors[index] = _map.sectors[index].floorHeight.toDouble();
+      _sectorCeilings[index] = _map.sectors[index].ceilingHeight.toDouble();
+    }
+    _lastDiscoveredSector = null;
+    value = DoomAutomapSnapshot(
+      isOpen: false,
+      zoom: initialZoom,
+      playerX: fixedToDouble(player.x),
+      playerY: fixedToDouble(player.y),
+      playerAngle: player.angle,
+      visitedLines: Set<int>.unmodifiable(_visitedLines),
+      sectorFloors: List<double>.unmodifiable(_sectorFloors),
+      sectorCeilings: List<double>.unmodifiable(_sectorCeilings),
+    );
+  }
+
   void toggle() => _publish(isOpen: !value.isOpen);
 
   void zoomIn() => _setZoom(value.zoom * _zoomStep);

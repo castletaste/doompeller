@@ -91,4 +91,6 @@ abstract interface class DoomRuntimeView {
   void zoomAutomap({required bool inwards});
 
   void clearInput();
+
+  void restartLevel();
 }

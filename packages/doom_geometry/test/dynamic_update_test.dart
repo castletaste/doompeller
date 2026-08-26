@@ -67,6 +67,126 @@ void main() {
     expect(level.setFloorHeight(0, 40), 0);
   });
 
+  test('floor transfer rewrites only the retained plane atlas rectangles', () {
+    final MapBuilder b = MapBuilder('FLATXFER');
+    final int source = b.sector(floorFlat: 'FLOOR4_8');
+    final int target = b.sector(floorFlat: 'FLOOR0_1', tag: 7);
+    b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], source);
+    b.solidLoop(<int>[128, 0, 256, 0, 256, 128, 128, 128], target);
+    final int v1 = b.vertex(128, 128);
+    final int v2 = b.vertex(128, 0);
+    b.line(
+      v1: v1,
+      v2: v2,
+      right: b.sidedef(sector: source),
+      left: b.sidedef(sector: target),
+      special: 59,
+      tag: 7,
+    );
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(buildNodes: false),
+      testTextures(),
+    );
+    final SectorPlaneRef plane = level.floorPlanes.firstWhere(
+      (SectorPlaneRef item) => item.sector == target,
+    );
+    final AtlasEntry sourceEntry = level.atlas.entry('FLOOR4_8')!;
+    expect(
+      level.atlas.entry('FLOOR0_1')!.page,
+      sourceEntry.page,
+      reason: 'runtime-mutated flat pair must share one material page',
+    );
+
+    expect(level.setFloorFlat(target, 'FLOOR4_8'), plane.vertexCount);
+    expect(plane.textureName, 'FLOOR4_8');
+    for (final VertexRange range in plane.ranges) {
+      final PackedMesh mesh = level.meshes[range.meshIndex];
+      for (
+        var vertex = range.firstVertex;
+        vertex < range.firstVertex + range.vertexCount;
+        vertex++
+      ) {
+        final int offset =
+            vertex * DoomVertexAbi.floatsPerVertex +
+            DoomVertexAbi.atlasRectOffset;
+        expect(mesh.vertices.sublist(offset, offset + 4), <double>[
+          sourceEntry.u0(level.atlas.pageSize),
+          sourceEntry.v0(level.atlas.pageSize),
+          sourceEntry.u1(level.atlas.pageSize),
+          sourceEntry.v1(level.atlas.pageSize),
+        ]);
+      }
+    }
+  });
+
+  test('floor-transfer co-location overflow is a typed compile failure', () {
+    final MapBuilder b = MapBuilder('FLATXFERLIMIT');
+    final int source = b.sector(floorFlat: 'FLOOR4_8');
+    final int target = b.sector(floorFlat: 'FLOOR0_1', tag: 7);
+    b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], source);
+    b.solidLoop(<int>[64, 0, 128, 0, 128, 64, 64, 64], target);
+    final int v1 = b.vertex(64, 64);
+    final int v2 = b.vertex(64, 0);
+    b.line(
+      v1: v1,
+      v2: v2,
+      right: b.sidedef(sector: source),
+      left: b.sidedef(sector: target),
+      special: 59,
+      tag: 7,
+    );
+    expect(
+      () => DoomGeometryCompiler.compileWithTextures(
+        b.build(buildNodes: false),
+        testTextures(),
+        options: const GeometryOptions(atlasPageSize: 64),
+      ),
+      throwsA(isA<DoomLimitFailure>()),
+    );
+  });
+
+  test('cross-page floor mutation is a typed failure', () {
+    final CompiledLevel level = _compile();
+    final SectorPlaneRef floor = level.floorPlanes.first;
+    final int currentPage =
+        level.meshes[floor.ranges.first.meshIndex].atlasPage;
+    final AtlasEntry crossPage = AtlasEntry(
+      name: 'CROSS',
+      page: currentPage + 1,
+      x: 0,
+      y: 0,
+      width: 64,
+      height: 64,
+      tiling: true,
+      leftOffset: 0,
+      topOffset: 0,
+    );
+    final CompiledLevel malformed = CompiledLevel(
+      meshes: level.meshes,
+      atlas: IndexedAtlas(
+        pages: level.atlas.pages,
+        pageSize: level.atlas.pageSize,
+        entries: <String, AtlasEntry>{
+          ...level.atlas.entries,
+          crossPage.name: crossPage,
+        },
+        overflowed: level.atlas.overflowed,
+        totalPixels: level.atlas.totalPixels,
+      ),
+      floorPlanes: level.floorPlanes,
+      ceilingPlanes: level.ceilingPlanes,
+      wallBands: level.wallBands,
+      animations: level.animations,
+      switchFrames: level.switchFrames,
+      report: level.report,
+      skyTextureName: level.skyTextureName,
+    );
+    expect(
+      () => malformed.setFloorFlat(floor.sector, crossPage.name),
+      throwsA(isA<DoomFormatFailure>()),
+    );
+  });
+
   test('an open door\'s upper band tracks the ceiling as it closes', () {
     // A door is compiled in its CLOSED state and opened at runtime, not the
     // other way around. That is not a test convenience, it is the requirement:
@@ -152,11 +272,7 @@ void main() {
     b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], room);
     final int v1 = b.vertex(128, 0);
     final int v2 = b.vertex(128, 128);
-    final int front = b.sidedef(
-      sector: room,
-      lower: 'STARTAN3',
-      yOffset: 0,
-    );
+    final int front = b.sidedef(sector: room, lower: 'STARTAN3', yOffset: 0);
     final int back = b.sidedef(sector: lift, lower: 'STARTAN3');
     b.line(
       v1: v2,
@@ -172,8 +288,7 @@ void main() {
       testTextures(),
     );
     final WallBandRef lower = level.wallBands.firstWhere(
-      (WallBandRef w) =>
-          w.band == WallBandKind.lower && w.frontSector == room,
+      (WallBandRef w) => w.band == WallBandKind.lower && w.frontSector == room,
     );
     final List<double> floors = <double>[0, 128];
     final List<double> ceilings = <double>[128, 128];
@@ -195,22 +310,14 @@ void main() {
     final int v2 = b.vertex(128, 128);
     final int front = b.sidedef(sector: room, upper: 'BIGDOOR2');
     final int back = b.sidedef(sector: door, upper: 'BIGDOOR2');
-    b.line(
-      v1: v2,
-      v2: v1,
-      right: front,
-      left: back,
-      special: 1,
-      tag: 0,
-    );
+    b.line(v1: v2, v2: v1, right: front, left: back, special: 1, tag: 0);
     b.solidLoop(<int>[128, 0, 256, 0, 256, 128, 128, 128], door);
     final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
       b.build(),
       testTextures(),
     );
     final WallBandRef upper = level.wallBands.firstWhere(
-      (WallBandRef w) =>
-          w.band == WallBandKind.upper && w.frontSector == room,
+      (WallBandRef w) => w.band == WallBandKind.upper && w.frontSector == room,
     );
     expect(upper.top, upper.bottom);
     final List<double> floors = <double>[0, 0];

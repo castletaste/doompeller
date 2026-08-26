@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'atlas.dart';
+import 'wad_types.dart';
 
 /// Packed GPU buffers and the in-place update handles the runtime needs.
 ///
@@ -162,6 +163,15 @@ class PackedMesh {
             DoomVertexAbi.colorOffset] =
         light;
   }
+
+  void setVertexAtlasRect(int vertex, AtlasEntry entry, int atlasPageSize) {
+    final int offset =
+        vertex * DoomVertexAbi.floatsPerVertex + DoomVertexAbi.atlasRectOffset;
+    vertices[offset] = entry.u0(atlasPageSize);
+    vertices[offset + 1] = entry.v0(atlasPageSize);
+    vertices[offset + 2] = entry.u1(atlasPageSize);
+    vertices[offset + 3] = entry.v1(atlasPageSize);
+  }
 }
 
 /// A contiguous run of vertices inside one mesh.
@@ -196,7 +206,7 @@ class SectorPlaneRef {
 
   final int sector;
   final bool isCeiling;
-  final String textureName;
+  String textureName;
   final List<VertexRange> ranges;
 
   /// Height at compile time, the value the packed buffers were built with.
@@ -230,6 +240,34 @@ class SectorPlaneRef {
       final int end = range.firstVertex + range.vertexCount;
       for (var v = range.firstVertex; v < end; v++) {
         mesh.setVertexHeight(v, height);
+      }
+      touched += range.vertexCount;
+    }
+    return touched;
+  }
+
+  int applyTexture(
+    List<PackedMesh> meshes,
+    AtlasEntry entry,
+    int atlasPageSize,
+  ) {
+    if (textureName == entry.name) return 0;
+    for (final VertexRange range in ranges) {
+      final int page = meshes[range.meshIndex].atlasPage;
+      if (page != entry.page) {
+        throw DoomFormatFailure(
+          'sector $sector floor transfer ${entry.name} spans atlas pages '
+          '$page and ${entry.page}',
+        );
+      }
+    }
+    textureName = entry.name;
+    var touched = 0;
+    for (final VertexRange range in ranges) {
+      final PackedMesh mesh = meshes[range.meshIndex];
+      final int end = range.firstVertex + range.vertexCount;
+      for (var vertex = range.firstVertex; vertex < end; vertex++) {
+        mesh.setVertexAtlasRect(vertex, entry, atlasPageSize);
       }
       touched += range.vertexCount;
     }

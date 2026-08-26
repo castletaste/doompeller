@@ -61,6 +61,15 @@ void main() {
   float fullBright = fragParams.x;
   float lightRowOverride = fragParams.y;
   float uvMode = fragParams.z;
+  // Spectres mark actor vertices with alpha 0.5. True vanilla fuzz remaps a
+  // neighbouring pixel from the already-rendered framebuffer, which the
+  // current one-pass material cannot sample. Ordered screen-space holes keep
+  // the actor genuinely see-through without alpha-sort or depth-write errors;
+  // the surviving pixels still go through a dark COLORMAP row.
+  bool fuzz = abs(fragAlpha - 0.5) < 0.01;
+  if (fuzz && mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) {
+    discard;
+  }
 
   vec2 atlasMin = fragAtlasRect.xy;
   vec2 atlasMax = fragAtlasRect.zw;
@@ -114,6 +123,9 @@ void main() {
   }
 
   lightRow = clamp(lightRow, 0.0, max(colorMapRows - 1.0, 0.0));
+  if (fuzz) {
+    lightRow = max(lightRow, floor(maxLightRow * 0.75));
+  }
 
   // COLORMAP maps (palette index, light level) to a darker palette index.
   float mappedIndex = floor(texture(colorMapLut, vec2(
@@ -137,7 +149,7 @@ void main() {
   )).rgb;
 
   // paletteColor is used verbatim. Do not tint it.
-  float alpha = clamp(fragAlpha, 0.0, 1.0);
+  float alpha = fuzz ? 1.0 : clamp(fragAlpha, 0.0, 1.0);
 
   // The render pass blends with premultiplied alpha, so premultiply here. With
   // the normal alpha of 1.0 this is an identity operation and the palette RGB

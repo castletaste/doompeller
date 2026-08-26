@@ -47,6 +47,7 @@ final class DoomRuntimeGame extends FlameGame3D
       if (level.content.isFixture) 'TEST',
     };
     final Set<String> packed = requested.intersection(availablePrefixes);
+    final GameState gameState = level.createGame();
     final scene = DoomScene.fromCompiledLevel(
       level.geometry,
       level.resources,
@@ -55,10 +56,11 @@ final class DoomRuntimeGame extends FlameGame3D
         for (final sector in level.map.sectors) sector.lightLevel,
       ],
     );
-    final player = level.game.player;
+    final player = gameState.player;
     return DoomRuntimeGame._(
       level,
       scene,
+      gameState,
       input ?? DoomInputState(),
       onLevelComplete,
       SoundPlaybackManager(
@@ -73,31 +75,31 @@ final class DoomRuntimeGame extends FlameGame3D
   DoomRuntimeGame._(
     this.level,
     this.scene,
+    this.gameState,
     this.input,
     this._onLevelComplete,
     this._soundPlayback, {
     required CameraComponent3D camera,
     required Set<String> packedSpritePrefixes,
-  }) : gameState = level.game,
-       tickDriver = FixedTickDriver(
-         maxTicsPerFrame: level.game.config.maxCatchUpTics,
+  }) : tickDriver = FixedTickDriver(
+         maxTicsPerFrame: gameState.config.maxCatchUpTics,
        ),
        _packedSpritePrefixes = Set<String>.unmodifiable(packedSpritePrefixes),
-       _previousPlayer = level.game.player,
-       _currentPlayer = level.game.player,
-       _automap = DoomAutomapState(level.map, level.game.player),
+       _previousPlayer = gameState.player,
+       _currentPlayer = gameState.player,
+       _automap = DoomAutomapState(level.map, gameState.player),
        _sectorFloors = <double>[
-         for (final sector in level.game.sectors)
+         for (final sector in gameState.sectors)
            fixedToDouble(sector.floorHeight),
        ],
        _sectorCeilings = <double>[
-         for (final sector in level.game.sectors)
+         for (final sector in gameState.sectors)
            fixedToDouble(sector.ceilingHeight),
        ],
        super(camera: camera) {
     _automap.updatePlayer(
-      level.game.player,
-      sectorIndex: level.game.playerSectorIndex,
+      gameState.player,
+      sectorIndex: gameState.playerSectorIndex,
     );
     _syncActors();
     _syncWeapon(force: true);
@@ -107,8 +109,8 @@ final class DoomRuntimeGame extends FlameGame3D
 
   final PreparedDoomLevel level;
   final DoomScene scene;
-  final GameState gameState;
-  final FixedTickDriver tickDriver;
+  GameState gameState;
+  FixedTickDriver tickDriver;
   final DoomInputState input;
   final DoomLevelCompleteCallback? _onLevelComplete;
   final Set<String> _packedSpritePrefixes;
@@ -116,14 +118,13 @@ final class DoomRuntimeGame extends FlameGame3D
   final List<double> _sectorCeilings;
   final Map<int, ActorSpriteComponent> _actors = <int, ActorSpriteComponent>{};
   final Set<String> _reportedMissingSprites = <String>{};
-  final ValueNotifier<DoomHudSnapshot> _hud = ValueNotifier<DoomHudSnapshot>(
-    const DoomHudSnapshot.initial(),
-  );
+  final _CountingValueNotifier<DoomHudSnapshot> _hud =
+      _CountingValueNotifier<DoomHudSnapshot>(const DoomHudSnapshot.initial());
   final DoomAutomapState _automap;
+  late final _CountingValueListenable<DoomAutomapSnapshot> _automapListenable =
+      _CountingValueListenable<DoomAutomapSnapshot>(_automap);
   final SoundPlaybackManager _soundPlayback;
-  late final DoomCoreSoundJournal _soundJournal = DoomCoreSoundJournal(
-    gameState,
-  );
+  late DoomCoreSoundJournal _soundJournal = DoomCoreSoundJournal(gameState);
   Future<void> _soundPlaybackTail = Future<void>.value();
 
   PlayerView _previousPlayer;
@@ -138,7 +139,7 @@ final class DoomRuntimeGame extends FlameGame3D
   ValueListenable<DoomHudSnapshot> get hud => _hud;
 
   @override
-  ValueListenable<DoomAutomapSnapshot> get automap => _automap;
+  ValueListenable<DoomAutomapSnapshot> get automap => _automapListenable;
 
   bool get isPaused => _paused;
   int get actorComponentCount => _actors.length;
@@ -146,6 +147,12 @@ final class DoomRuntimeGame extends FlameGame3D
   String? get weaponFrame => _weaponSprite?.lumpName;
   String? get weaponFlashFrame => _weaponFlashSprite?.lumpName;
   bool get weaponFlashVisible => _weaponFlashSprite?.visible ?? false;
+
+  @visibleForTesting
+  int get hudListenerCountForTest => _hud.listenerCount;
+
+  @visibleForTesting
+  int get automapListenerCountForTest => _automapListenable.listenerCount;
 
   ActorSpriteComponent? actorComponentForTest(int id) => _actors[id];
 
@@ -281,6 +288,11 @@ final class DoomRuntimeGame extends FlameGame3D
             sectorIndex: change.sector,
             lightLevel: change.value,
           );
+        case PlaneKind.floorFlat:
+          scene.updateSectorFloorFlat(
+            sectorIndex: change.sector,
+            flatName: change.flatName,
+          );
       }
     }
     for (final sector in automapHeightChanges) {
@@ -351,6 +363,7 @@ final class DoomRuntimeGame extends FlameGame3D
             actorAngle: angle,
             light: actor.lightLevel / 255.0,
             fullBright: actor.fullBright,
+            fuzz: (actor.flags & MobjFlags.shadow) != 0,
           ),
         );
         if (updated) {
@@ -369,6 +382,7 @@ final class DoomRuntimeGame extends FlameGame3D
           actorAngle: angle,
           light: actor.lightLevel / 255.0,
           fullBright: actor.fullBright,
+          fuzz: (actor.flags & MobjFlags.shadow) != 0,
         ),
       );
       if (component == null) {
@@ -512,9 +526,15 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   @override
-  void setPointerAttack(bool pressed) => pressed
-      ? input.press(DoomControl.attack)
-      : input.release(DoomControl.attack);
+  void setPointerAttack(bool pressed) {
+    if (pressed && gameState.player.health <= 0) {
+      restartLevel();
+      return;
+    }
+    pressed
+        ? input.press(DoomControl.attack)
+        : input.release(DoomControl.attack);
+  }
 
   @override
   void addPointerYaw(double deltaX) {
@@ -533,6 +553,37 @@ final class DoomRuntimeGame extends FlameGame3D
 
   @override
   void clearInput() => input.clear();
+
+  @override
+  void restartLevel() {
+    input.clear();
+    _soundPlaybackTail = _soundPlaybackTail.then(
+      (_) => _soundPlayback.stopAll(),
+    );
+    gameState = level.createGame();
+    tickDriver = FixedTickDriver(
+      maxTicsPerFrame: gameState.config.maxCatchUpTics,
+    );
+    _soundJournal = DoomCoreSoundJournal(gameState);
+    _paused = false;
+    _completionReported = false;
+    _fractionalMicros = 0;
+    _previousPlayer = gameState.player;
+    _currentPlayer = gameState.player;
+    var sector = 0;
+    for (final runtimeSector in gameState.sectors) {
+      _sectorFloors[sector] = fixedToDouble(runtimeSector.floorHeight);
+      _sectorCeilings[sector] = fixedToDouble(runtimeSector.ceilingHeight);
+      sector++;
+    }
+    scene.resetDynamicState(level.map);
+    _automap.reset(_currentPlayer);
+    _weaponFlashSprite?.setVisible(false);
+    _syncActors();
+    _syncWeapon(force: true);
+    _syncCamera(0);
+    _publishHud();
+  }
 
   @override
   void onRemove() {
@@ -554,6 +605,16 @@ final class DoomRuntimeGame extends FlameGame3D
     final bool down = event is KeyDownEvent || event is KeyRepeatEvent;
     final bool up = event is KeyUpEvent;
     final key = event.logicalKey;
+    if (down &&
+        event is! KeyRepeatEvent &&
+        gameState.player.health <= 0 &&
+        (key == LogicalKeyboardKey.controlLeft ||
+            key == LogicalKeyboardKey.controlRight ||
+            key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.keyE)) {
+      restartLevel();
+      return KeyEventResult.handled;
+    }
     DoomControl? control;
     if (key == LogicalKeyboardKey.keyW || key == LogicalKeyboardKey.arrowUp) {
       control = DoomControl.forward;
@@ -635,4 +696,48 @@ final class DoomRuntimeGame extends FlameGame3D
   /// flame_3d/catalog yaw uses zero at world +Z; Doom BAM zero faces +X.
   static double worldActorYawForBam(int angle) =>
       _bamRadians(angle) + math.pi / 2;
+}
+
+final class _CountingValueNotifier<T> extends ValueNotifier<T> {
+  _CountingValueNotifier(super.value);
+
+  int listenerCount = 0;
+
+  @override
+  void addListener(VoidCallback listener) {
+    super.addListener(listener);
+    listenerCount++;
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (listenerCount > 0) {
+      listenerCount--;
+    }
+  }
+}
+
+final class _CountingValueListenable<T> implements ValueListenable<T> {
+  _CountingValueListenable(this._source);
+
+  final ValueListenable<T> _source;
+  int listenerCount = 0;
+
+  @override
+  T get value => _source.value;
+
+  @override
+  void addListener(VoidCallback listener) {
+    _source.addListener(listener);
+    listenerCount++;
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    _source.removeListener(listener);
+    if (listenerCount > 0) {
+      listenerCount--;
+    }
+  }
 }

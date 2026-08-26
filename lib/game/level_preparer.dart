@@ -12,19 +12,30 @@ final class PreparedDoomLevel {
     required this.resources,
     required this.map,
     required this.geometry,
-    required this.game,
+    required this.gameConfig,
+    required this.seed,
   });
 
   final DoomContent content;
   final WadResources resources;
   final MapData map;
   final CompiledLevel geometry;
-  final GameState game;
+  final GameConfig gameConfig;
+  final int seed;
 
-  /// Actor sprite prefixes that exist at level start. Projectiles and weapon
-  /// overlays are added by the renderer's explicit supplemental sprite list.
+  /// Recreates only the deterministic simulation over this prepared level.
+  /// Parsed WAD resources and compiled GPU-ready geometry stay shared.
+  GameState createGame() => GameState.start(map, gameConfig, seed: seed);
+
+  /// Actor sprite prefixes declared by the immutable source THINGS. This must
+  /// never depend on a live [GameState], because pickups and deaths remove or
+  /// change actors before another runtime is assembled from this level.
+  /// Projectiles and weapon overlays are added by the renderer's explicit
+  /// supplemental sprite list.
   Set<String> get initialSpritePrefixes => <String>{
-    for (final MobjView actor in game.mobjs) actor.sprite,
+    for (final thing in map.things)
+      if (DoomCoreCatalog.infoForEdNum(thing.type) case final MobjInfo info)
+        info.spriteName,
   };
 }
 
@@ -70,14 +81,13 @@ final class DoomLevelPreparer {
       options: geometryOptions,
     );
     token.throwIfCancelled();
-    final GameState game = GameState.start(map, gameConfig, seed: seed);
-    token.throwIfCancelled();
     return PreparedDoomLevel(
       content: content,
       resources: resources,
       map: map,
       geometry: geometry,
-      game: game,
+      gameConfig: gameConfig,
+      seed: seed,
     );
   }
 }

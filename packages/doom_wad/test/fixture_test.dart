@@ -36,15 +36,16 @@ void main() {
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      // Removing seven impossible weapon lamps deliberately changes the bytes.
-      expect(DoomFixtures.hash(), 0x038a0b410fcfa3aa);
+      // The E1 actor expansion deliberately adds generated sprite and sound
+      // lumps plus map things; no commercial bytes participate in this pin.
+      expect(DoomFixtures.hash(), 0x9b9fd35265121407);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(DoomFixtures.pwadBytes().lengthInBytes, 434551);
-      expect(wad.length, 162);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 494332);
+      expect(wad.length, 187);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -180,6 +181,19 @@ void main() {
         2008: 2,
         2011: 4,
         2018: 4,
+        3002: 2,
+        58: 2,
+        2028: 0,
+        48: 1,
+        34: 0,
+        35: 0,
+        10: 2,
+        12: 2,
+        15: 2,
+        18: 4,
+        19: 4,
+        20: 4,
+        21: 4,
       };
       expect(map.things.length, expectedSectorByType.length);
       for (final Thing thing in map.things) {

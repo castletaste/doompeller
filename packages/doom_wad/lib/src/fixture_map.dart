@@ -245,6 +245,19 @@ class FixtureGeometry {
     builder.addThing(x: 736, y: 224, angle: 0, type: 2008, flags: 7);
     builder.addThing(x: 832, y: 64, angle: 0, type: 2011, flags: 7);
     builder.addThing(x: 832, y: 192, angle: 0, type: 2018, flags: 7);
+    builder.addThing(x: 544, y: 224, angle: 0, type: 3002, flags: 7);
+    builder.addThing(x: 736, y: 32, angle: 180, type: 58, flags: 7);
+    builder.addThing(x: 224, y: 32, angle: 0, type: 2028, flags: 7);
+    builder.addThing(x: 320, y: 64, angle: 0, type: 48, flags: 7);
+    builder.addThing(x: 32, y: 224, angle: 0, type: 34, flags: 7);
+    builder.addThing(x: 224, y: 224, angle: 0, type: 35, flags: 7);
+    builder.addThing(x: 544, y: 32, angle: 0, type: 10, flags: 7);
+    builder.addThing(x: 544, y: 96, angle: 0, type: 12, flags: 7);
+    builder.addThing(x: 544, y: 160, angle: 0, type: 15, flags: 7);
+    builder.addThing(x: 800, y: 32, angle: 0, type: 18, flags: 7);
+    builder.addThing(x: 800, y: 224, angle: 0, type: 19, flags: 7);
+    builder.addThing(x: 992, y: 224, angle: 0, type: 20, flags: 7);
+    builder.addThing(x: 992, y: 32, angle: 0, type: 21, flags: 7);
 
     return FixtureGeometry._(
       builder.vertices,

@@ -14,6 +14,7 @@ class SectorRuntime {
     : floorHeight = toFixed(staticData.floorHeight),
       ceilingHeight = toFixed(staticData.ceilingHeight),
       lightLevel = staticData.lightLevel,
+      special = staticData.special,
       floorFlat = staticData.floorFlat,
       ceilingFlat = staticData.ceilingFlat;
 
@@ -25,6 +26,7 @@ class SectorRuntime {
   int ceilingHeight;
 
   int lightLevel;
+  int special;
   String floorFlat;
   String ceilingFlat;
 

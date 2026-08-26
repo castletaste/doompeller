@@ -236,6 +236,11 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     }
   }
 
+  void _restartLevel() {
+    _runtime.restartLevel();
+    _gameFocusNode.requestFocus();
+  }
+
   Widget _buildGameSurface(BuildContext context) {
     final custom = widget.gameSurfaceBuilder;
     if (custom != null) {
@@ -353,7 +358,7 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                     bottom: 0,
                     child: DoomStatusBar(hud: hud, synthetic: widget.synthetic),
                   ),
-                  if (hud.paused)
+                  if (hud.paused && hud.health > 0)
                     _ModalOverlay(
                       key: const Key('pause-overlay'),
                       title: 'PAUSED',
@@ -365,6 +370,15 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                     _IntermissionOverlay(
                       key: const Key('completion-overlay'),
                       hud: hud,
+                      onRestart: _restartLevel,
+                    ),
+                  if (hud.health <= 0 && !hud.levelComplete)
+                    _ModalOverlay(
+                      key: const Key('death-overlay'),
+                      title: 'YOU DIED',
+                      subtitle: 'Press fire or use to restart the level',
+                      onPressed: _restartLevel,
+                      buttonLabel: 'RESTART LEVEL',
                     ),
                 ],
               ),
@@ -571,9 +585,14 @@ final class _StatusValue extends StatelessWidget {
 }
 
 final class _IntermissionOverlay extends StatefulWidget {
-  const _IntermissionOverlay({super.key, required this.hud});
+  const _IntermissionOverlay({
+    super.key,
+    required this.hud,
+    required this.onRestart,
+  });
 
   final DoomHudSnapshot hud;
+  final VoidCallback onRestart;
 
   @override
   State<_IntermissionOverlay> createState() => _IntermissionOverlayState();
@@ -681,6 +700,12 @@ final class _IntermissionOverlayState extends State<_IntermissionOverlay>
                     'CLICK OR PRESS ANY KEY TO FINISH TALLY',
                     style: TextStyle(color: Colors.white54, fontSize: 10),
                   ),
+                  const SizedBox(height: 16),
+                  FilledButton.tonal(
+                    key: const Key('intermission-restart'),
+                    onPressed: widget.onRestart,
+                    child: const Text('RESTART LEVEL'),
+                  ),
                 ],
               );
             },
@@ -772,7 +797,11 @@ final class _ModalOverlay extends StatelessWidget {
         children: <Widget>[
           Text(
             title,
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Color(0xFFC8B45A),
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
           ),
           const SizedBox(height: 8),
           Text(subtitle, style: const TextStyle(color: Colors.white70)),

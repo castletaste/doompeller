@@ -145,6 +145,7 @@ class TicCmd { int forwardMove, sideMove, angleTurn; int buttons; }
 
 class GameState {
   static GameState start(MapData map, GameConfig config, {int seed});
+  int get initialSeed;                     // exact restart seed, hash-neutral
   void runTic(TicCmd cmd);
   int get tic;
   int get playerSectorIndex;          // read-only current sector for UI discovery
@@ -180,12 +181,18 @@ single public capability-audit entry point: its linedef set is assembled from
 the exact dispatcher classifier sets; actor/key lookups share spawn and pickup
 classification; sound ids are the canonical DS lump names emitted by the core.
 
+`GameConfig.maxDonutBuildVisits` bounds donut and floor-model topology walks,
+also defaults to 65535, and is hashed with a versioned sentinel when non-default
+so the established default replay schema remains stable.
+
 Monster awareness stores the latest live sound target per reached sector.
 Traversal uses pre-indexed touching linedefs, crosses at most one
 `ML_SOUNDBLOCK` boundary, observes current two-sided openings, and caps both
 queue growth and visits at the configured budget. Sector sound targets, ambush
 state, individual reaction/threshold/move counters and actor targets are all
-hashed; death-camera descent is visual-only and excluded.
+hashed; death-camera descent and turn toward the killer are visual-only and
+excluded. They alter `PlayerView` presentation but never the hashed player
+actor angle or a future simulation decision.
 
 ### doom_core M4/M5 supported special subset
 
@@ -198,26 +205,30 @@ The core classifies specials by their explicit map-format values in
 | locked door | 26/32 blue, 27/34 yellow, 28/33 red | requires collected key, otherwise leaves the line inactive; wait-close for 26/27/28, stay-open for 32/33/34 |
 | switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; S1 stays pressed, SR resets after 35 tics |
 | walk doors | W1 2 open-stay, 3 close, 4 open-wait-close, 16 close-wait-open; WR 75 close, 86 open-stay, 90 open-wait-close | tagged sectors only; normal speed; waits 150 tics at top and 1050 tics for close-wait-open; closing never damages an obstructing live actor; W1 consumes the line, WR may retrigger |
+| crushers | W1 6 fast, 25 normal; S1 49 normal; WR 73 normal, 77 fast; stop W1 57 / WR 74 | ceiling cycles from its initial height to floor+8; normal speed is one unit/tic and slows to 1/8 on contact, fast stays two; every fourth tic deals 10 damage and crushed monster corpses gib; stopped crushers retain their future direction for restart; doors remain non-crushing |
 | lifts | 10, 21, 62, 88, 120..123 | sector floor descends to lowest neighbour, waits 35 tics, then returns |
 | raise floors | 5 walk / 24 gun to eight below lowest neighbouring ceiling; S1 18 and W1/WR 119/128 to next higher neighbouring floor; W1 58 by 24; WR 91 to lowest neighbouring ceiling | tagged sectors use distinct height queries; W1/S1 are one-shot, WR retriggers after the previous mover completes |
+| raise and change | S1 20 / W1 22 to next higher floor; W1 59 by 24 | 20/22 move at half speed, take the trigger front-sector flat immediately and clear the sector special; 59 moves at floor speed and immediately takes the front-sector flat and special |
 | lower floors | W1 19 to highest neighbour, 36 turbo to highest neighbour plus 8, 38 to lowest neighbour; S1 23 and WR 82 to lowest neighbour | tagged sectors; normal one-unit speed except 36 at four units/tic; lowering cannot crush |
+| lower and change | W1 37 | lowers at one unit/tic; on arrival takes flat and special from the first neighbouring model at the destination height |
 | stairs | S1 7, W1 8 | raises a directed front-to-back chain of same-floor-flat sectors in successive 8-unit steps at quarter floor speed; traversal and queue growth stop at `maxStairBuildVisits` |
+| donut | S1 9 | tagged inner floor and surrounding ring converge on the outer model height at half speed; the ring takes the outer flat and clears its special; topology visits stop at `maxDonutBuildVisits` |
 | switch exit (S1) | 11 normal, 51 secret | front-side player use, once; records `levelComplete` and secret-trigger intent |
 | walk exit (W1) | 52 normal, 124 secret | player crossing in either direction, once; records the same completion state |
 | sector effects | 1..5, 7..9, 11..13, 17 | deterministic flicker/strobe/glow journals light deltas; 5/7/11 damage at 32-tic cadence; 9 increments one-time secret count |
 
-The implementation does **not** claim demo compatibility, crusher/ceiling
-behaviour, floor texture/special transfer (37/59 and raise-nearest-and-change
-variants 20/22), generalized Boom specials, teleporters, donut 9, or a complete
-commercial-E1M1 audit. Those need separate work and runtime verification with
-the developer-local WAD, never a committed asset.
+The implementation does **not** claim demo compatibility, generalized Boom
+specials, teleporters, the remaining classic ceiling/floor/platform families,
+or a complete commercial-E1M1 audit. The supported crushers, floor-model
+transfers and donut above have synthetic deterministic coverage but still need
+runtime verification with the developer-local WAD, never a committed asset.
 
 Collision treats a loaded `BLOCKMAP` as advisory candidate ordering, not as
 authority: candidates are unioned with the loader-bounded canonical linedef
 list. This intentionally favors fail-closed E1M1 correctness over broadphase
 speed until a separately validated pure-Dart spatial index replaces the union.
 
-`GameState.changeJournal` retains ordered floor, ceiling, and light records
+`GameState.changeJournal` retains ordered floor, ceiling, light, and floor-flat records
 until `consumeChangeJournal()` is called. This prevents a renderer that misses
 one 35 Hz tic from silently losing an earlier plane update; consuming returns
 an immutable snapshot and clears the pending records.
@@ -234,12 +245,15 @@ tics and Y are hashed because they gate future firing. The flash lamp and its
 visual-only lifetime are excluded. The adapter maps lamp indices to exact
 supplemental sprite names and never makes firing decisions.
 
-Actor animation uses a clean-room Dart state table. The exact table cursor is
-hashed in addition to the coarse phase, frame and remaining tics because two
-consecutive records may deliberately display the same lamp but have different
-successors. `MobjView.fullBright` and `lightLevel` carry the selected record and
-current sector light into the adapter; these renderer-facing values are derived
-from that already-hashed actor/sector state.
+Actor animation uses a clean-room Dart state table. The stable FNV-1a identity
+of the selected record's semantic name is hashed in addition to the coarse
+phase, frame and remaining tics because two consecutive records may
+deliberately display the same lamp but have different successors. Actor types
+are identified the same way from `MobjType.name`; neither identity depends on
+an enum index or physical table cursor, so unrelated insertions do not move the
+replay oracle. `MobjView.fullBright` and `lightLevel` carry the selected record
+and current sector light into the adapter; these renderer-facing values are
+derived from that already-hashed actor/sector state.
 
 Classic flat/wall animation ranges and switch pairs are clean-room Dart data.
 Flat ranges follow WAD directory order; wall ranges follow TEXTURE1/TEXTURE2
@@ -268,12 +282,16 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0x35ec969a` for seed 7 and its documented twenty-command stream. The combat
-oracle is pinned at `0x8a4407a8`. Both pins changed only because the new
-future-affecting `maxStairBuildVisits` ruleset word is hashed; isolated runs
-without a stair special confirmed no gameplay/RNG divergence. Spawn order
-is intentionally part of deterministic identity and therefore part of the
-hash; actor hashing itself sorts by stable actor id.
+`0xc8b5532e` for seed 7 and its documented twenty-command stream. It changed
+when the generated fixture gained ordered demon, spectre and decoration actors:
+the actors and their published reaction delays are future-affecting, and the
+two monsters consume the shared chase RNG in map order. The isolated combat
+oracle is pinned at `0xfb2f66ba`. Both pins use semantic actor/state identities;
+inserting an unused actor state or actor type does not change them. The
+generated PWAD itself is pinned at
+`0x9b9fd35265121407` and 494332 bytes. Spawn order is intentionally part of
+deterministic identity and therefore part of the hash; actor hashing itself
+sorts by stable actor id.
 
 ## lib/adapter public API
 
@@ -290,6 +308,11 @@ class DoomScene { ... }                            // builds MeshComponents, upd
 referenced vertices and reuse dirty-range uploads. Every animation/switch group
 is packed atomically on one page; exceeding `maxAtlasPixels` is a typed compile
 failure, never a silently dropped frame.
+
+`DoomScene.updateSectorFloorFlat(sectorIndex, flatName)` uses the same atlas-rect
+dirty-range path for mutable floors. The geometry compiler transitively merges
+overlapping animation and floor-transfer co-location groups; a missing entry or
+cross-page mutation is a typed failure rather than a material mismatch.
 
 ## Frame budget
 

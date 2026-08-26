@@ -40,6 +40,7 @@ void main() {
     expect(first.totalSecrets, 1);
     expect(first.player.keys, contains(Key.blue));
     expect(first.mobjs.length, lessThanOrEqualTo(initialActors));
+    expect(hashes.last, 0xe0202f8e);
 
     final GameState second = GameState.start(
       map,

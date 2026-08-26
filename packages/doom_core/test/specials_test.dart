@@ -678,6 +678,39 @@ void main() {
       expect(game.player.x, lessThan(toFixed(128)));
     });
 
+    test('MAXMOVE plus split movement cannot tunnel through a thin wall', () {
+      final GameState game = GameState.start(
+        testMap(
+          vertices: const <MapVertex>[MapVertex(64, 0), MapVertex(64, 128)],
+          lines: const <Linedef>[
+            Linedef(
+              v1: 0,
+              v2: 1,
+              flags: LinedefFlags.blocking,
+              special: 0,
+              tag: 0,
+              rightSidedef: 0,
+              leftSidedef: kNoSidedef,
+            ),
+          ],
+          things: const <Thing>[
+            Thing(x: 32, y: 64, angle: 0, type: 1, flags: _allSkills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+      );
+
+      // Deliberately outside the input adapter's normal range: without the
+      // momentum clamp both half-move endpoints land beyond the thin wall.
+      game.runTic(const TicCmd(forwardMove: 4000));
+
+      print(
+        'thin-wall clamp: playerX='
+        '${fixedToDouble(game.player.x).toStringAsFixed(6)} wallX=64',
+      );
+      expect(game.player.x, lessThanOrEqualTo(toFixed(48)));
+    });
+
     test('two sided opening permits movement', () {
       final MapData map = testMap(
         sectors: twoSectors(),
@@ -703,7 +736,7 @@ void main() {
         ),
         const GameConfig(monsters: false),
       );
-      for (int i = 0; i < 12; i++) {
+      for (int i = 0; i < 60; i++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }
       expect(game.player.z, toFixed(24));
@@ -718,7 +751,7 @@ void main() {
         ),
         const GameConfig(monsters: false),
       );
-      for (int i = 0; i < 12; i++) {
+      for (int i = 0; i < 60; i++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }
       expect(game.player.x, greaterThan(toFixed(128)));
@@ -827,7 +860,7 @@ void main() {
           map,
           const GameConfig(monsters: false),
         );
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 60; i++) {
           game.runTic(const TicCmd(forwardMove: 10));
         }
         expect(game.player.x, lessThan(toFixed(112)));
@@ -2286,7 +2319,7 @@ void main() {
           ),
           const GameConfig(monsters: false),
         );
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 60; i++) {
           game.runTic(const TicCmd(forwardMove: 10));
         }
         expect(game.levelComplete, isFalse, reason: 'special $special');
@@ -2304,7 +2337,7 @@ void main() {
           ),
           const GameConfig(monsters: false),
         );
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 60; i++) {
           normal.runTic(const TicCmd(forwardMove: 10));
         }
         expect(normal.levelComplete, isTrue);
@@ -2321,7 +2354,7 @@ void main() {
           ),
           const GameConfig(monsters: false),
         );
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 60; i++) {
           secret.runTic(const TicCmd(forwardMove: 10));
         }
         expect(secret.levelComplete, isTrue);
@@ -2354,7 +2387,7 @@ void main() {
         map,
         const GameConfig(monsters: false),
       );
-      for (int i = 0; i < 20; i++) {
+      for (int i = 0; i < 60; i++) {
         game.runTic(const TicCmd(forwardMove: 10));
       }
       expect(game.levelComplete, isTrue);

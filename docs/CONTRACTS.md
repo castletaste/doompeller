@@ -289,16 +289,23 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xc8b5532e` for seed 7 and its documented twenty-command stream. It changed
-when the generated fixture gained ordered demon, spectre and decoration actors:
-the actors and their published reaction delays are future-affecting, and the
-two monsters consume the shared chase RNG in map order. The isolated combat
-oracle is pinned at `0xfb2f66ba`. Both pins use semantic actor/state identities;
-inserting an unused actor state or actor type does not change them. The
-generated PWAD itself is pinned at
+`0xf2b9c9a9` for seed 7 and its documented twenty-command stream. It changed
+when player thrust was corrected from one fixed-point unit to 2048 fixed-point
+steps per command unit, so the same input stream now records classic-scale
+positions and momentum. The isolated combat oracle remains pinned at
+`0xfb2f66ba`: its hash is sampled before that test's movement assertion, so the
+movement-scale change does not affect it. Both pins use semantic actor/state
+identities; inserting an unused actor state or actor type does not change them.
+The generated PWAD itself is pinned at
 `0x9b9fd35265121407` and 494332 bytes. Spawn order is intentionally part of
 deterministic identity and therefore part of the hash; actor hashing itself
 sorts by stable actor id.
+
+The synthetic MAP97 completion stream is separately pinned at `0xe0202f8e`
+after its movement holds were lengthened for classic-scale thrust. The
+developer-local shareware E1M1 traversal observed `0x85cbc43b` for its generated
+1629-command stream; its test replays and compares that generated stream rather
+than hard-coding the hash for every possible legal IWAD supplied by path.
 
 ## lib/adapter public API
 

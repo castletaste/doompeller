@@ -130,20 +130,50 @@ void main() {
     expect(count, 0);
   });
 
-  test('maximum forward impulse keeps bob at the vanilla peak', () {
+  test('walk input converges on the fixed-point terminal speed', () {
     final GameState game = GameState.start(
-      testMap(),
+      testMap(vertices: const <MapVertex>[], lines: const <Linedef>[]),
       const GameConfig(monsters: false),
     );
-    game.runTic(const TicCmd(forwardMove: 50));
-    for (int i = 0; i < 4; i++) {
-      game.runTic(TicCmd.empty);
+    int previousX = game.player.x;
+    int delta = 0;
+    for (int i = 0; i < 1000; i++) {
+      game.runTic(const TicCmd(forwardMove: 25));
+      delta = game.player.x - previousX;
+      previousX = game.player.x;
     }
-    expect(game.player.bob, 0x7fff8);
-    for (int i = 0; i < 100; i++) {
-      game.runTic(const TicCmd(forwardMove: 50));
-      expect(game.player.bob.abs(), lessThanOrEqualTo(toFixed(8)));
+    print(
+      'walk terminal speed: fixed=$delta '
+      'units=${fixedToDouble(delta).toStringAsFixed(6)}/tic',
+    );
+    expect(delta, 546123);
+  });
+
+  test('bob remains speed-dependent and bounded at vanilla movement scale', () {
+    GameState movingGame() => GameState.start(
+      testMap(vertices: const <MapVertex>[], lines: const <Linedef>[]),
+      const GameConfig(monsters: false),
+    );
+
+    final GameState walk = movingGame();
+    final GameState run = movingGame();
+    int walkPeak = 0;
+    int runPeak = 0;
+    for (int i = 0; i < 200; i++) {
+      walk.runTic(const TicCmd(forwardMove: 25));
+      run.runTic(const TicCmd(forwardMove: 50));
+      walkPeak = walkPeak < walk.player.bob.abs()
+          ? walk.player.bob.abs()
+          : walkPeak;
+      runPeak = runPeak < run.player.bob.abs() ? run.player.bob.abs() : runPeak;
     }
+    print(
+      'bob peaks: walk=${fixedToDouble(walkPeak).toStringAsFixed(6)} '
+      'run=${fixedToDouble(runPeak).toStringAsFixed(6)}',
+    );
+    expect(walkPeak, greaterThan(0));
+    expect(walkPeak, lessThan(runPeak));
+    expect(runPeak, lessThanOrEqualTo(toFixed(8)));
   });
 
   test('camera stays below the current moving sector ceiling', () {
@@ -240,11 +270,10 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    // The generated fixture now includes demon, spectre and decoration things.
-    // Their ordered actor ids/state records are future-affecting and hashed;
-    // the two extra monsters also start with their published reaction delay
-    // and then consume the shared chase RNG in map order.
-    expect(a.hashState(), 0xc8b5532e);
+    // Classic-scale player thrust changes the recorded position and momentum;
+    // ordered actor ids, state records, and shared chase RNG remain part of the
+    // same future-affecting replay identity.
+    expect(a.hashState(), 0xf2b9c9a9);
   });
 
   test('replay hash ignores an unused actor-state table insertion', () {

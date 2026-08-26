@@ -19,14 +19,14 @@ abstract final class DoomPlaythroughReplay {
     ..._travelTaps(3),
     const TicCmd(buttons: Buttons.use),
     ..._repeat(20, TicCmd.empty),
-    const TicCmd(forwardMove: 25),
+    ..._travelTaps(1),
     ..._repeat(20, TicCmd.empty),
     const TicCmd(buttons: Buttons.use), // Lower the lift.
     ..._repeat(12, TicCmd.empty),
-    const TicCmd(forwardMove: 25),
+    ..._travelTaps(1),
     ..._repeat(15, TicCmd.empty),
     ..._repeat(60, TicCmd.empty), // Ride through down/wait/up.
-    const TicCmd(forwardMove: 25),
+    ..._travelTaps(1),
     ..._repeat(20, TicCmd.empty),
     const TicCmd(buttons: Buttons.use),
   ]);
@@ -40,7 +40,7 @@ List<TicCmd> _repeat(int count, TicCmd command) =>
 
 List<TicCmd> _travelTaps(int count) => <TicCmd>[
   for (var tap = 0; tap < count; tap++) ...<TicCmd>[
-    const TicCmd(forwardMove: 25),
+    ..._repeat(28, const TicCmd(forwardMove: 25)),
     ..._repeat(20, TicCmd.empty),
   ],
 ];

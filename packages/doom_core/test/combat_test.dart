@@ -469,7 +469,7 @@ void main() {
       // Actor and exact frame-state identities are semantic, so unrelated enum
       // or table insertions cannot move this pin.
       expect(game.hashState(), 0xfb2f66ba);
-      for (var tic = 0; tic < 10; tic++) {
+      for (var tic = 0; tic < 30; tic++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }
       expect(game.player.x, greaterThan(toFixed(80)));
@@ -610,14 +610,33 @@ void main() {
         const GameConfig(),
         seed: 2,
       );
-      for (int i = 0; i < 36; i++) {
+      MobjView? spawned;
+      for (int i = 0; i < 100 && spawned == null; i++) {
         game.runTic(TicCmd.empty);
+        final List<MobjView> liveShots = game.mobjs
+            .where(
+              (MobjView m) =>
+                  m.sprite == 'BAL1' && (m.flags & MobjFlags.missile) != 0,
+            )
+            .toList();
+        if (liveShots.isNotEmpty) spawned = liveShots.first;
       }
-      expect(game.mobjs.where((MobjView m) => m.sprite == 'BAL1'), isNotEmpty);
+      expect(spawned, isNotNull);
       expect(
         game.mobjs.firstWhere((MobjView m) => m.sprite == 'TROO').health,
         60,
       );
+      game.runTic(TicCmd.empty);
+      final MobjView moved = game.mobjs.firstWhere(
+        (MobjView m) => m.id == spawned!.id,
+      );
+      final int dx = moved.x - spawned!.x;
+      final int dy = moved.y - spawned.y;
+      print(
+        'imp projectile displacement: '
+        '${fixedToDouble(approxDistance(dx, dy)).toStringAsFixed(6)} units',
+      );
+      expect(approxDistance(dx, dy), toFixed(10));
     });
 
     test(

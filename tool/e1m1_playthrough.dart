@@ -664,6 +664,7 @@ final class _Driver {
   bool damageObserved = false;
   bool floorInvariantHeld = true;
   bool wallInvariantHeld = true;
+  static const int _playerThrustPerCommand = 2048;
   static const Set<int> _doorUseSpecials = <int>{
     1,
     26,
@@ -916,8 +917,8 @@ final class _Driver {
   }
 
   int _fixedToCommand(int fixed) => fixed >= 0
-      ? (fixed + (kFracUnit ~/ 2)) >> kFracBits
-      : -((-fixed + (kFracUnit ~/ 2)) >> kFracBits);
+      ? (fixed + (_playerThrustPerCommand ~/ 2)) ~/ _playerThrustPerCommand
+      : -((-fixed + (_playerThrustPerCommand ~/ 2)) ~/ _playerThrustPerCommand);
 
   bool _tryNearbyDoors() {
     final int before = doorOpenEvents;
@@ -1085,11 +1086,21 @@ final class _Driver {
   }
 
   bool _insideBlockingWall(PlayerView player, List<SectorRuntime> sectors) {
-    final _Point p = _Point(fixedToInt(player.x), fixedToInt(player.y));
+    final int radius = toFixed(16);
     for (final Linedef line in map.linedefs) {
       final MapVertex a = map.vertices[line.v1];
       final MapVertex b = map.vertices[line.v2];
-      if (_Planner._distanceSquared(p, a, b) >= 16 * 16) continue;
+      if (_fixedDistanceSquaredToSegment(
+            player.x,
+            player.y,
+            toFixed(a.x),
+            toFixed(a.y),
+            toFixed(b.x),
+            toFixed(b.y),
+          ) >=
+          radius * radius) {
+        continue;
+      }
       if (line.blocksMovement || !line.isTwoSided) return true;
       final int front = map.sidedefs[line.rightSidedef].sector;
       final int back = map.sidedefs[line.leftSidedef].sector;
@@ -1106,6 +1117,32 @@ final class _Driver {
       }
     }
     return false;
+  }
+
+  static int _fixedDistanceSquaredToSegment(
+    int px,
+    int py,
+    int ax,
+    int ay,
+    int bx,
+    int by,
+  ) {
+    final int dx = bx - ax;
+    final int dy = by - ay;
+    final int lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared == 0) {
+      final int ox = px - ax;
+      final int oy = py - ay;
+      return ox * ox + oy * oy;
+    }
+    int projection =
+        (((px - ax) * dx + (py - ay) * dy) << kFracBits) ~/ lengthSquared;
+    projection = projection.clamp(0, kFracUnit);
+    final int qx = ax + ((dx * projection) >> kFracBits);
+    final int qy = ay + ((dy * projection) >> kFracBits);
+    final int ox = px - qx;
+    final int oy = py - qy;
+    return ox * ox + oy * oy;
   }
 }
 

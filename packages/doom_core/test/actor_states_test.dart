@@ -284,7 +284,7 @@ void main() {
           ]),
           const GameConfig(monsters: false),
         );
-        for (var tic = 0; tic < 10; tic++) {
+        for (var tic = 0; tic < 30; tic++) {
           game.runTic(const TicCmd(forwardMove: 8));
         }
         expect(

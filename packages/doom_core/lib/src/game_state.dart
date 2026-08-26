@@ -18,6 +18,9 @@ import 'views.dart';
 
 const int _playerRadius = 16 * kFracUnit;
 const int _maxStep = 24 * kFracUnit;
+const int _playerThrustPerCommand = 2048;
+const int _maxMove = 30 * kFracUnit;
+const int _halfMaxMove = _maxMove ~/ 2;
 const int _maxBob = 0x100000;
 const int _singleAxisMaxBobMomentum = 8 * kFracUnit;
 const int _bobAngleStep = (kFineAngles ~/ 20) << kAngleToFineShift;
@@ -350,11 +353,11 @@ class GameState {
       _playerMobj.angle + (cmd.angleTurn << 16),
     );
     if (cmd.changingWeapon) _selectWeapon(cmd.requestedWeapon);
-    final int forward = toFixed(cmd.forwardMove);
-    final int side = toFixed(cmd.sideMove);
+    final int forward = wrap32(cmd.forwardMove * _playerThrustPerCommand);
+    final int side = wrap32(cmd.sideMove * _playerThrustPerCommand);
     _playerMobj.thrust(_playerMobj.angle, forward);
     _playerMobj.thrust(normalizeAngle(_playerMobj.angle - kAng90), side);
-    _tryMove(_playerMobj, _playerMobj.momX, _playerMobj.momY);
+    _moveMomentum(_playerMobj);
     _playerMobj.momX = fixedMul(_playerMobj.momX, 0xe800);
     _playerMobj.momY = fixedMul(_playerMobj.momY, 0xe800);
     int bob =
@@ -691,26 +694,42 @@ class GameState {
     _setMobjState(blood, MobjStateTable.bloodImpactStart(damage));
   }
 
-  bool _tryMove(Mobj m, int dx, int dy, {bool allowSlide = true}) {
+  bool _tryMove(
+    Mobj m,
+    int dx,
+    int dy, {
+    bool allowSlide = true,
+    bool traceLargeMoves = true,
+  }) {
     if (dx == 0 && dy == 0) return true;
-    // A broadphase is not a substitute for a trace: momentum can cross a thin
-    // line in one tic. Split into <=8-unit traces so a wall cannot be tunneled.
-    final int magnitude = approxDistance(dx, dy);
-    final int maxTrace = toFixed(8);
-    if (magnitude > maxTrace) {
-      final int parts = (magnitude + maxTrace - 1) ~/ maxTrace;
-      final int stepX = dx ~/ parts;
-      final int stepY = dy ~/ parts;
-      int remainderX = dx - stepX * parts;
-      int remainderY = dy - stepY * parts;
-      for (int i = 0; i < parts; i++) {
-        final int partX = stepX + (remainderX == 0 ? 0 : remainderX.sign);
-        final int partY = stepY + (remainderY == 0 ? 0 : remainderY.sign);
-        remainderX -= remainderX.sign;
-        remainderY -= remainderY.sign;
-        if (!_tryMove(m, partX, partY, allowSlide: allowSlide)) return false;
+    // Step-driven actors keep the existing fine-grained trace. Persistent
+    // momentum uses the bounded two-part path in [_moveMomentum] instead.
+    if (traceLargeMoves) {
+      final int magnitude = approxDistance(dx, dy);
+      final int maxTrace = toFixed(8);
+      if (magnitude > maxTrace) {
+        final int parts = (magnitude + maxTrace - 1) ~/ maxTrace;
+        final int stepX = dx ~/ parts;
+        final int stepY = dy ~/ parts;
+        int remainderX = dx - stepX * parts;
+        int remainderY = dy - stepY * parts;
+        for (int i = 0; i < parts; i++) {
+          final int partX = stepX + (remainderX == 0 ? 0 : remainderX.sign);
+          final int partY = stepY + (remainderY == 0 ? 0 : remainderY.sign);
+          remainderX -= remainderX.sign;
+          remainderY -= remainderY.sign;
+          if (!_tryMove(
+            m,
+            partX,
+            partY,
+            allowSlide: allowSlide,
+            traceLargeMoves: false,
+          )) {
+            return false;
+          }
+        }
+        return true;
       }
-      return true;
     }
     final int nx = wrap32(m.x + dx), ny = wrap32(m.y + dy);
     final int radius = m.radius;
@@ -726,9 +745,21 @@ class GameState {
           return false;
         }
         if (lx.abs() > ly.abs()) {
-          return _tryMove(m, dx, 0, allowSlide: false);
+          return _tryMove(
+            m,
+            dx,
+            0,
+            allowSlide: false,
+            traceLargeMoves: traceLargeMoves,
+          );
         }
-        return _tryMove(m, 0, dy, allowSlide: false);
+        return _tryMove(
+          m,
+          0,
+          dy,
+          allowSlide: false,
+          traceLargeMoves: traceLargeMoves,
+        );
       }
     }
     for (final Mobj other in _mobjs) {
@@ -791,6 +822,32 @@ class GameState {
     }
     _crossSpecials(m, oldX, oldY, nx, ny);
     return true;
+  }
+
+  /// Moves an actor whose position is driven by persistent momentum. Each
+  /// axis is bounded before collision, then large moves are traced as two
+  /// exact integer parts so a thin blocking line cannot be skipped in one tic.
+  bool _moveMomentum(Mobj m) {
+    m.momX = _clampMomentum(m.momX);
+    m.momY = _clampMomentum(m.momY);
+    if (fixedAbs(m.momX) <= _halfMaxMove && fixedAbs(m.momY) <= _halfMaxMove) {
+      return _tryMove(m, m.momX, m.momY, traceLargeMoves: false);
+    }
+    final int firstX = m.momX ~/ 2;
+    final int firstY = m.momY ~/ 2;
+    if (!_tryMove(m, firstX, firstY, traceLargeMoves: false)) return false;
+    return _tryMove(
+      m,
+      m.momX - firstX,
+      m.momY - firstY,
+      traceLargeMoves: false,
+    );
+  }
+
+  int _clampMomentum(int value) {
+    if (value > _maxMove) return _maxMove;
+    if (value < -_maxMove) return -_maxMove;
+    return value;
   }
 
   bool _lineCrossed(int oldX, int oldY, int newX, int newY, Linedef line) {
@@ -2001,6 +2058,8 @@ class GameState {
   }
 
   void _tickMissile(Mobj m) {
+    m.momX = _clampMomentum(m.momX);
+    m.momY = _clampMomentum(m.momY);
     final Mobj? struck = _missileImpactTarget(m);
     if (struck != null) {
       final int damage = m.info.damage * (1 + (_random.next() % 8));
@@ -2013,7 +2072,7 @@ class GameState {
       _explodeMissile(m);
       return;
     }
-    if (!_tryMove(m, m.momX, m.momY)) {
+    if (!_moveMomentum(m)) {
       _explodeMissile(m);
       return;
     }

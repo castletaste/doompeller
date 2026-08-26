@@ -244,6 +244,65 @@ void main() {
     expect(backend.buffers.length, buffers);
   });
 
+  test('scrolling wall dirties and uploads only its four vertices', () {
+    final geometry.WallBandRef source = level.wallBands.first;
+    final geometry.WallBandRef scrolling = geometry.WallBandRef(
+      linedef: source.linedef,
+      sidedef: source.sidedef,
+      textureName: source.textureName,
+      band: source.band,
+      frontSector: source.frontSector,
+      backSector: source.backSector,
+      meshIndex: source.meshIndex,
+      firstVertex: source.firstVertex,
+      lowerUnpegged: source.lowerUnpegged,
+      upperUnpegged: source.upperUnpegged,
+      textureHeight: source.textureHeight,
+      textureWidth: 64,
+      baseULeft: level.meshes[source.meshIndex].vertexU(source.firstVertex),
+      baseURight: level.meshes[source.meshIndex].vertexU(
+        source.firstVertex + 1,
+      ),
+      scrollsHorizontally: true,
+      yOffset: source.yOffset,
+      rawYOffset: source.rawYOffset,
+      nearCeilingAnchor: source.nearCeilingAnchor,
+      atlasV0: source.atlasV0,
+      atlasV1: source.atlasV1,
+      baseBottom: source.baseBottom,
+      baseTop: source.baseTop,
+    );
+    final geometry.CompiledLevel scrollingLevel = geometry.CompiledLevel(
+      meshes: level.meshes,
+      atlas: level.atlas,
+      floorPlanes: level.floorPlanes,
+      ceilingPlanes: level.ceilingPlanes,
+      wallBands: <geometry.WallBandRef>[scrolling, ...level.wallBands.skip(1)],
+      animations: level.animations,
+      switchFrames: level.switchFrames,
+      report: level.report,
+      skyTextureName: level.skyTextureName,
+    );
+    final DoomScene scene = DoomScene.fromCompiledLevel(
+      scrollingLevel,
+      resources,
+    );
+    for (final surface in scene.surfaces) {
+      surface.resource;
+    }
+
+    expect(
+      scene.updateTextureAnimations(1),
+      geometry.WallBandRef.verticesPerQuad,
+    );
+    expect(scene.flushPendingUploads(), 1);
+    final FakeGpuBuffer buffer = backend.buffers[scrolling.meshIndex];
+    expect(buffer.writeRanges.last, (
+      DoomVertexAbi.byteOffsetOf(scrolling.firstVertex),
+      geometry.WallBandRef.verticesPerQuad * DoomVertexAbi.bytesPerVertex,
+    ));
+  });
+
   test(
     'floor-flat transfer dirties exact ranges without recreating buffers',
     () {

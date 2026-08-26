@@ -157,6 +157,9 @@ class CompiledLevel {
 ///   4. Walls from linedefs.
 ///   5. Atlas packing, then vertex packing split by page, kind and 65535.
 class DoomGeometryCompiler {
+  /// Visual linedef specials implemented by compiled geometry/the adapter.
+  static const Set<int> supportedLinedefSpecials = <int>{48};
+
   /// Compiles a map against a parsed WAD's resources.
   ///
   /// This is the contract entry point.
@@ -340,6 +343,7 @@ class _Compiler {
           overlaps: finding.overlaps,
           emptyRegions: finding.emptyRegions,
           usedFallback: fallBack,
+          oracleReliable: finding.oracleReliable,
         ),
       );
     }
@@ -817,6 +821,12 @@ class _Compiler {
           lowerUnpegged: quad.lowerUnpegged,
           upperUnpegged: quad.upperUnpegged,
           textureHeight: texH,
+          textureWidth: texW,
+          baseULeft: uA,
+          baseURight: uB,
+          scrollsHorizontally:
+              map.linedefs[quad.linedef].special == 48 &&
+              quad.sidedef == map.linedefs[quad.linedef].rightSidedef,
           yOffset: quad.yOffset,
           rawYOffset: quad.rawYOffset,
           nearCeilingAnchor: quad.nearCeiling,

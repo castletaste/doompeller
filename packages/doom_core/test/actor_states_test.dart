@@ -231,6 +231,12 @@ void main() {
             (19, 'SPOS', 20, 16, 0),
             (10, 'PLAY', 20, 16, 0),
             (12, 'PLAY', 20, 16, 0),
+            (24, 'POB1', 20, 16, 0),
+            (2003, 'LAUN', 20, 16, MobjFlags.special),
+            (2019, 'ARM2', 20, 16, MobjFlags.special),
+            (2046, 'BROK', 20, 16, MobjFlags.special),
+            (2048, 'AMMO', 20, 16, MobjFlags.special),
+            (2049, 'SBOX', 20, 16, MobjFlags.special),
           ];
       for (final (int edNum, String sprite, int radius, int height, int flags)
           in cases) {
@@ -268,6 +274,7 @@ void main() {
         (19, false),
         (10, false),
         (12, false),
+        (24, false),
       ];
       for (final (int edNum, bool blocks) in cases) {
         final GameState game = GameState.start(

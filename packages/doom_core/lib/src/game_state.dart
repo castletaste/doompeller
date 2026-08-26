@@ -2212,6 +2212,17 @@ class GameState {
             _health = (_health + 25 > 100) ? 100 : _health + 25;
           case MobjType.misc17:
             _shells += 4;
+          case MobjType.megaArmor:
+            _armor = 200;
+          case MobjType.bulletBox:
+            _bullets += 50;
+          case MobjType.shellBox:
+            _shells += 20;
+          case MobjType.rocketLauncher || MobjType.rocketBox:
+            // The current weapon model has no rockets yet. Keep these E1M1
+            // pickups visible and collectable without inventing another
+            // weapon or misapplying their payload to bullets/shells.
+            break;
           default:
             _health = (_health + 10 > 100) ? 100 : _health + 10;
         }
@@ -3650,6 +3661,90 @@ const MobjInfo _bloodyMess2Info = MobjInfo(
   spriteName: 'PLAY',
   flags: 0,
 );
+const MobjInfo _bloodyPoolInfo = MobjInfo(
+  id: MobjType.bloodyPool,
+  doomEdNum: 24,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'POB1',
+  flags: 0,
+);
+const MobjInfo _rocketLauncherInfo = MobjInfo(
+  id: MobjType.rocketLauncher,
+  doomEdNum: 2003,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'LAUN',
+  flags: MobjFlags.special,
+);
+const MobjInfo _megaArmorInfo = MobjInfo(
+  id: MobjType.megaArmor,
+  doomEdNum: 2019,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'ARM2',
+  flags: MobjFlags.special,
+);
+const MobjInfo _rocketBoxInfo = MobjInfo(
+  id: MobjType.rocketBox,
+  doomEdNum: 2046,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'BROK',
+  flags: MobjFlags.special,
+);
+const MobjInfo _bulletBoxInfo = MobjInfo(
+  id: MobjType.bulletBox,
+  doomEdNum: 2048,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'AMMO',
+  flags: MobjFlags.special,
+);
+const MobjInfo _shellBoxInfo = MobjInfo(
+  id: MobjType.shellBox,
+  doomEdNum: 2049,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'SBOX',
+  flags: MobjFlags.special,
+);
 MobjInfo? _infoForEdNum(int n) => switch (n) {
   1 => _playerInfo,
   3004 => _possessedInfo,
@@ -3690,5 +3785,11 @@ MobjInfo? _infoForEdNum(int n) => switch (n) {
   19 => _deadShotgunGuyInfo,
   10 => _bloodyMess1Info,
   12 => _bloodyMess2Info,
+  24 => _bloodyPoolInfo,
+  2003 => _rocketLauncherInfo,
+  2019 => _megaArmorInfo,
+  2046 => _rocketBoxInfo,
+  2048 => _bulletBoxInfo,
+  2049 => _shellBoxInfo,
   _ => null,
 };

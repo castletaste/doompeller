@@ -64,6 +64,7 @@ void main() {
     expect(sectorSpecials['unsupported'], isEmpty);
     expect(things['playerStarts'], 1);
     expect(things['cooperativeStarts'], 1);
+    expect(things['deathmatchStarts'], 0);
     expect(things['unknownTypes'], isEmpty);
     expect(progression['hasExit'], isTrue);
     expect(sounds['missing'], isEmpty);
@@ -165,6 +166,32 @@ void main() {
     ]);
     _expectNoWadContent(result, bytes: _fixtureWithUnknownThing());
   });
+
+  test(
+    'deathmatch start is known format metadata, not a spawned actor',
+    () async {
+      final String path = _write(
+        temp,
+        'deathmatch-start.wad',
+        _fixtureWithThingType(11),
+      );
+      final ProcessResult result = await _run(<String>[
+        '--json',
+        '--map',
+        DoomFixtures.mapName,
+        path,
+      ]);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      final Map<String, Object?> gameplay =
+          _json(result)['gameplay']! as Map<String, Object?>;
+      final Map<String, Object?> things =
+          gameplay['things']! as Map<String, Object?>;
+      expect(things['deathmatchStarts'], 1);
+      expect(things['unknownTypes'], isEmpty);
+      expect(things['knownNonSpawning'], 1);
+      _expectNoWadContent(result, bytes: _fixtureWithThingType(11));
+    },
+  );
 
   test('explicit existing and missing map names have clear outcomes', () async {
     final String path = _write(temp, 'fixture.wad', DoomFixtures.pwadBytes());
@@ -390,6 +417,10 @@ Uint8List _fixtureWithGameplayGaps() {
 }
 
 Uint8List _fixtureWithUnknownThing() {
+  return _fixtureWithThingType(9999);
+}
+
+Uint8List _fixtureWithThingType(int type) {
   final Uint8List bytes = Uint8List.fromList(DoomFixtures.pwadBytes());
   final WadFile wad = WadFile.parse(bytes);
   final int thingsOffset = wad.lumps[wad.indexOfLump('THINGS')!].offset;
@@ -397,7 +428,7 @@ Uint8List _fixtureWithUnknownThing() {
   // spawn. The report must surface the unknown type as a progression gap.
   ByteData.sublistView(
     bytes,
-  ).setUint16(thingsOffset + 10 + 6, 9999, Endian.little);
+  ).setUint16(thingsOffset + 10 + 6, type, Endian.little);
   return bytes;
 }
 

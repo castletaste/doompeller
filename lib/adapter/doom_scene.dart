@@ -667,6 +667,14 @@ final class DoomScene {
         entry,
       );
     }
+    for (final band in compiled.wallBands) {
+      if (!band.applyHorizontalScroll(compiled.meshes, levelTime)) continue;
+      _geometryBindings[band.meshIndex]!.surface.markVertexRangeDirty(
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+      );
+      touched += geometry.WallBandRef.verticesPerQuad;
+    }
     if (touched > 0) diagnostics.onDynamicUpdate();
     return touched;
   }

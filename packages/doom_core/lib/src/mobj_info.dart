@@ -207,6 +207,14 @@ enum MobjType {
 
   /// Demon gameplay with the classic shadow-rendering flag.
   spectre,
+
+  /// E1M1 catalog entries added with semantic replay identities.
+  bloodyPool,
+  rocketLauncher,
+  megaArmor,
+  rocketBox,
+  bulletBox,
+  shellBox,
 }
 
 final Map<MobjType, int> _mobjTypeReplayIdentities = () {

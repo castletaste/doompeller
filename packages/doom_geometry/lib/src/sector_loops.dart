@@ -89,12 +89,21 @@ class SectorLoopBuilder {
     final int sectorCount = map.sectors.length;
     // Bucket linedef sides by sector in one pass so each sector's edge set is
     // a contiguous slice instead of a full linedef scan per sector.
-    final List<List<int>> sidesBySector =
-        List<List<int>>.generate(sectorCount, (int _) => <int>[], growable: false);
+    final List<List<int>> sidesBySector = List<List<int>>.generate(
+      sectorCount,
+      (int _) => <int>[],
+      growable: false,
+    );
     for (var i = 0; i < map.linedefs.length; i++) {
       final Linedef line = map.linedefs[i];
       final int front = _sectorOfSide(line.rightSidedef);
       final int back = _sectorOfSide(line.leftSidedef);
+      // A self-referencing linedef separates a sector from itself. It may be
+      // meaningful to collision or rendering, but it is not part of that
+      // sector's floor boundary and must not create a dangling oracle edge.
+      if (front != kNoSector && front == back) {
+        continue;
+      }
       if (front != kNoSector && front < sectorCount) {
         // Encode side in the low bit: even = front, odd = back.
         sidesBySector[front].add(i << 1);
@@ -153,7 +162,10 @@ class SectorLoopBuilder {
       if (a == b) {
         continue; // zero-length linedef
       }
-      if (a < 0 || b < 0 || a >= map.vertices.length || b >= map.vertices.length) {
+      if (a < 0 ||
+          b < 0 ||
+          a >= map.vertices.length ||
+          b >= map.vertices.length) {
         continue;
       }
       final int key = a * 65536 + b;
@@ -177,7 +189,13 @@ class SectorLoopBuilder {
       );
     }
     final List<Loop> rings = <Loop>[];
-    final int openChains = _chainLoops(edgeFrom, edgeTo, edgeCount, rings, budget);
+    final int openChains = _chainLoops(
+      edgeFrom,
+      edgeTo,
+      edgeCount,
+      rings,
+      budget,
+    );
     if (rings.isEmpty) {
       return SectorLoopResult(
         sector: sector,
@@ -361,7 +379,9 @@ class SectorLoopBuilder {
     for (var i = 0; i < n; i++) {
       if (depth[i].isEven) {
         outerSlot[i] = outers.length;
-        outers.add(ordered[i].isCounterClockwise ? ordered[i] : ordered[i].reversed());
+        outers.add(
+          ordered[i].isCounterClockwise ? ordered[i] : ordered[i].reversed(),
+        );
         holes.add(<Loop>[]);
       }
     }

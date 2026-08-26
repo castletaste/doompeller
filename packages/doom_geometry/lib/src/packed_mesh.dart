@@ -157,6 +157,18 @@ class PackedMesh {
           DoomVertexAbi.texCoordOffset +
           1];
 
+  /// Rewrites the horizontal texture coordinate of one vertex. Scrolling-wall
+  /// specials use this without changing atlas placement or geometry.
+  void setVertexU(int vertex, double u) {
+    vertices[vertex * DoomVertexAbi.floatsPerVertex +
+            DoomVertexAbi.texCoordOffset] =
+        u;
+  }
+
+  double vertexU(int vertex) =>
+      vertices[vertex * DoomVertexAbi.floatsPerVertex +
+          DoomVertexAbi.texCoordOffset];
+
   /// Rewrites the light level of one vertex, for light-changing sectors.
   void setVertexLight(int vertex, double light) {
     vertices[vertex * DoomVertexAbi.floatsPerVertex +
@@ -296,6 +308,10 @@ class WallBandRef {
     required this.lowerUnpegged,
     required this.upperUnpegged,
     required this.textureHeight,
+    required this.textureWidth,
+    required this.baseULeft,
+    required this.baseURight,
+    required this.scrollsHorizontally,
     required this.yOffset,
     required this.rawYOffset,
     required this.nearCeilingAnchor,
@@ -328,6 +344,16 @@ class WallBandRef {
   /// Height of the source texture in texels; 0 when untextured.
   final double textureHeight;
 
+  /// Width of the source picture in texels, used to convert the classic
+  /// one-texel-per-tic offset to texture-local UVs.
+  final double textureWidth;
+
+  final double baseULeft;
+  final double baseURight;
+
+  /// True for classic linedef special 48.
+  final bool scrollsHorizontally;
+
   /// Sidedef vertical offset in texels.
   final double yOffset;
 
@@ -351,6 +377,27 @@ class WallBandRef {
   double get top => _top;
 
   static const int verticesPerQuad = 4;
+
+  /// Applies the visual-only horizontal wall scroll for [levelTime].
+  /// Returns false if this band is static or already contains the requested
+  /// offset. The modulo keeps Float32 precision bounded while repeat sampling
+  /// makes the wrapped result visually identical.
+  bool applyHorizontalScroll(List<PackedMesh> meshes, int levelTime) {
+    if (!scrollsHorizontally || textureWidth <= 0) return false;
+    final double offset = (levelTime % textureWidth.toInt()) / textureWidth;
+    final PackedMesh mesh = meshes[meshIndex];
+    final double left = baseULeft + offset;
+    final double right = baseURight + offset;
+    if (mesh.vertexU(firstVertex) == left &&
+        mesh.vertexU(firstVertex + 1) == right) {
+      return false;
+    }
+    mesh.setVertexU(firstVertex, left);
+    mesh.setVertexU(firstVertex + 1, right);
+    mesh.setVertexU(firstVertex + 2, right);
+    mesh.setVertexU(firstVertex + 3, left);
+    return true;
+  }
 
   /// Moves the quad to span [bottom]..[top] and re-pegs its texture.
   ///

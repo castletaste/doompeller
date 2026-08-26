@@ -265,6 +265,88 @@ void main() {
     );
   });
 
+  test('special 48 scrolls wall U by one texel per tic and wraps', () {
+    final MapBuilder b = MapBuilder('SCROLL48');
+    final int sector = b.sector();
+    b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], sector);
+    final Linedef original = b.linedefs.first;
+    b.linedefs[0] = Linedef(
+      v1: original.v1,
+      v2: original.v2,
+      flags: original.flags,
+      special: 48,
+      tag: original.tag,
+      rightSidedef: original.rightSidedef,
+      leftSidedef: original.leftSidedef,
+    );
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(),
+      testTextures(),
+    );
+    final WallBandRef band = level.wallBands.firstWhere(
+      (WallBandRef item) => item.linedef == 0,
+    );
+    final PackedMesh mesh = level.meshes[band.meshIndex];
+    expect(DoomGeometryCompiler.supportedLinedefSpecials, contains(48));
+    expect(band.scrollsHorizontally, isTrue);
+    expect(band.applyHorizontalScroll(level.meshes, 0), isFalse);
+
+    expect(band.applyHorizontalScroll(level.meshes, 1), isTrue);
+    expect(
+      mesh.vertexU(band.firstVertex),
+      closeTo(band.baseULeft + 1 / band.textureWidth, 1e-6),
+    );
+    expect(
+      mesh.vertexU(band.firstVertex + 1),
+      closeTo(band.baseURight + 1 / band.textureWidth, 1e-6),
+    );
+
+    expect(
+      band.applyHorizontalScroll(level.meshes, band.textureWidth.toInt()),
+      isTrue,
+    );
+    expect(mesh.vertexU(band.firstVertex), closeTo(band.baseULeft, 1e-6));
+  });
+
+  test('special 48 scrolls only the front sidedef', () {
+    final MapBuilder b = MapBuilder('SCROLL48SIDE');
+    final int frontSector = b.sector();
+    final int backSector = b.sector();
+    b.solidLoop(<int>[0, 0, 128, 0, 128, 128, 0, 128], frontSector);
+    b.solidLoop(<int>[128, 0, 256, 0, 256, 128, 128, 128], backSector);
+    final int v1 = b.vertex(128, 0);
+    final int v2 = b.vertex(128, 128);
+    final int front = b.sidedef(sector: frontSector, middle: 'STARTAN3');
+    final int back = b.sidedef(sector: backSector, middle: 'STARTAN3');
+    final int line = b.line(
+      v1: v1,
+      v2: v2,
+      right: front,
+      left: back,
+      special: 48,
+    );
+    final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+      b.build(buildNodes: false),
+      testTextures(),
+    );
+    final List<WallBandRef> bands = level.wallBands
+        .where((WallBandRef band) => band.linedef == line)
+        .toList();
+    expect(bands, hasLength(2));
+    expect(
+      bands
+          .singleWhere((WallBandRef band) => band.sidedef == front)
+          .scrollsHorizontally,
+      isTrue,
+    );
+    expect(
+      bands
+          .singleWhere((WallBandRef band) => band.sidedef == back)
+          .scrollsHorizontally,
+      isFalse,
+    );
+  });
+
   test('lower-unpegged wall recomputes from the raw sidedef offset', () {
     final MapBuilder b = MapBuilder('LIFT');
     final int room = b.sector(floorHeight: 0, ceilingHeight: 128);

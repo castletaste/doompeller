@@ -11,6 +11,9 @@ enum GeometryIssue {
   /// BSP and oracle disagree on how much area the sector covers.
   areaMismatch,
 
+  /// BSP and oracle cover different shapes despite agreeing closely on area.
+  shapeMismatch,
+
   /// A triangle with no usable area was produced and dropped.
   degenerateTriangle,
 
@@ -53,6 +56,7 @@ class SectorFinding {
     required this.emptyRegions,
     required this.usedFallback,
     this.bspEvaluated = true,
+    this.oracleReliable = true,
   });
 
   final int sector;
@@ -78,12 +82,26 @@ class SectorFinding {
   /// unrun sector would report its entire area as a gap.
   final bool bspEvaluated;
 
+  /// False when the loop path could not produce a closed, complete oracle.
+  /// Its area and boundary must not be compared with BSP output in that case.
+  final bool oracleReliable;
+
   /// Area disagreement between the two paths. Zero when only one path ran,
   /// because there is then nothing to disagree with.
-  double get areaDelta => bspEvaluated ? (bspArea - loopArea).abs() : 0;
+  double get areaDelta =>
+      bspEvaluated && oracleReliable ? (bspArea - loopArea).abs() : 0;
 
   /// Area difference relative to the oracle; 0 when the oracle found no area.
   double get relativeAreaDelta => loopArea > 0 ? areaDelta / loopArea : 0;
+
+  /// Whether a defect remains in geometry that would actually be emitted.
+  /// Oracle-only failures are still reported, but they do not condemn a
+  /// separately valid BSP result.
+  bool get hasEmittedGeometryDefect => issues.any(
+    (GeometryIssue issue) =>
+        issue != GeometryIssue.openLoop &&
+        issue != GeometryIssue.incompleteTriangulation,
+  );
 
   bool get isClean => issues.isEmpty;
 

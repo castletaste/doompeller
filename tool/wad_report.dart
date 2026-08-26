@@ -323,7 +323,7 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
   // that remain in the emitted BSP path make the verdict PROBLEMS.
   final bool hasResidualGeometryProblems = report.findings.any(
     (SectorFinding finding) =>
-        !finding.usedFallback && finding.issues.isNotEmpty,
+        !finding.usedFallback && finding.hasEmittedGeometryDefect,
   );
   final bool hasGeometryProblems =
       report.budgetExhausted || hasResidualGeometryProblems;
@@ -512,6 +512,7 @@ Map<String, Object?> _geometryJson(GeometryReport report) => <String, Object?>{
         'emptyRegions': finding.emptyRegions,
         'usedFallback': finding.usedFallback,
         'bspEvaluated': finding.bspEvaluated,
+        'oracleReliable': finding.oracleReliable,
       },
   ],
 };
@@ -655,9 +656,13 @@ _GameplaySummary _gameplaySummary(
   WadResources resources,
   CompiledLevel level,
 ) {
-  final _SpecialCoverage lineSpecials = _specialCoverage(<int>[
-    for (final Linedef line in map.linedefs) line.special,
-  ], DoomCoreCatalog.supportedLinedefSpecials);
+  final _SpecialCoverage lineSpecials = _specialCoverage(
+    <int>[for (final Linedef line in map.linedefs) line.special],
+    <int>{
+      ...DoomCoreCatalog.supportedLinedefSpecials,
+      ...DoomGeometryCompiler.supportedLinedefSpecials,
+    },
+  );
   final _SpecialCoverage sectorSpecials = _specialCoverage(<int>[
     for (final Sector sector in map.sectors) sector.special,
   ], DoomCoreCatalog.supportedSectorSpecials);
@@ -722,7 +727,8 @@ class _GameplaySummary {
       )
       ..writeln(
         'things: player starts ${things.playerStarts}; co-op starts '
-        '${things.coopStarts}; known spawnable ${things.knownSpawnable}; '
+        '${things.coopStarts}; deathmatch starts ${things.deathmatchStarts}; '
+        'known spawnable ${things.knownSpawnable}; '
         'known non-spawning ${things.knownNonSpawning}; unknown '
         '${_formatCounts(things.unknownTypes)}',
       )
@@ -797,6 +803,7 @@ class _ThingSummary {
     required this.types,
     required this.playerStarts,
     required this.coopStarts,
+    required this.deathmatchStarts,
     required this.knownSpawnable,
     required this.knownNonSpawning,
     required this.unknownTypes,
@@ -806,6 +813,7 @@ class _ThingSummary {
   final List<Map<String, Object?>> types;
   final int playerStarts;
   final int coopStarts;
+  final int deathmatchStarts;
   final int knownSpawnable;
   final int knownNonSpawning;
   final Map<int, int> unknownTypes;
@@ -815,6 +823,7 @@ class _ThingSummary {
     'types': types,
     'playerStarts': playerStarts,
     'cooperativeStarts': coopStarts,
+    'deathmatchStarts': deathmatchStarts,
     'knownSpawnable': knownSpawnable,
     'knownNonSpawning': knownNonSpawning,
     'unknownTypes': _jsonIntCounts(unknownTypes),
@@ -858,6 +867,7 @@ _ThingSummary _thingSummary(List<Thing> things) {
   final Map<int, int> unknown = <int, int>{};
   var playerStarts = 0;
   var coopStarts = 0;
+  var deathmatchStarts = 0;
   var knownSpawnable = 0;
   var knownNonSpawning = 0;
   final Map<Skill, _SkillThingCounts> bySkill = <Skill, _SkillThingCounts>{
@@ -868,10 +878,14 @@ _ThingSummary _thingSummary(List<Thing> things) {
     final MobjInfo? info = DoomCoreCatalog.infoForEdNum(thing.type);
     final bool isPlayerStart = thing.type == 1;
     final bool isCoopStart = coopStartTypes.contains(thing.type);
+    final bool isDeathmatchStart = thing.type == 11;
     if (isPlayerStart) {
       playerStarts++;
     } else if (isCoopStart) {
       coopStarts++;
+      knownNonSpawning++;
+    } else if (isDeathmatchStart) {
+      deathmatchStarts++;
       knownNonSpawning++;
     } else if (info == null) {
       unknown[thing.type] = (unknown[thing.type] ?? 0) + 1;
@@ -881,7 +895,8 @@ _ThingSummary _thingSummary(List<Thing> things) {
     for (final Skill skill in Skill.values) {
       if (!_enabledForSkill(thing, skill) ||
           (thing.flags & ThingFlags.multiplayerOnly) != 0 ||
-          isCoopStart) {
+          isCoopStart ||
+          isDeathmatchStart) {
         continue;
       }
       final _SkillThingCounts counts = bySkill[skill]!;
@@ -899,6 +914,8 @@ _ThingSummary _thingSummary(List<Thing> things) {
             ? 'playerStart'
             : coopStartTypes.contains(type)
             ? 'cooperativeStart'
+            : type == 11
+            ? 'deathmatchStart'
             : DoomCoreCatalog.infoForEdNum(type) == null
             ? 'unknown'
             : 'spawnable',
@@ -909,6 +926,7 @@ _ThingSummary _thingSummary(List<Thing> things) {
                   (Thing thing) =>
                       thing.type == type &&
                       !_isCoopStart(thing.type) &&
+                      thing.type != 11 &&
                       _enabledForSkill(thing, skill) &&
                       (thing.flags & ThingFlags.multiplayerOnly) == 0 &&
                       (thing.type == 1 ||
@@ -922,6 +940,7 @@ _ThingSummary _thingSummary(List<Thing> things) {
     types: types,
     playerStarts: playerStarts,
     coopStarts: coopStarts,
+    deathmatchStarts: deathmatchStarts,
     knownSpawnable: knownSpawnable,
     knownNonSpawning: knownNonSpawning,
     unknownTypes: unknown,

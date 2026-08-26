@@ -497,6 +497,12 @@ _Catalog _buildCatalog() {
   decoration(type: MobjType.misc67, sprite: 'SPOS', frame: 11);
   decoration(type: MobjType.misc68, sprite: 'PLAY', frame: 21);
   decoration(type: MobjType.misc69, sprite: 'PLAY', frame: 21);
+  decoration(type: MobjType.bloodyPool, sprite: 'POB1', frame: 0);
+  decoration(type: MobjType.rocketLauncher, sprite: 'LAUN', frame: 0);
+  decoration(type: MobjType.megaArmor, sprite: 'ARM2', frame: 0);
+  decoration(type: MobjType.rocketBox, sprite: 'BROK', frame: 0);
+  decoration(type: MobjType.bulletBox, sprite: 'AMMO', frame: 0);
+  decoration(type: MobjType.shellBox, sprite: 'SBOX', frame: 0);
 
   b.chain(
     type: MobjType.barrel,

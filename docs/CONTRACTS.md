@@ -255,6 +255,13 @@ replay oracle. `MobjView.fullBright` and `lightLevel` carry the selected record
 and current sector light into the adapter; these renderer-facing values are
 derived from that already-hashed actor/sector state.
 
+The E1M1 thing catalog also recognizes deathmatch start 11 as non-spawning map
+metadata and renders thing 24 plus pickup types 2003, 2019, 2046, 2048 and
+2049. Mega armor, bullet boxes and shell boxes apply their current player-state
+effects. Rocket launcher and rocket box are deliberately collectable visual
+placeholders until rockets and a rocket weapon exist; they never fall through
+to an unrelated health or ammo effect.
+
 Classic flat/wall animation ranges and switch pairs are clean-room Dart data.
 Flat ranges follow WAD directory order; wall ranges follow TEXTURE1/TEXTURE2
 declaration order. Missing endpoints or frame data degrade to static and appear
@@ -308,6 +315,12 @@ class DoomScene { ... }                            // builds MeshComponents, upd
 referenced vertices and reuse dirty-range uploads. Every animation/switch group
 is packed atomically on one page; exceeding `maxAtlasPixels` is a typed compile
 failure, never a silently dropped frame.
+
+Classic linedef special 48 is a visual geometry capability exposed through
+`DoomGeometryCompiler.supportedLinedefSpecials`. Its front-sided wall bands
+advance texture-local U by one texel per level tic through the same retained
+mesh and dirty-range upload path. The offset is derived from `levelTime`, so it
+adds no mutable simulation state and does not enter `GameState.hashState()`.
 
 `DoomScene.updateSectorFloorFlat(sectorIndex, flatName)` uses the same atlas-rect
 dirty-range path for mutable floors. The geometry compiler transitively merges
@@ -430,3 +443,14 @@ interior of another region's edge **of the same sector** are inserted into that
 edge. Area and shape are unchanged; both sides of a shared boundary then agree
 vertex for vertex, which is what closes the hairline cracks that BSP-first
 geometry was flagged as risky for.
+
+### Oracle reliability and shape findings
+
+Self-referencing linedefs do not bound a sector floor and are excluded from the
+sector-loop oracle. If an oracle still has an open chain or incomplete
+triangulation, its area is explicitly non-comparable: the finding remains
+visible but contributes zero to `GeometryReport.totalAreaDelta` and cannot by
+itself condemn separately validated BSP output. Equal-area coverage differences
+use `GeometryIssue.shapeMismatch`; `areaMismatch` is reserved for measured area
+disagreement. Internal triangulation seams are accepted only when their probes
+are covered by the other mesh.

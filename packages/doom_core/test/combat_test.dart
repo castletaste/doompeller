@@ -140,6 +140,41 @@ void main() {
       expect(game.player.ammo.shells, 4);
     });
 
+    test(
+      'E1M1 ammo boxes and mega armor apply without fake rocket effects',
+      () {
+        final GameState game = GameState.start(
+          arena(const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 64, y: 64, angle: 0, type: 2019, flags: _skills),
+            Thing(x: 64, y: 64, angle: 0, type: 2048, flags: _skills),
+            Thing(x: 64, y: 64, angle: 0, type: 2049, flags: _skills),
+            Thing(x: 64, y: 64, angle: 0, type: 2003, flags: _skills),
+            Thing(x: 64, y: 64, angle: 0, type: 2046, flags: _skills),
+          ]),
+          const GameConfig(monsters: false),
+        );
+        expect(
+          game.mobjs.map((MobjView actor) => actor.sprite),
+          containsAll(<String>['ARM2', 'AMMO', 'SBOX', 'LAUN', 'BROK']),
+        );
+
+        game.runTic(TicCmd.empty);
+
+        expect(game.player.armor, 200);
+        expect(game.player.ammo.bullets, 100);
+        expect(game.player.ammo.shells, 20);
+        expect(game.player.weapon, Weapon.pistol);
+        expect(game.player.health, 100);
+        expect(
+          game.mobjs.map((MobjView actor) => actor.sprite).toSet().intersection(
+            <String>{'ARM2', 'AMMO', 'SBOX', 'LAUN', 'BROK'},
+          ),
+          isEmpty,
+        );
+      },
+    );
+
     test('weapon cannot be selected before it is owned', () {
       final GameState game = GameState.start(
         arena(const <Thing>[

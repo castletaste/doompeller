@@ -268,6 +268,27 @@ void main() {
         expect(loops[s].isWellFormed, isFalse);
       },
     );
+
+    test('self-referencing linedef is not a floor boundary', () {
+      final MapBuilder b = MapBuilder('SELFREF');
+      final int s = b.sector();
+      b.solidLoop(<int>[0, 0, 256, 0, 256, 256, 0, 256], s);
+      final int a = b.vertex(64, 64);
+      final int z = b.vertex(192, 64);
+      b.line(
+        v1: a,
+        v2: z,
+        right: b.sidedef(sector: s, middle: 'STARTAN3'),
+        left: b.sidedef(sector: s, middle: 'STARTAN3'),
+      );
+      final SectorLoopResult loop = SectorLoopBuilder(
+        b.build(),
+        GeometryOptions.defaults,
+      ).buildAll(CheckBudget(100000))[s];
+      expect(loop.openChains, 0);
+      expect(loop.area, 256 * 256);
+      expect(loop.isWellFormed, isTrue);
+    });
   });
 }
 

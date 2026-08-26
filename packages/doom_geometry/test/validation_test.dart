@@ -143,6 +143,53 @@ void main() {
       expect(validator.shouldFallBack(finding), isTrue);
     });
 
+    test('equal area with different covered shape has its own issue', () {
+      final SectorMesh2D left = SectorMesh2D(
+        Float64List.fromList(<double>[0, 0, 10, 0, 10, 10, 0, 10]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+      );
+      final SectorMesh2D right = SectorMesh2D(
+        Float64List.fromList(<double>[20, 0, 30, 0, 30, 10, 20, 10]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+      );
+      final SectorFinding finding = check(left, right);
+      expect(finding.areaDelta, 0);
+      expect(finding.issues, contains(GeometryIssue.shapeMismatch));
+      expect(finding.issues, isNot(contains(GeometryIssue.areaMismatch)));
+      expect(validator.shouldFallBack(finding), isTrue);
+    });
+
+    test('internal oracle subdivision is not a shape mismatch', () {
+      final SectorMesh2D bsp = SectorMesh2D(
+        Float64List.fromList(<double>[0, 0, 100, 0, 100, 100, 0, 100]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3]),
+      );
+      // Same covered square, but its two halves disagree on how their shared
+      // edge is subdivided. The resulting internal slit is not a boundary.
+      final SectorMesh2D oracle = SectorMesh2D(
+        Float64List.fromList(<double>[
+          0,
+          0,
+          50,
+          0,
+          50,
+          100,
+          0,
+          100,
+          50,
+          50,
+          100,
+          0,
+          100,
+          100,
+        ]),
+        Uint32List.fromList(<int>[0, 1, 2, 0, 2, 3, 1, 5, 4, 5, 6, 4, 4, 6, 2]),
+      );
+      final SectorFinding finding = check(bsp, oracle);
+      expect(finding.areaDelta, 0);
+      expect(finding.issues, isNot(contains(GeometryIssue.shapeMismatch)));
+    });
+
     test('detects a half-unit gap across a million-unit sector', () {
       final SectorMesh2D bsp = SectorMesh2D(
         Float64List.fromList(<double>[0, 0, 999.5, 0, 999.5, 1000, 0, 1000]),
@@ -202,6 +249,10 @@ void main() {
         budget: CheckBudget(1000),
       );
       expect(finding.issues, contains(GeometryIssue.openLoop));
+      expect(finding.issues, isNot(contains(GeometryIssue.areaMismatch)));
+      expect(finding.areaDelta, 0);
+      expect(finding.oracleReliable, isFalse);
+      expect(finding.hasEmittedGeometryDefect, isFalse);
       expect(validator.shouldFallBack(finding), isFalse);
     });
   });

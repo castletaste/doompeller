@@ -33,6 +33,7 @@ class GeometryValidator {
     final Set<GeometryIssue> issues = <GeometryIssue>{};
     final double bspArea = bsp.area;
     final double loopArea = loop.area;
+    final bool oracleReliable = loopClosed && loopComplete;
 
     if (!loopClosed) {
       issues.add(GeometryIssue.openLoop);
@@ -44,16 +45,18 @@ class GeometryValidator {
       issues.add(GeometryIssue.emptyRegion);
     }
 
-    final double tolerance = _areaTolerance(loopArea);
-    if ((bspArea - loopArea).abs() > tolerance) {
-      issues.add(GeometryIssue.areaMismatch);
-    }
-    if (bsp.triangleCount > 0 &&
-        loop.triangleCount > 0 &&
-        !_boundariesMatch(bsp, loop, budget)) {
-      // Reuse areaMismatch as the covered-shape mismatch issue. Equal area is
-      // insufficient when a wedge is lost on one side and gained on another.
-      issues.add(GeometryIssue.areaMismatch);
+    if (oracleReliable) {
+      final double tolerance = _areaTolerance(loopArea);
+      if ((bspArea - loopArea).abs() > tolerance) {
+        issues.add(GeometryIssue.areaMismatch);
+      }
+      if (bsp.triangleCount > 0 &&
+          loop.triangleCount > 0 &&
+          !_boundariesMatch(bsp, loop, budget)) {
+        // Equal area is insufficient when a wedge is lost on one side and
+        // gained in another, so covered shape has its own issue.
+        issues.add(GeometryIssue.shapeMismatch);
+      }
     }
 
     final int degenerate = _countDegenerate(bsp);
@@ -93,6 +96,7 @@ class GeometryValidator {
       overlaps: overlaps,
       emptyRegions: emptyRegions,
       usedFallback: false,
+      oracleReliable: oracleReliable,
     );
   }
 
@@ -107,6 +111,7 @@ class GeometryValidator {
       return false;
     }
     return finding.issues.contains(GeometryIssue.areaMismatch) ||
+        finding.issues.contains(GeometryIssue.shapeMismatch) ||
         finding.issues.contains(GeometryIssue.tJunction) ||
         finding.issues.contains(GeometryIssue.overlap) ||
         finding.issues.contains(GeometryIssue.emptyRegion) ||
@@ -129,8 +134,8 @@ class GeometryValidator {
   ) {
     final List<_BoundarySegment> a = _boundarySegments(first);
     final List<_BoundarySegment> b = _boundarySegments(second);
-    return _segmentsCoveredBy(a, b, budget) &&
-        _segmentsCoveredBy(b, a, budget);
+    return _segmentsCoveredBy(a, b, second, budget) &&
+        _segmentsCoveredBy(b, a, first, budget);
   }
 
   List<_BoundarySegment> _boundarySegments(SectorMesh2D mesh) {
@@ -163,9 +168,41 @@ class GeometryValidator {
     ];
   }
 
+  bool _meshContains(
+    SectorMesh2D mesh,
+    double x,
+    double y,
+    CheckBudget budget,
+  ) {
+    final Float64List xy = mesh.xy;
+    final Uint32List indices = mesh.indices;
+    final double epsilon = options.epsilon;
+    for (var t = 0; t < indices.length; t += 3) {
+      if (!budget.spend()) return false;
+      final int ai = indices[t] * 2;
+      final int bi = indices[t + 1] * 2;
+      final int ci = indices[t + 2] * 2;
+      final double ab =
+          (xy[bi] - xy[ai]) * (y - xy[ai + 1]) -
+          (xy[bi + 1] - xy[ai + 1]) * (x - xy[ai]);
+      final double bc =
+          (xy[ci] - xy[bi]) * (y - xy[bi + 1]) -
+          (xy[ci + 1] - xy[bi + 1]) * (x - xy[bi]);
+      final double ca =
+          (xy[ai] - xy[ci]) * (y - xy[ci + 1]) -
+          (xy[ai + 1] - xy[ci + 1]) * (x - xy[ci]);
+      if ((ab >= -epsilon && bc >= -epsilon && ca >= -epsilon) ||
+          (ab <= epsilon && bc <= epsilon && ca <= epsilon)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool _segmentsCoveredBy(
     List<_BoundarySegment> source,
     List<_BoundarySegment> target,
+    SectorMesh2D targetMesh,
     CheckBudget budget,
   ) {
     final double tolerance = 2.0 / options.weldGrid;
@@ -178,6 +215,13 @@ class GeometryValidator {
         (segment.bx, segment.by),
       ];
       for (final (double, double) probe in probes) {
+        // Weakly-simple hole bridges and zero-width branches can surface as
+        // unmatched triangulation edges even though they lie wholly inside
+        // the other covered shape. Coverage, not identical triangulation, is
+        // the contract; an interior probe is therefore already accounted for.
+        if (_meshContains(targetMesh, probe.$1, probe.$2, budget)) {
+          continue;
+        }
         var covered = false;
         for (final _BoundarySegment candidate in target) {
           if (!budget.spend()) {

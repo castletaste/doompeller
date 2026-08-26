@@ -255,6 +255,26 @@ void main() {
       expect(res.composite('DUPL')!.indexAt(0, 0), 11);
     });
 
+    test('unused PNAMES entry may be absent when every texture resolves', () {
+      final WadResources res = WadResources.load(
+        setWith(<LumpSource>[
+          LumpSource('PNAMES', _pnames(<String>['USED', 'UNUSED'])),
+          LumpSource('USED', encodeDoomPatch(_solidPatch(16, 16, 7))),
+          LumpSource(
+            'TEXTURE1',
+            _textureDirectory(<_TextureSpec>[
+              const _TextureSpec('COMPLETE', 16, 16, 0),
+            ]),
+          ),
+        ]),
+      );
+
+      expect(res.patchNames, <String>['USED', 'UNUSED']);
+      expect(res.patchAt(0), isNotNull);
+      expect(res.patchAt(1), isNull);
+      expect(res.composite('COMPLETE'), isNotNull);
+    });
+
     test('a PWAD replacement TEXTURE1 still wins over an IWAD TEXTURE1', () {
       final WadFile iwad = WadFile.parse(
         buildWad(<LumpSource>[

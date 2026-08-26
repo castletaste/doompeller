@@ -153,9 +153,14 @@ class GameState {
     _runtime.sectors.length,
     0,
   );
+  late final List<int> _stairVisitGenerations = List<int>.filled(
+    _runtime.sectors.length,
+    0,
+  );
   final List<int> _soundQueueSectors = <int>[];
   final List<int> _soundQueueBlocks = <int>[];
   int _soundVisitGeneration = 0;
+  int _stairVisitGeneration = 0;
   int _secrets = 0;
   int _killCount = 0;
   int _totalKills = 0;
@@ -279,7 +284,7 @@ class GameState {
         continue;
       }
       final MobjInfo? info = _infoForEdNum(thing.type);
-      if (thing.type == 1) {
+      if (info?.id == MobjType.player) {
         _playerMobj = _add(_playerInfo, thing.x, thing.y, thing.angle, 100);
       } else if (info != null) {
         final Mobj spawned = _add(
@@ -756,7 +761,7 @@ class GameState {
     if (m.z < m.floorZ) {
       m.z = m.floorZ;
     }
-    if (identical(m, _playerMobj)) _crossSpecials(oldX, oldY, nx, ny);
+    _crossSpecials(m, oldX, oldY, nx, ny);
     return true;
   }
 
@@ -771,7 +776,11 @@ class GameState {
     return (before < 0 && after >= 0) || (before > 0 && after <= 0);
   }
 
-  void _crossSpecials(int oldX, int oldY, int newX, int newY) {
+  void _crossSpecials(Mobj activator, int oldX, int oldY, int newX, int newY) {
+    final bool isPlayer = identical(activator, _playerMobj);
+    if (!isPlayer && (!activator.info.isMonster || activator.health <= 0)) {
+      return;
+    }
     for (
       int lineIndex = 0;
       lineIndex < _runtime.map.linedefs.length;
@@ -779,6 +788,7 @@ class GameState {
     ) {
       final Linedef line = _runtime.map.linedefs[lineIndex];
       if (line.special == 0) continue;
+      if (!isPlayer && !_monsterWalkSpecials.contains(line.special)) continue;
       final MapVertex a = _runtime.map.vertices[line.v1];
       final MapVertex b = _runtime.map.vertices[line.v2];
       if (!_lineCrossed(oldX, oldY, newX, newY, line) ||
@@ -794,18 +804,37 @@ class GameState {
           )) {
         continue;
       }
-      if (_isWalkLiftSpecial(line.special)) {
-        _activateLift(line);
+      final _LineDispatchKind? dispatch = _lineDispatchKind(
+        line.special,
+        _LineActivation.cross,
+      );
+      if (dispatch == null) continue;
+      if (_isOneShotWalkSpecial(line.special) &&
+          _activatedOnceLines.contains(lineIndex)) {
+        continue;
       }
-      if (_isWalkFloorSpecial(line.special)) {
-        _activateFloor(line);
+      switch (dispatch) {
+        case _LineDispatchKind.walkDoor:
+          _activateDoor(line, allowTagZeroBack: false);
+        case _LineDispatchKind.walkLift:
+          _activateLift(line);
+        case _LineDispatchKind.walkFloor:
+          _activateFloor(line);
+        case _LineDispatchKind.walkStair:
+          _activateStairs(line);
+        case _LineDispatchKind.walkExit:
+          _completeExit(
+            lineIndex,
+            secret: line.special == LineSpecial.secretExitWalkOnce,
+          );
+        default:
+          throw StateError('non-walk dispatch kind $dispatch');
       }
-      if (line.special == LineSpecial.exitWalkOnce ||
-          line.special == LineSpecial.secretExitWalkOnce) {
-        _completeExit(
-          lineIndex,
-          secret: line.special == LineSpecial.secretExitWalkOnce,
-        );
+      // Vanilla W1 lines are consumed by the crossing attempt even when every
+      // tagged sector is already busy. Keeping that state separate from the
+      // immutable map data also makes it visible to the replay hash.
+      if (_isOneShotWalkSpecial(line.special)) {
+        _activatedOnceLines.add(lineIndex);
       }
     }
   }
@@ -843,32 +872,47 @@ class GameState {
       }
     }
     if (selected == null) return;
-    if (!_isUseSpecial(selected.special)) return;
+    final _LineDispatchKind? dispatch = _lineDispatchKind(
+      selected.special,
+      _LineActivation.use,
+    );
+    if (dispatch == null) return;
+    if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
     if ((_isOneShotSwitchSpecial(selected.special) &&
             _activatedOnceLines.contains(selectedIndex)) ||
         _pressedSwitches.containsKey(selectedIndex)) {
       return;
     }
-    if (_isDoorSpecial(selected.special)) {
-      final bool activated = _tryActivateDoor(selected);
-      if (activated && _isSwitchDoorSpecial(selected.special)) {
-        _activateSwitchTexture(selectedIndex, selected);
-        _emitPlayerSound('DSSWTCHN');
-      }
+    bool activated = false;
+    switch (dispatch) {
+      case _LineDispatchKind.useDoor:
+        activated = _tryActivateDoor(selected);
+        if (activated && _isSwitchDoorSpecial(selected.special)) {
+          _activateSwitchTexture(selectedIndex, selected);
+          _emitPlayerSound('DSSWTCHN');
+        }
+      case _LineDispatchKind.useLift:
+        activated = _activateLift(selected);
+      case _LineDispatchKind.useFloor:
+        activated = _activateFloor(selected);
+      case _LineDispatchKind.useStair:
+        activated = _activateStairs(selected);
+      case _LineDispatchKind.useExit:
+        if (_completeExit(
+          selectedIndex,
+          secret: selected.special == LineSpecial.secretExitSwitchOnce,
+        )) {
+          _activateSwitchTexture(selectedIndex, selected);
+        }
+        return;
+      default:
+        throw StateError('non-use dispatch kind $dispatch');
     }
-    if (_isUseLiftSpecial(selected.special) && _activateLift(selected)) {
+    if (activated &&
+        dispatch != _LineDispatchKind.useDoor &&
+        dispatch != _LineDispatchKind.useExit) {
       _activateSwitchTexture(selectedIndex, selected);
       _emitPlayerSound('DSSWTCHN');
-    }
-    if (selected.special == LineSpecial.exitSwitchOnce ||
-        selected.special == LineSpecial.secretExitSwitchOnce) {
-      if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
-      if (_completeExit(
-        selectedIndex,
-        secret: selected.special == LineSpecial.secretExitSwitchOnce,
-      )) {
-        _activateSwitchTexture(selectedIndex, selected);
-      }
     }
   }
 
@@ -993,9 +1037,11 @@ class GameState {
         selectedIndex = i;
       }
     }
-    if (selected?.special == LineSpecial.floorRaise24 &&
+    if (selected != null &&
+        _lineDispatchKind(selected.special, _LineActivation.shoot) ==
+            _LineDispatchKind.shootFloor &&
         !_activatedOnceLines.contains(selectedIndex) &&
-        _activateFloor(selected!)) {
+        _activateFloor(selected)) {
       _activateSwitchTexture(selectedIndex, selected);
       _emitPlayerSound('DSSWTCHN');
     }
@@ -1015,11 +1061,11 @@ class GameState {
     return _activateDoor(line);
   }
 
-  bool _activateDoor(Linedef line) {
+  bool _activateDoor(Linedef line, {bool allowTagZeroBack = true}) {
     // tag 0 manual doors affect the adjacent back sector; classification comes
     // from special, never from the tag.
     final int? back = _runtime.backSector(line);
-    final List<int> targets = line.tag == 0
+    final List<int> targets = line.tag == 0 && allowTagZeroBack
         ? (back == null ? <int>[] : <int>[back])
         : <int>[
             for (int i = 0; i < _runtime.sectors.length; i++)
@@ -1029,14 +1075,24 @@ class GameState {
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
       if (sector.activeMover == null) {
+        final _DoorKind kind = _doorKind(line.special);
+        final bool startsClosing =
+            kind == _DoorKind.close || kind == _DoorKind.closeWaitOpen;
+        final int initialCeiling = sector.ceilingHeight;
         sector.activeMover = _DoorMover(
           sector,
-          _doorOpenTop(index),
-          closeAfterWait: !_doorStaysOpen(line.special),
+          kind == _DoorKind.closeWaitOpen
+              ? initialCeiling
+              : _doorOpenTop(index),
+          closeAfterWait: kind == _DoorKind.openWaitClose,
+          startsClosing: startsClosing,
+          reopenAfterWait: kind == _DoorKind.closeWaitOpen,
+          reverseOnObstruction: kind != _DoorKind.close,
+          closedTarget: sector.floorHeight,
           obstructed: (int nextCeiling) =>
               _sectorObstructed(index, ceiling: nextCeiling),
         );
-        _emitSectorSound('DSDOROPN', index);
+        _emitSectorSound(startsClosing ? 'DSDORCLS' : 'DSDOROPN', index);
         activated = true;
       }
     }
@@ -1064,6 +1120,8 @@ class GameState {
   }
 
   bool _activateFloor(Linedef line) {
+    final _FloorTargetKind? targetKind = _floorTargetKinds[line.special];
+    if (targetKind == null) return false;
     final List<int> targets = <int>[
       for (int i = 0; i < _runtime.sectors.length; i++)
         if (_runtime.sectors[i].staticData.tag == line.tag && line.tag != 0) i,
@@ -1071,20 +1129,81 @@ class GameState {
     var activated = false;
     for (final int index in targets) {
       final SectorRuntime sector = _runtime.sectors[index];
-      final int target = switch (line.special) {
-        LineSpecial.floorRaise24 => sector.floorHeight + toFixed(24),
-        LineSpecial.floorRaiseToLowestCeiling =>
+      final int target = switch (targetKind) {
+        _FloorTargetKind.raise24 => sector.floorHeight + toFixed(24),
+        _FloorTargetKind.raiseToLowestCeilingMinus8 =>
           _lowestNeighborCeiling(index) - toFixed(8),
-        _ => sector.floorHeight,
+        _FloorTargetKind.raiseToLowestCeiling => _lowestNeighborCeiling(index),
+        _FloorTargetKind.raiseToNextHigher => _nextHigherNeighborFloor(index),
+        _FloorTargetKind.lowerToHighest => _highestNeighborFloor(index),
+        _FloorTargetKind.lowerToLowest => _lowestNeighborFloor(index),
+        _FloorTargetKind.lowerTurbo => _turboLowerTarget(index),
       };
       if (sector.activeMover == null) {
         sector.activeMover = _FloorMover(
           sector,
           target,
+          speed: line.special == LineSpecial.walkFloorLowerTurboOnce
+              ? toFixed(4)
+              : kFracUnit,
           obstructed: (int nextFloor) =>
               _sectorObstructed(index, floor: nextFloor),
         );
         activated = true;
+      }
+    }
+    return activated;
+  }
+
+  bool _activateStairs(Linedef line) {
+    final int generation = ++_stairVisitGeneration;
+    var visits = 0;
+    var activated = false;
+    for (int start = 0; start < _runtime.sectors.length; start++) {
+      if (visits >= config.maxStairBuildVisits) break;
+      if (line.tag == 0 ||
+          _runtime.sectors[start].staticData.tag != line.tag ||
+          _stairVisitGenerations[start] == generation) {
+        continue;
+      }
+      final String floorFlat = _runtime.sectors[start].floorFlat;
+      var current = start;
+      var target = _runtime.sectors[start].floorHeight;
+      while (visits < config.maxStairBuildVisits &&
+          _stairVisitGenerations[current] != generation) {
+        _stairVisitGenerations[current] = generation;
+        visits++;
+        final SectorRuntime sector = _runtime.sectors[current];
+        target += toFixed(8);
+        if (sector.activeMover == null) {
+          final int stairSector = current;
+          sector.activeMover = _FloorMover(
+            sector,
+            target,
+            speed: kFracUnit ~/ 4,
+            obstructed: (int nextFloor) =>
+                _sectorObstructed(stairSector, floor: nextFloor),
+          );
+          activated = true;
+        }
+        int? next;
+        for (final int lineIndex in sector.touchingLinedefs) {
+          final Linedef candidate = _runtime.map.linedefs[lineIndex];
+          if (!candidate.isTwoSided ||
+              _runtime.frontSector(candidate) != current) {
+            continue;
+          }
+          final int? back = _runtime.backSector(candidate);
+          if (back == null ||
+              _stairVisitGenerations[back] == generation ||
+              _runtime.sectors[back].floorFlat != floorFlat) {
+            continue;
+          }
+          next = back;
+          break;
+        }
+        if (next == null) break;
+        current = next;
       }
     }
     return activated;
@@ -1134,6 +1253,47 @@ class GameState {
     return ceiling;
   }
 
+  int _highestNeighborFloor(int index) {
+    int? floor;
+    for (final int lineIndex in _runtime.sectors[index].touchingLinedefs) {
+      final int? other = _neighborAcross(index, lineIndex);
+      if (other == null) continue;
+      final int candidate = _runtime.sectors[other].floorHeight;
+      if (floor == null || candidate > floor) floor = candidate;
+    }
+    return floor ?? _runtime.sectors[index].floorHeight;
+  }
+
+  int _nextHigherNeighborFloor(int index) {
+    final int current = _runtime.sectors[index].floorHeight;
+    int? floor;
+    for (final int lineIndex in _runtime.sectors[index].touchingLinedefs) {
+      final int? other = _neighborAcross(index, lineIndex);
+      if (other == null) continue;
+      final int candidate = _runtime.sectors[other].floorHeight;
+      if (candidate > current && (floor == null || candidate < floor)) {
+        floor = candidate;
+      }
+    }
+    return floor ?? current;
+  }
+
+  int _turboLowerTarget(int index) {
+    final int current = _runtime.sectors[index].floorHeight;
+    final int highest = _highestNeighborFloor(index);
+    return highest == current ? current : highest + toFixed(8);
+  }
+
+  int? _neighborAcross(int sector, int lineIndex) {
+    final Linedef line = _runtime.map.linedefs[lineIndex];
+    final int front = _runtime.frontSector(line);
+    final int? back = _runtime.backSector(line);
+    if (back == null) return null;
+    if (front == sector) return back;
+    if (back == sector) return front;
+    return null;
+  }
+
   int _doorOpenTop(int index) {
     int top = 0x7fffffff;
     for (final int li in _runtime.sectors[index].touchingLinedefs) {
@@ -1158,6 +1318,9 @@ class GameState {
         mover.tick();
         if (mover is _DoorMover && !doorWasClosing && mover.isClosing) {
           _emitSectorSound('DSDORCLS', s.index);
+        }
+        if (mover is _DoorMover && doorWasClosing && !mover.isClosing) {
+          _emitSectorSound('DSDOROPN', s.index);
         }
         if (oldFloor != s.floorHeight) {
           for (final Mobj m in _mobjs) {
@@ -1200,6 +1363,7 @@ class GameState {
     for (final SectorRuntime item in _runtime.sectors) {
       final int old = item.lightLevel;
       final int special = item.staticData.special;
+      if (!_supportedSectorSpecials.contains(special)) continue;
       if (special == SectorSpecial.lightFlicker ||
           special == SectorSpecial.lightFlickerSync) {
         item.lightLevel = (_random.next() & 3) == 0
@@ -1762,56 +1926,55 @@ class GameState {
               _playerRadius + m.radius) {
         continue;
       }
-      switch (m.info.id) {
-        case MobjType.clip:
-          _bullets += 10;
-        case MobjType.shotgun:
-          _shells += 8;
-          _ownedWeapons.add(Weapon.shotgun);
-          _queueWeapon(Weapon.shotgun);
-        case MobjType.chaingun:
-          _bullets += 20;
-          _ownedWeapons.add(Weapon.chaingun);
-          _queueWeapon(Weapon.chaingun);
-        case MobjType.megaHealth:
-          _health = (_health + 100 > 200) ? 200 : _health + 100;
-        case MobjType.soulSphere:
-          _health = (_health + 100 > 200) ? 200 : _health + 100;
-        case MobjType.megaSphere:
-          _health = 200;
-          _armor = 200;
-        case MobjType.backpack:
-          _bullets += 10;
-          _shells += 4;
-        case MobjType.berserk:
-          if (_health < 100) _health = 100;
-          _setWeapon(Weapon.fist);
-        case MobjType.invulnerability ||
-            MobjType.invisibility ||
-            MobjType.radiationSuit ||
-            MobjType.computerMap ||
-            MobjType.lightAmplification:
-          // Their timed/UI effects are outside the current E1M1 runtime
-          // subset, but they are still collectable special artifacts.
-          break;
-        case MobjType.misc0:
-          if (_armor < 100) _armor = 100;
-        case MobjType.misc2:
-          _keys.add(Key.blue);
-        case MobjType.misc3:
-          _keys.add(Key.yellow);
-        case MobjType.misc4:
-          _keys.add(Key.red);
-        case MobjType.misc10:
-          _health = _health < 200 ? _health + 1 : 200;
-        case MobjType.misc11:
-          _armor = _armor < 200 ? _armor + 1 : 200;
-        case MobjType.misc12:
-          _health = (_health + 25 > 100) ? 100 : _health + 25;
-        case MobjType.misc17:
-          _shells += 4;
-        default:
-          _health = (_health + 10 > 100) ? 100 : _health + 10;
+      final Key? key = _keyForMobjType(m.info.id);
+      if (key != null) {
+        _keys.add(key);
+      } else {
+        switch (m.info.id) {
+          case MobjType.clip:
+            _bullets += 10;
+          case MobjType.shotgun:
+            _shells += 8;
+            _ownedWeapons.add(Weapon.shotgun);
+            _queueWeapon(Weapon.shotgun);
+          case MobjType.chaingun:
+            _bullets += 20;
+            _ownedWeapons.add(Weapon.chaingun);
+            _queueWeapon(Weapon.chaingun);
+          case MobjType.megaHealth:
+            _health = (_health + 100 > 200) ? 200 : _health + 100;
+          case MobjType.soulSphere:
+            _health = (_health + 100 > 200) ? 200 : _health + 100;
+          case MobjType.megaSphere:
+            _health = 200;
+            _armor = 200;
+          case MobjType.backpack:
+            _bullets += 10;
+            _shells += 4;
+          case MobjType.berserk:
+            if (_health < 100) _health = 100;
+            _setWeapon(Weapon.fist);
+          case MobjType.invulnerability ||
+              MobjType.invisibility ||
+              MobjType.radiationSuit ||
+              MobjType.computerMap ||
+              MobjType.lightAmplification:
+            // Their timed/UI effects are outside the current E1M1 runtime
+            // subset, but they are still collectable special artifacts.
+            break;
+          case MobjType.misc0:
+            if (_armor < 100) _armor = 100;
+          case MobjType.misc10:
+            _health = _health < 200 ? _health + 1 : 200;
+          case MobjType.misc11:
+            _armor = _armor < 200 ? _armor + 1 : 200;
+          case MobjType.misc12:
+            _health = (_health + 25 > 100) ? 100 : _health + 25;
+          case MobjType.misc17:
+            _shells += 4;
+          default:
+            _health = (_health + 10 > 100) ? 100 : _health + 10;
+        }
       }
       if ((m.info.flags & MobjFlags.countItem) != 0) _itemCount++;
       _emitPlayerSound('DSITEMUP');
@@ -1909,6 +2072,10 @@ class GameState {
   }
 
   void _appendSound(SoundEvent event) {
+    assert(
+      _coreSoundIds.contains(event.soundId),
+      'Uncatalogued core sound id: ${event.soundId}',
+    );
     if (_sounds.length < maxSoundJournalLength) {
       _sounds.add(event);
       return;
@@ -1955,6 +2122,7 @@ class GameState {
     add(config.maxCatchUpTics);
     add(config.monsters ? 1 : 0);
     add(config.maxSoundPropagationVisits);
+    add(config.maxStairBuildVisits);
     add(_nextId);
     add(_useHeld ? 1 : 0);
     add(_health);
@@ -2070,36 +2238,58 @@ class _DoorMover extends SectorMover {
     super.sector,
     this.target, {
     required this.closeAfterWait,
+    required bool startsClosing,
+    required this.reopenAfterWait,
+    required this.reverseOnObstruction,
+    required int closedTarget,
     required this.obstructed,
-  }) : _closed = sector.ceilingHeight;
+  }) : _closed = closedTarget,
+       _closing = startsClosing;
   final int target;
   final int _closed;
   final bool closeAfterWait;
+  final bool reopenAfterWait;
+  final bool reverseOnObstruction;
   final bool Function(int nextCeiling) obstructed;
   int _wait = 150;
-  bool _closing = false;
+  bool _closing;
+  bool _waitingAtBottom = false;
   bool get isClosing => _closing;
   @override
   bool tick() {
     final int step = toFixed(4);
+    if (_waitingAtBottom) {
+      if (--_wait <= 0) {
+        _waitingAtBottom = false;
+        _closing = false;
+      }
+      return false;
+    }
     if (!_closing) {
       sector.ceilingHeight += step;
       if (sector.ceilingHeight >= target) {
         sector.ceilingHeight = target;
         if (!closeAfterWait) finished = true;
-        if (closeAfterWait && _wait-- <= 0) _closing = true;
+        if (closeAfterWait && --_wait <= 0) _closing = true;
       }
     } else {
       final int next = sector.ceilingHeight - step;
       if (obstructed(next)) {
-        _closing = false;
-        _wait = 150;
+        if (reverseOnObstruction) {
+          _closing = false;
+          _wait = 150;
+        }
         return false;
       }
       sector.ceilingHeight = next;
       if (sector.ceilingHeight <= _closed) {
         sector.ceilingHeight = _closed;
-        finished = true;
+        if (reopenAfterWait) {
+          _wait = 30 * kTicRate;
+          _waitingAtBottom = true;
+        } else {
+          finished = true;
+        }
       }
     }
     return true;
@@ -2111,8 +2301,11 @@ class _DoorMover extends SectorMover {
     target,
     _closed,
     closeAfterWait ? 1 : 0,
+    reopenAfterWait ? 1 : 0,
+    reverseOnObstruction ? 1 : 0,
     _wait,
     _closing ? 1 : 0,
+    _waitingAtBottom ? 1 : 0,
   ];
 }
 
@@ -2151,19 +2344,24 @@ class _LiftMover extends SectorMover {
 }
 
 class _FloorMover extends SectorMover {
-  _FloorMover(super.sector, this.target, {required this.obstructed});
+  _FloorMover(
+    super.sector,
+    this.target, {
+    required this.obstructed,
+    this.speed = kFracUnit,
+  });
   final int target;
+  final int speed;
   final bool Function(int nextFloor) obstructed;
 
   @override
   bool tick() {
-    const int step = kFracUnit;
     if (sector.floorHeight == target) {
       finished = true;
       return false;
     }
     final int direction = target > sector.floorHeight ? 1 : -1;
-    int next = sector.floorHeight + step * direction;
+    int next = sector.floorHeight + speed * direction;
     if ((direction > 0 && next > target) || (direction < 0 && next < target)) {
       next = target;
     }
@@ -2174,34 +2372,260 @@ class _FloorMover extends SectorMover {
   }
 
   @override
-  Iterable<int> get hashWords => <int>[3, target];
+  Iterable<int> get hashWords => <int>[3, target, speed];
 }
 
-bool _isDoorSpecial(int special) =>
-    <int>{1, 26, 27, 28, 31, 32, 33, 34, 61, 99, 103, 134}.contains(special);
-bool _isSwitchDoorSpecial(int special) =>
-    <int>{61, 99, 103, 134}.contains(special);
-bool _doorStaysOpen(int special) => <int>{31, 32, 33, 34, 61}.contains(special);
+enum _DoorKind { openWaitClose, openStay, close, closeWaitOpen }
+
+enum _LineActivation { use, cross, shoot }
+
+enum _LineDispatchKind {
+  useDoor,
+  useLift,
+  useFloor,
+  useStair,
+  useExit,
+  walkDoor,
+  walkLift,
+  walkFloor,
+  walkStair,
+  walkExit,
+  shootFloor,
+}
+
+enum _FloorTargetKind {
+  raise24,
+  raiseToLowestCeilingMinus8,
+  raiseToLowestCeiling,
+  raiseToNextHigher,
+  lowerToHighest,
+  lowerToLowest,
+  lowerTurbo,
+}
+
+const Set<int> _useDoorSpecials = <int>{
+  1,
+  26,
+  27,
+  28,
+  31,
+  32,
+  33,
+  34,
+  61,
+  99,
+  103,
+  134,
+};
+const Set<int> _walkDoorSpecials = <int>{2, 3, 4, 16, 75, 86, 90};
+const Set<int> _switchDoorSpecials = <int>{61, 99, 103, 134};
+const Set<int> _walkLiftSpecials = <int>{10, 88, 120, 121};
+const Set<int> _useLiftSpecials = <int>{21, 62, 122, 123};
+const Set<int> _walkFloorSpecials = <int>{5, 19, 36, 38, 58, 82, 91, 119, 128};
+const Set<int> _useFloorSpecials = <int>{18, 23};
+const Set<int> _walkStairSpecials = <int>{8};
+const Set<int> _useStairSpecials = <int>{7};
+const Set<int> _walkExitSpecials = <int>{52, 124};
+const Set<int> _useExitSpecials = <int>{11, 51};
+const Set<int> _shootFloorSpecials = <int>{24};
+const Set<int> _monsterWalkSpecials = <int>{4, 10, 88};
+const Map<int, _FloorTargetKind> _floorTargetKinds = <int, _FloorTargetKind>{
+  5: _FloorTargetKind.raiseToLowestCeilingMinus8,
+  18: _FloorTargetKind.raiseToNextHigher,
+  19: _FloorTargetKind.lowerToHighest,
+  23: _FloorTargetKind.lowerToLowest,
+  24: _FloorTargetKind.raise24,
+  36: _FloorTargetKind.lowerTurbo,
+  38: _FloorTargetKind.lowerToLowest,
+  58: _FloorTargetKind.raise24,
+  82: _FloorTargetKind.lowerToLowest,
+  91: _FloorTargetKind.raiseToLowestCeiling,
+  119: _FloorTargetKind.raiseToNextHigher,
+  128: _FloorTargetKind.raiseToNextHigher,
+};
+final Set<int> _supportedLineSpecials = Set<int>.unmodifiable(<int>{
+  ..._useDoorSpecials,
+  ..._walkDoorSpecials,
+  ..._switchDoorSpecials,
+  ..._walkLiftSpecials,
+  ..._useLiftSpecials,
+  ..._walkFloorSpecials,
+  ..._useFloorSpecials,
+  ..._walkStairSpecials,
+  ..._useStairSpecials,
+  ..._walkExitSpecials,
+  ..._useExitSpecials,
+  ..._shootFloorSpecials,
+});
+const Set<int> _supportedSectorSpecials = <int>{
+  1,
+  2,
+  3,
+  4,
+  5,
+  7,
+  8,
+  9,
+  11,
+  12,
+  13,
+  17,
+};
+const Set<String> _coreSoundIds = <String>{
+  'DSDORCLS',
+  'DSDOROPN',
+  'DSITEMUP',
+  'DSPISTOL',
+  'DSPLPAIN',
+  'DSPODTH1',
+  'DSPSTART',
+  'DSPSTOP',
+  'DSPUNCH',
+  'DSSHOTGN',
+  'DSSWTCHN',
+  'DSSWTCHX',
+  'DSWPNUP',
+};
+
+bool _isSwitchDoorSpecial(int special) => _switchDoorSpecials.contains(special);
+_DoorKind _doorKind(int special) => switch (special) {
+  LineSpecial.walkDoorCloseOnce ||
+  LineSpecial.walkDoorCloseRepeat => _DoorKind.close,
+  LineSpecial.walkDoorCloseWaitOpenOnce => _DoorKind.closeWaitOpen,
+  LineSpecial.doorOpenStay ||
+  LineSpecial.blueDoorOpenStay ||
+  LineSpecial.redDoorOpenStay ||
+  LineSpecial.yellowDoorOpenStay ||
+  LineSpecial.switchDoorOpenStay ||
+  LineSpecial.walkDoorOpenStayOnce ||
+  LineSpecial.walkDoorOpenStayRepeat => _DoorKind.openStay,
+  _ => _DoorKind.openWaitClose,
+};
 Key? _requiredKey(int special) => switch (special) {
   26 || 32 || 99 => Key.blue,
   27 || 34 => Key.yellow,
   28 || 33 || 134 => Key.red,
   _ => null,
 };
-bool _isWalkLiftSpecial(int special) =>
-    <int>{10, 88, 120, 121}.contains(special);
-bool _isUseLiftSpecial(int special) =>
-    <int>{21, 62, 122, 123}.contains(special);
-bool _isWalkFloorSpecial(int special) => special == 5;
-bool _isUseSpecial(int special) =>
-    _isDoorSpecial(special) ||
-    _isUseLiftSpecial(special) ||
-    special == LineSpecial.exitSwitchOnce ||
-    special == LineSpecial.secretExitSwitchOnce;
+Key? _keyForMobjType(MobjType type) => switch (type) {
+  MobjType.misc2 => Key.blue,
+  MobjType.misc3 => Key.yellow,
+  MobjType.misc4 => Key.red,
+  _ => null,
+};
+bool _isOneShotWalkSpecial(int special) =>
+    <int>{2, 3, 4, 5, 8, 10, 16, 19, 36, 38, 58, 119, 121}.contains(special);
 bool _isRepeatableSwitchSpecial(int special) =>
     <int>{61, 62, 99, 123, 134}.contains(special);
 bool _isOneShotSwitchSpecial(int special) =>
-    <int>{11, 21, 24, 51, 103, 122}.contains(special);
+    <int>{7, 11, 18, 21, 23, 24, 51, 103, 122}.contains(special);
+
+_LineDispatchKind? _lineDispatchKind(int special, _LineActivation activation) =>
+    switch (activation) {
+      _LineActivation.use when _useDoorSpecials.contains(special) =>
+        _LineDispatchKind.useDoor,
+      _LineActivation.use when _useLiftSpecials.contains(special) =>
+        _LineDispatchKind.useLift,
+      _LineActivation.use when _useFloorSpecials.contains(special) =>
+        _LineDispatchKind.useFloor,
+      _LineActivation.use when _useStairSpecials.contains(special) =>
+        _LineDispatchKind.useStair,
+      _LineActivation.use when _useExitSpecials.contains(special) =>
+        _LineDispatchKind.useExit,
+      _LineActivation.cross when _walkDoorSpecials.contains(special) =>
+        _LineDispatchKind.walkDoor,
+      _LineActivation.cross when _walkLiftSpecials.contains(special) =>
+        _LineDispatchKind.walkLift,
+      _LineActivation.cross when _walkFloorSpecials.contains(special) =>
+        _LineDispatchKind.walkFloor,
+      _LineActivation.cross when _walkStairSpecials.contains(special) =>
+        _LineDispatchKind.walkStair,
+      _LineActivation.cross when _walkExitSpecials.contains(special) =>
+        _LineDispatchKind.walkExit,
+      _LineActivation.shoot when _shootFloorSpecials.contains(special) =>
+        _LineDispatchKind.shootFloor,
+      _ => null,
+    };
+
+/// Internal structural tripwire used by package tests. It compares the public
+/// catalog with the classifier sets consumed by the three runtime dispatchers,
+/// and also verifies that every classified floor special has target semantics.
+/// This is deliberately not exported from doom_core.dart.
+List<String> linedefDispatcherCoverageIssuesForTesting() {
+  final Map<_LineActivation, List<Set<int>>> classifiers =
+      <_LineActivation, List<Set<int>>>{
+        _LineActivation.use: <Set<int>>[
+          _useDoorSpecials,
+          _useLiftSpecials,
+          _useFloorSpecials,
+          _useStairSpecials,
+          _useExitSpecials,
+        ],
+        _LineActivation.cross: <Set<int>>[
+          _walkDoorSpecials,
+          _walkLiftSpecials,
+          _walkFloorSpecials,
+          _walkStairSpecials,
+          _walkExitSpecials,
+        ],
+        _LineActivation.shoot: <Set<int>>[_shootFloorSpecials],
+      };
+  final List<String> issues = <String>[];
+  final Set<int> dispatched = <int>{};
+  for (final MapEntry<_LineActivation, List<Set<int>>> entry
+      in classifiers.entries) {
+    for (final Set<int> classifier in entry.value) {
+      for (final int special in classifier) {
+        if (!dispatched.add(special)) {
+          issues.add('special $special has more than one activation path');
+        }
+        if (_lineDispatchKind(special, entry.key) == null) {
+          issues.add('special $special is not dispatched for ${entry.key}');
+        }
+      }
+    }
+  }
+  if (!dispatched.containsAll(_supportedLineSpecials) ||
+      !_supportedLineSpecials.containsAll(dispatched)) {
+    issues.add('catalog and runtime classifier union differ');
+  }
+  final Set<int> classifiedFloors = <int>{
+    ..._useFloorSpecials,
+    ..._walkFloorSpecials,
+    ..._shootFloorSpecials,
+  };
+  if (!classifiedFloors.containsAll(_floorTargetKinds.keys) ||
+      !_floorTargetKinds.keys.toSet().containsAll(classifiedFloors)) {
+    issues.add('floor classifiers and target semantics differ');
+  }
+  if (!<int>{
+    ..._walkDoorSpecials,
+    ..._walkLiftSpecials,
+  }.containsAll(_monsterWalkSpecials)) {
+    issues.add('monster walk classifier contains an unsupported special');
+  }
+  return List<String>.unmodifiable(issues);
+}
+
+/// One stable public entry point for format-data capability auditing.
+///
+/// The linedef set is assembled from the exact classifier sets used by the
+/// runtime dispatcher. Actor lookup delegates to the same catalog used during
+/// map spawning, and sound ids are the canonical DS lump names emitted here.
+abstract final class DoomCoreCatalog {
+  static Set<int> get supportedLinedefSpecials => _supportedLineSpecials;
+  static Set<int> get supportedSectorSpecials => _supportedSectorSpecials;
+  static Set<String> get soundIds => _coreSoundIds;
+
+  static MobjInfo? infoForEdNum(int doomEdNum) => _infoForEdNum(doomEdNum);
+
+  static Key? requiredKeyForLineSpecial(int special) => _requiredKey(special);
+
+  static Key? keyForEdNum(int doomEdNum) {
+    final MobjInfo? info = _infoForEdNum(doomEdNum);
+    return info == null ? null : _keyForMobjType(info.id);
+  }
+}
 
 const MobjInfo _playerInfo = MobjInfo(
   id: MobjType.player,
@@ -2610,6 +3034,7 @@ const MobjInfo _barrelInfo = MobjInfo(
   flags: MobjFlags.solid | MobjFlags.shootable,
 );
 MobjInfo? _infoForEdNum(int n) => switch (n) {
+  1 => _playerInfo,
   3004 => _possessedInfo,
   9 => _shotguyInfo,
   3001 => _impInfo,

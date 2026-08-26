@@ -1,5 +1,4 @@
 import 'package:doom_core/doom_core.dart';
-import 'package:doom_core/src/mobj_info.dart';
 import 'package:doom_core/src/mobj_states.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';

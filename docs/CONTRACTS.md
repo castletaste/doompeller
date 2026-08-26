@@ -159,11 +159,26 @@ class GameState {
   List<SwitchTextureChange> get switchJournal; // retained visual output
   int hashState();                    // deterministic replay oracle
 }
+
+abstract final class DoomCoreCatalog {
+  static Set<int> get supportedLinedefSpecials;
+  static Set<int> get supportedSectorSpecials;
+  static Set<String> get soundIds;             // canonical DS* lump names
+  static MobjInfo? infoForEdNum(int doomEdNum);
+  static Key? requiredKeyForLineSpecial(int special);
+  static Key? keyForEdNum(int doomEdNum);
+}
 ```
 
 `GameConfig.maxSoundPropagationVisits` bounds one weapon-noise sector walk and
 defaults to `DoomLimits.defaults.maxSectors` (65535). The ruleset value is
 future-affecting and is included in `hashState()`.
+
+`GameConfig.maxStairBuildVisits` similarly bounds one stair-building traversal,
+defaults to 65535, and is included in `hashState()`. `DoomCoreCatalog` is the
+single public capability-audit entry point: its linedef set is assembled from
+the exact dispatcher classifier sets; actor/key lookups share spawn and pickup
+classification; sound ids are the canonical DS lump names emitted by the core.
 
 Monster awareness stores the latest live sound target per reached sector.
 Traversal uses pre-indexed touching linedefs, crosses at most one
@@ -182,14 +197,18 @@ The core classifies specials by their explicit map-format values in
 | normal door | 1, 31 | tag-0 uses the used line's back sector; tagged lines target matching sectors; 1 opens, waits 150 tics, then closes; 31 stays open |
 | locked door | 26/32 blue, 27/34 yellow, 28/33 red | requires collected key, otherwise leaves the line inactive; wait-close for 26/27/28, stay-open for 32/33/34 |
 | switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; S1 stays pressed, SR resets after 35 tics |
+| walk doors | W1 2 open-stay, 3 close, 4 open-wait-close, 16 close-wait-open; WR 75 close, 86 open-stay, 90 open-wait-close | tagged sectors only; normal speed; waits 150 tics at top and 1050 tics for close-wait-open; closing never damages an obstructing live actor; W1 consumes the line, WR may retrigger |
 | lifts | 10, 21, 62, 88, 120..123 | sector floor descends to lowest neighbour, waits 35 tics, then returns |
-| floors | 5 walk, 24 gun | tagged sectors raise to eight below the lowest neighbouring ceiling or by 24 units |
+| raise floors | 5 walk / 24 gun to eight below lowest neighbouring ceiling; S1 18 and W1/WR 119/128 to next higher neighbouring floor; W1 58 by 24; WR 91 to lowest neighbouring ceiling | tagged sectors use distinct height queries; W1/S1 are one-shot, WR retriggers after the previous mover completes |
+| lower floors | W1 19 to highest neighbour, 36 turbo to highest neighbour plus 8, 38 to lowest neighbour; S1 23 and WR 82 to lowest neighbour | tagged sectors; normal one-unit speed except 36 at four units/tic; lowering cannot crush |
+| stairs | S1 7, W1 8 | raises a directed front-to-back chain of same-floor-flat sectors in successive 8-unit steps at quarter floor speed; traversal and queue growth stop at `maxStairBuildVisits` |
 | switch exit (S1) | 11 normal, 51 secret | front-side player use, once; records `levelComplete` and secret-trigger intent |
 | walk exit (W1) | 52 normal, 124 secret | player crossing in either direction, once; records the same completion state |
 | sector effects | 1..5, 7..9, 11..13, 17 | deterministic flicker/strobe/glow journals light deltas; 5/7/11 damage at 32-tic cadence; 9 increments one-time secret count |
 
-The implementation does **not** claim demo compatibility, crusher behaviour,
-generalized Boom specials, teleporters, or a complete
+The implementation does **not** claim demo compatibility, crusher/ceiling
+behaviour, floor texture/special transfer (37/59 and raise-nearest-and-change
+variants 20/22), generalized Boom specials, teleporters, donut 9, or a complete
 commercial-E1M1 audit. Those need separate work and runtime verification with
 the developer-local WAD, never a committed asset.
 
@@ -249,7 +268,10 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xd3e34da8` for seed 7 and its documented twenty-command stream. Spawn order
+`0x35ec969a` for seed 7 and its documented twenty-command stream. The combat
+oracle is pinned at `0x8a4407a8`. Both pins changed only because the new
+future-affecting `maxStairBuildVisits` ruleset word is hashed; isolated runs
+without a stair special confirmed no gameplay/RNG divergence. Spawn order
 is intentionally part of deterministic identity and therefore part of the
 hash; actor hashing itself sorts by stable actor id.
 

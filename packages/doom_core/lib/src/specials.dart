@@ -3,7 +3,7 @@
 /// Values are the map-format special numbers, not inferred labels. They are
 /// intentionally centralized so unsupported data is visible during map review.
 abstract final class LineSpecial {
-  // Walk-once / use normal doors.
+  // Use normal doors.
   static const int doorOpenWaitClose = 1;
   static const int doorOpenStay = 31;
   static const int blueDoorOpenWaitClose = 26;
@@ -17,9 +17,30 @@ abstract final class LineSpecial {
   static const int switchDoorOpenStay = 61;
   static const int switchBlueDoorOpenWaitClose = 99;
   static const int switchRedDoorOpenWaitClose = 134;
+  // Walk doors. W1 variants consume the line; WR variants may retrigger after
+  // the sector's previous mover has completed.
+  static const int walkDoorOpenStayOnce = 2;
+  static const int walkDoorCloseOnce = 3;
+  static const int walkDoorOpenWaitCloseOnce = 4;
+  static const int walkDoorCloseWaitOpenOnce = 16;
+  static const int walkDoorCloseRepeat = 75;
+  static const int walkDoorOpenStayRepeat = 86;
+  static const int walkDoorOpenWaitCloseRepeat = 90;
   // Floors/lifts.
   static const int floorRaiseToLowestCeiling = 5;
   static const int floorRaise24 = 24;
+  static const int switchFloorRaiseToNextHigherOnce = 18;
+  static const int walkFloorLowerToHighestOnce = 19;
+  static const int switchFloorLowerToLowestOnce = 23;
+  static const int walkFloorLowerTurboOnce = 36;
+  static const int walkFloorLowerToLowestOnce = 38;
+  static const int walkFloorRaise24Once = 58;
+  static const int walkFloorLowerToLowestRepeat = 82;
+  static const int walkFloorRaiseToLowestCeilingRepeat = 91;
+  static const int walkFloorRaiseToNextHigherOnce = 119;
+  static const int walkFloorRaiseToNextHigherRepeat = 128;
+  static const int switchBuildStairs8Once = 7;
+  static const int walkBuildStairs8Once = 8;
   static const int liftDownWaitUp = 10;
   static const int liftDownWaitUpSwitch = 21;
   static const int liftDownWaitUpFast = 88;

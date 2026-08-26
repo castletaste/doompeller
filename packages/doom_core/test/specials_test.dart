@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:doom_core/doom_core.dart';
+import 'package:doom_core/src/game_state.dart' as game_state_internal;
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
 
@@ -171,6 +172,187 @@ List<Sector> twoSectors({
     tag: 0,
   ),
 ];
+
+MapData taggedSpecialMap({
+  required int special,
+  int targetFloor = 0,
+  int targetCeiling = 128,
+  List<int> neighborFloors = const <int>[0, 0],
+  List<int> neighborCeilings = const <int>[128, 128],
+  bool switchTexture = false,
+  List<Thing> extraThings = const <Thing>[],
+  int playerX = 64,
+  int playerAngle = 0,
+}) {
+  assert(neighborFloors.length == 2);
+  assert(neighborCeilings.length == 2);
+  const List<MapVertex> vertices = <MapVertex>[
+    MapVertex(128, 128),
+    MapVertex(128, 0),
+    MapVertex(0, 320),
+    MapVertex(128, 320),
+    MapVertex(0, 384),
+    MapVertex(128, 384),
+  ];
+  Sidedef side(int sector, {String upper = '-'}) => Sidedef(
+    xOffset: 0,
+    yOffset: 0,
+    upperTexture: upper,
+    lowerTexture: '-',
+    middleTexture: '-',
+    sector: sector,
+  );
+  Sector sector({required int floor, required int ceiling, int tag = 0}) =>
+      Sector(
+        floorHeight: floor,
+        ceilingHeight: ceiling,
+        floorFlat: 'STAIR',
+        ceilingFlat: 'C',
+        lightLevel: 160,
+        special: 0,
+        tag: tag,
+      );
+  return MapData(
+    name: 'TAGGED',
+    vertices: vertices,
+    linedefs: <Linedef>[
+      Linedef(
+        v1: 0,
+        v2: 1,
+        flags: LinedefFlags.twoSided,
+        special: special,
+        tag: 7,
+        rightSidedef: 0,
+        leftSidedef: 1,
+      ),
+      const Linedef(
+        v1: 2,
+        v2: 3,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 2,
+        leftSidedef: 3,
+      ),
+      const Linedef(
+        v1: 4,
+        v2: 5,
+        flags: LinedefFlags.twoSided,
+        special: 0,
+        tag: 0,
+        rightSidedef: 2,
+        leftSidedef: 4,
+      ),
+    ],
+    sidedefs: <Sidedef>[
+      side(0, upper: switchTexture ? 'SW1COMP' : '-'),
+      side(1),
+      side(2),
+      side(3),
+      side(4),
+    ],
+    sectors: <Sector>[
+      sector(floor: 0, ceiling: 128),
+      sector(floor: 0, ceiling: 128),
+      sector(floor: targetFloor, ceiling: targetCeiling, tag: 7),
+      sector(floor: neighborFloors[0], ceiling: neighborCeilings[0]),
+      sector(floor: neighborFloors[1], ceiling: neighborCeilings[1]),
+    ],
+    segs: const <Seg>[],
+    subsectors: const <Subsector>[],
+    nodes: const <BspNode>[],
+    things: <Thing>[
+      Thing(x: playerX, y: 64, angle: playerAngle, type: 1, flags: _allSkills),
+      ...extraThings,
+    ],
+    blockmap: null,
+    reject: null,
+  );
+}
+
+MapData stairMap(int special) {
+  final MapData base = taggedSpecialMap(special: special);
+  final List<Sector> sectors = List<Sector>.of(base.sectors)
+    ..add(
+      const Sector(
+        floorHeight: 0,
+        ceilingHeight: 128,
+        floorFlat: 'STAIR',
+        ceilingFlat: 'C',
+        lightLevel: 160,
+        special: 0,
+        tag: 0,
+      ),
+    );
+  final List<Sidedef> sides = List<Sidedef>.of(base.sidedefs)
+    ..add(
+      const Sidedef(
+        xOffset: 0,
+        yOffset: 0,
+        upperTexture: '-',
+        lowerTexture: '-',
+        middleTexture: '-',
+        sector: 5,
+      ),
+    );
+  final List<Linedef> lines = <Linedef>[
+    base.linedefs[0],
+    // Directed front-to-back chain 2 -> 3 -> 5. Sector 4 is another
+    // neighbour but not on the stair chain.
+    base.linedefs[1],
+    const Linedef(
+      v1: 4,
+      v2: 5,
+      flags: LinedefFlags.twoSided,
+      special: 0,
+      tag: 0,
+      rightSidedef: 3,
+      leftSidedef: 5,
+    ),
+  ];
+  return MapData(
+    name: base.name,
+    vertices: base.vertices,
+    linedefs: lines,
+    sidedefs: sides,
+    sectors: sectors,
+    segs: base.segs,
+    subsectors: base.subsectors,
+    nodes: base.nodes,
+    things: base.things,
+    blockmap: null,
+    reject: null,
+  );
+}
+
+MapData withThings(MapData base, List<Thing> things) => MapData(
+  name: base.name,
+  vertices: base.vertices,
+  linedefs: base.linedefs,
+  sidedefs: base.sidedefs,
+  sectors: base.sectors,
+  segs: base.segs,
+  subsectors: base.subsectors,
+  nodes: base.nodes,
+  things: things,
+  blockmap: base.blockmap,
+  reject: base.reject,
+);
+
+void crossEast(GameState game) {
+  for (var tic = 0; tic < 100 && game.player.x <= toFixed(128); tic++) {
+    game.runTic(const TicCmd(forwardMove: 10));
+  }
+  expect(game.player.x, greaterThan(toFixed(128)));
+}
+
+void crossWest(GameState game) {
+  game.runTic(const TicCmd(angleTurn: 0x8000));
+  for (var tic = 0; tic < 100 && game.player.x >= toFixed(128); tic++) {
+    game.runTic(const TicCmd(forwardMove: 10));
+  }
+  expect(game.player.x, lessThan(toFixed(128)));
+}
 
 void main() {
   group('runtime map/collision', () {
@@ -390,6 +572,415 @@ void main() {
   });
 
   group('doors, lifts and effects', () {
+    test('public capability catalog shares dispatcher and actor truth', () {
+      expect(
+        game_state_internal.linedefDispatcherCoverageIssuesForTesting(),
+        isEmpty,
+      );
+      expect(
+        DoomCoreCatalog.supportedLinedefSpecials,
+        containsAll(<int>[
+          LineSpecial.walkDoorOpenStayOnce,
+          LineSpecial.walkFloorLowerToHighestOnce,
+          LineSpecial.walkBuildStairs8Once,
+        ]),
+      );
+      expect(
+        DoomCoreCatalog.supportedSectorSpecials,
+        contains(SectorSpecial.secret),
+      );
+      expect(DoomCoreCatalog.infoForEdNum(3001)?.isMonster, isTrue);
+      expect(DoomCoreCatalog.infoForEdNum(5)?.spriteName, 'BKEY');
+      expect(DoomCoreCatalog.keyForEdNum(5), Key.blue);
+      expect(
+        DoomCoreCatalog.requiredKeyForLineSpecial(
+          LineSpecial.blueDoorOpenWaitClose,
+        ),
+        Key.blue,
+      );
+      expect(DoomCoreCatalog.soundIds, contains('DSWPNUP'));
+      expect(
+        DoomCoreCatalog.soundIds.every((String id) => id.startsWith('DS')),
+        isTrue,
+      );
+    });
+
+    test('walk doors implement W1/WR modes and obstruction safety', () {
+      GameState door(int special, {List<Thing> extras = const <Thing>[]}) {
+        final bool startsOpen = <int>{
+          LineSpecial.walkDoorCloseOnce,
+          LineSpecial.walkDoorCloseWaitOpenOnce,
+          LineSpecial.walkDoorCloseRepeat,
+        }.contains(special);
+        return GameState.start(
+          taggedSpecialMap(
+            special: special,
+            targetCeiling: startsOpen ? 128 : 32,
+            extraThings: extras,
+          ),
+          const GameConfig(monsters: false),
+        );
+      }
+
+      final GameState openStay = door(LineSpecial.walkDoorOpenStayOnce);
+      crossEast(openStay);
+      for (var i = 0; i < 30; i++) {
+        openStay.runTic(TicCmd.empty);
+      }
+      expect(openStay.sectors.elementAt(2).ceilingHeight, toFixed(124));
+      crossWest(openStay);
+      expect(openStay.sectors.elementAt(2).hasMover, isFalse);
+
+      final GameState close = door(LineSpecial.walkDoorCloseOnce);
+      crossEast(close);
+      for (var i = 0; i < 40; i++) {
+        close.runTic(TicCmd.empty);
+      }
+      expect(close.sectors.elementAt(2).ceilingHeight, toFixed(0));
+
+      final GameState raise = door(LineSpecial.walkDoorOpenWaitCloseOnce);
+      crossEast(raise);
+      for (var i = 0; i < 30; i++) {
+        raise.runTic(TicCmd.empty);
+      }
+      expect(raise.sectors.elementAt(2).ceilingHeight, toFixed(124));
+      for (var i = 0; i < 200; i++) {
+        raise.runTic(TicCmd.empty);
+      }
+      expect(raise.sectors.elementAt(2).ceilingHeight, toFixed(0));
+
+      final GameState closeWaitOpen = door(
+        LineSpecial.walkDoorCloseWaitOpenOnce,
+      );
+      crossEast(closeWaitOpen);
+      for (var i = 0; i < 40; i++) {
+        closeWaitOpen.runTic(TicCmd.empty);
+      }
+      expect(closeWaitOpen.sectors.elementAt(2).ceilingHeight, toFixed(0));
+      for (var i = 0; i < 1100; i++) {
+        closeWaitOpen.runTic(TicCmd.empty);
+      }
+      expect(closeWaitOpen.sectors.elementAt(2).ceilingHeight, toFixed(128));
+
+      final GameState blockedClose = door(
+        LineSpecial.walkDoorCloseOnce,
+        extras: const <Thing>[
+          Thing(x: 64, y: 300, angle: 0, type: 2035, flags: _allSkills),
+        ],
+      );
+      crossEast(blockedClose);
+      for (var i = 0; i < 40; i++) {
+        blockedClose.runTic(TicCmd.empty);
+      }
+      expect(
+        blockedClose.sectors.elementAt(2).ceilingHeight,
+        greaterThan(toFixed(42)),
+      );
+      expect(
+        blockedClose.mobjs
+            .firstWhere((MobjView m) => m.sprite == 'BAR1')
+            .health,
+        20,
+      );
+
+      for (final int special in <int>[
+        LineSpecial.walkDoorCloseRepeat,
+        LineSpecial.walkDoorOpenStayRepeat,
+        LineSpecial.walkDoorOpenWaitCloseRepeat,
+      ]) {
+        final GameState repeat = door(special);
+        crossEast(repeat);
+        for (var i = 0; i < 230; i++) {
+          repeat.runTic(TicCmd.empty);
+        }
+        crossWest(repeat);
+        expect(
+          repeat.sectors.elementAt(2).hasMover,
+          isTrue,
+          reason: '$special',
+        );
+      }
+    });
+
+    test('door waits use vanilla tick counts at top and bottom', () {
+      final GameState top = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkDoorOpenWaitCloseOnce,
+          targetCeiling: 32,
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(top);
+      while (top.sectors.elementAt(2).ceilingHeight < toFixed(124)) {
+        top.runTic(TicCmd.empty);
+      }
+      for (var i = 0; i < 149; i++) {
+        top.runTic(TicCmd.empty);
+      }
+      expect(top.sectors.elementAt(2).ceilingHeight, toFixed(124));
+      top.runTic(TicCmd.empty);
+      expect(top.sectors.elementAt(2).ceilingHeight, toFixed(120));
+
+      final GameState bottom = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkDoorCloseWaitOpenOnce,
+          targetCeiling: 128,
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(bottom);
+      while (bottom.sectors.elementAt(2).ceilingHeight > 0) {
+        bottom.runTic(TicCmd.empty);
+      }
+      for (var i = 0; i < 1050; i++) {
+        bottom.runTic(TicCmd.empty);
+      }
+      expect(bottom.sectors.elementAt(2).ceilingHeight, toFixed(0));
+      bottom.runTic(TicCmd.empty);
+      expect(bottom.sectors.elementAt(2).ceilingHeight, toFixed(4));
+    });
+
+    test('monsters cross-trigger only the vanilla 4, 10, and 88 subset', () {
+      for (final (int special, bool expected) in <(int, bool)>[
+        (LineSpecial.walkDoorOpenWaitCloseOnce, true),
+        (LineSpecial.liftDownWaitUp, true),
+        (LineSpecial.liftDownWaitUpFast, true),
+        (LineSpecial.walkDoorOpenStayOnce, false),
+      ]) {
+        final MapData base = taggedSpecialMap(
+          special: special,
+          targetFloor: 32,
+          targetCeiling: special == LineSpecial.walkDoorOpenWaitCloseOnce
+              ? 32
+              : 128,
+        );
+        final GameState game = GameState.start(
+          withThings(base, const <Thing>[
+            Thing(x: 192, y: 64, angle: 180, type: 1, flags: _allSkills),
+            Thing(x: 64, y: 64, angle: 0, type: 3004, flags: _allSkills),
+          ]),
+          const GameConfig(),
+          seed: 2,
+        );
+        for (
+          var tic = 0;
+          tic < 200 && !game.sectors.elementAt(2).hasMover;
+          tic++
+        ) {
+          game.runTic(TicCmd.empty);
+        }
+        expect(
+          game.sectors.elementAt(2).hasMover,
+          expected,
+          reason:
+              'monster did not activate walk special $special: '
+              '${game.mobjs.map((MobjView m) => (m.sprite, fixedToInt(m.x), fixedToInt(m.y))).toList()}',
+        );
+      }
+    });
+
+    test(
+      'walk and switch floors use distinct vanilla height queries',
+      () async {
+        Future<void> reaches(
+          int special,
+          int expected, {
+          int start = 64,
+          List<int> floors = const <int>[16, 96],
+          List<int> ceilings = const <int>[100, 120],
+          bool use = false,
+        }) async {
+          final GameState game = GameState.start(
+            taggedSpecialMap(
+              special: special,
+              targetFloor: start,
+              neighborFloors: floors,
+              neighborCeilings: ceilings,
+              switchTexture: use,
+            ),
+            const GameConfig(monsters: false),
+          );
+          if (use) {
+            game.runTic(const TicCmd(buttons: Buttons.use));
+          } else {
+            crossEast(game);
+          }
+          for (var i = 0; i < 400; i++) {
+            game.runTic(TicCmd.empty);
+          }
+          expect(
+            game.sectors.elementAt(2).floorHeight,
+            toFixed(expected),
+            reason: '$special',
+          );
+        }
+
+        await reaches(LineSpecial.walkFloorLowerToHighestOnce, 96, start: 128);
+        await reaches(LineSpecial.walkFloorLowerTurboOnce, 104, start: 128);
+        await reaches(LineSpecial.walkFloorLowerToLowestOnce, 16);
+        await reaches(LineSpecial.walkFloorLowerToLowestRepeat, 16);
+        await reaches(LineSpecial.walkFloorRaise24Once, 88);
+        await reaches(LineSpecial.walkFloorRaiseToLowestCeilingRepeat, 100);
+        await reaches(
+          LineSpecial.walkFloorRaiseToNextHigherOnce,
+          80,
+          floors: const <int>[80, 112],
+        );
+        await reaches(
+          LineSpecial.walkFloorRaiseToNextHigherRepeat,
+          80,
+          floors: const <int>[80, 112],
+        );
+        await reaches(
+          LineSpecial.switchFloorRaiseToNextHigherOnce,
+          80,
+          use: true,
+          floors: const <int>[80, 112],
+        );
+        await reaches(LineSpecial.switchFloorLowerToLowestOnce, 16, use: true);
+      },
+    );
+
+    test('all use specials reject the directed line back side', () {
+      final GameState front = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.switchFloorRaiseToNextHigherOnce,
+          targetFloor: 64,
+          neighborFloors: const <int>[80, 112],
+          switchTexture: true,
+        ),
+        const GameConfig(monsters: false),
+      );
+      front.runTic(const TicCmd(buttons: Buttons.use));
+      expect(front.sectors.elementAt(2).hasMover, isTrue);
+
+      final GameState back = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.switchFloorRaiseToNextHigherOnce,
+          targetFloor: 64,
+          neighborFloors: const <int>[80, 112],
+          switchTexture: true,
+          playerX: 160,
+          playerAngle: 180,
+        ),
+        const GameConfig(monsters: false),
+      );
+      back.runTic(const TicCmd(buttons: Buttons.use));
+      expect(back.sectors.elementAt(2).hasMover, isFalse);
+      expect(back.switchJournal, isEmpty);
+    });
+
+    test('W1 floor is consumed while WR floor retriggers', () {
+      final GameState once = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkFloorRaise24Once,
+          targetFloor: 0,
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(once);
+      for (var i = 0; i < 30; i++) {
+        once.runTic(TicCmd.empty);
+      }
+      crossWest(once);
+      for (var i = 0; i < 30; i++) {
+        once.runTic(TicCmd.empty);
+      }
+      expect(once.sectors.elementAt(2).floorHeight, toFixed(24));
+
+      final GameState repeat = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkFloorRaiseToNextHigherRepeat,
+          targetFloor: 0,
+          neighborFloors: const <int>[24, 48],
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(repeat);
+      for (var i = 0; i < 30; i++) {
+        repeat.runTic(TicCmd.empty);
+      }
+      crossWest(repeat);
+      for (var i = 0; i < 30; i++) {
+        repeat.runTic(TicCmd.empty);
+      }
+      expect(repeat.sectors.elementAt(2).floorHeight, toFixed(48));
+    });
+
+    test('future mover phase, speed, and stair budget are hashed', () {
+      final GameState stairsOne = GameState.start(
+        stairMap(LineSpecial.walkBuildStairs8Once),
+        const GameConfig(monsters: false, maxStairBuildVisits: 1),
+      );
+      final GameState stairsTwo = GameState.start(
+        stairMap(LineSpecial.walkBuildStairs8Once),
+        const GameConfig(monsters: false, maxStairBuildVisits: 2),
+      );
+      expect(stairsOne.hashState(), isNot(stairsTwo.hashState()));
+
+      final GameState slow = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkFloorLowerToHighestOnce,
+          targetFloor: 128,
+          neighborFloors: const <int>[16, 96],
+        ),
+        const GameConfig(monsters: false),
+      );
+      final GameState turbo = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkFloorLowerTurboOnce,
+          targetFloor: 128,
+          neighborFloors: const <int>[16, 88],
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(slow);
+      crossEast(turbo);
+      // Both target 96, but the mover speed changes their future.
+      expect(slow.hashState(), isNot(turbo.hashState()));
+
+      final GameState closing = GameState.start(
+        taggedSpecialMap(
+          special: LineSpecial.walkDoorCloseWaitOpenOnce,
+          targetCeiling: 128,
+        ),
+        const GameConfig(monsters: false),
+      );
+      crossEast(closing);
+      for (var i = 0; i < 40; i++) {
+        closing.runTic(TicCmd.empty);
+      }
+      final int waitingHash = closing.hashState();
+      closing.runTic(TicCmd.empty);
+      expect(closing.hashState(), isNot(waitingHash));
+    });
+
+    test('stairs follow directed same-flat chain and obey visit budget', () {
+      final GameState full = GameState.start(
+        stairMap(LineSpecial.walkBuildStairs8Once),
+        const GameConfig(monsters: false, maxStairBuildVisits: 3),
+      );
+      crossEast(full);
+      for (var i = 0; i < 110; i++) {
+        full.runTic(TicCmd.empty);
+      }
+      expect(full.sectors.elementAt(2).floorHeight, toFixed(8));
+      expect(full.sectors.elementAt(3).floorHeight, toFixed(16));
+      expect(full.sectors.elementAt(5).floorHeight, toFixed(24));
+
+      final GameState bounded = GameState.start(
+        stairMap(LineSpecial.switchBuildStairs8Once),
+        const GameConfig(monsters: false, maxStairBuildVisits: 2),
+      );
+      bounded.runTic(const TicCmd(buttons: Buttons.use));
+      for (var i = 0; i < 110; i++) {
+        bounded.runTic(TicCmd.empty);
+      }
+      expect(bounded.sectors.elementAt(2).floorHeight, toFixed(8));
+      expect(bounded.sectors.elementAt(3).floorHeight, toFixed(16));
+      expect(bounded.sectors.elementAt(5).floorHeight, toFixed(0));
+    });
+
     test(
       'animation frame lookup is derived output and does not mutate hash',
       () {
@@ -499,7 +1090,7 @@ void main() {
       for (int i = 0; i < 200; i++) {
         game.runTic(TicCmd.empty);
       }
-      expect(game.sectors.elementAt(1).ceilingHeight, toFixed(32));
+      expect(game.sectors.elementAt(1).ceilingHeight, toFixed(0));
     });
 
     test('door stay-open completes without closing', () {
@@ -575,7 +1166,7 @@ void main() {
       for (var tic = 0; tic < 250; tic++) {
         game.runTic(TicCmd.empty);
       }
-      expect(game.sectors.elementAt(1).ceilingHeight, toFixed(32));
+      expect(game.sectors.elementAt(1).ceilingHeight, toFixed(0));
     });
 
     test('mapped lift executes down-wait-up cycle', () {

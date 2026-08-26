@@ -435,7 +435,7 @@ void main() {
       // its persistent sector target, but AI direction/attack RNG is never
       // consumed, so the chase-order correction deliberately leaves this pin
       // unchanged.
-      expect(game.hashState(), 0x74805ffe);
+      expect(game.hashState(), 0x8a4407a8);
       for (var tic = 0; tic < 10; tic++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }

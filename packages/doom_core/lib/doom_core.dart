@@ -2,6 +2,7 @@ export 'src/angles.dart';
 export 'src/config.dart';
 export 'src/fixed.dart';
 export 'src/game_state.dart';
+export 'src/mobj_info.dart';
 export 'src/replay.dart';
 export 'src/sector_runtime.dart';
 export 'src/sound_events.dart';

@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:doom_core/doom_core.dart';
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doom_wad/doom_wad.dart';
 
@@ -298,6 +299,11 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
   compileClock.stop();
 
   final GeometryReport report = level.report;
+  final _GameplaySummary gameplaySummary = _gameplaySummary(
+    map,
+    resources,
+    level,
+  );
   final int maxSurfaceVertices = level.meshes.isEmpty
       ? 0
       : level.meshes
@@ -326,8 +332,11 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
       missingFlats.isNotEmpty ||
       !uint16WithinLimit ||
       hasGeometryProblems;
+  final bool hasGameplayGaps = gameplaySummary.hasProgressionGaps;
   final String verdict = hasProblems
       ? 'PROBLEMS'
+      : hasGameplayGaps
+      ? 'READY WITH GAPS'
       : fallbackSectors.isNotEmpty || report.animationFailures.isNotEmpty
       ? 'READY WITH FALLBACKS'
       : 'READY';
@@ -354,6 +363,7 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
       'maps': set.mapNames(),
     },
     'resources': resourceSummary.json,
+    'gameplay': gameplaySummary.json,
     'mapCounts': <String, Object?>{
       'vertexes': map.vertices.length,
       'linedefs': map.linedefs.length,
@@ -420,6 +430,7 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
       'static animations: '
       '${report.animationFailures.isEmpty ? "none" : report.animationFailures.join(', ')}',
     )
+    ..write(gameplaySummary.text)
     ..writeln(
       'map $mapName: vertices ${map.vertices.length}, '
       'linedefs ${map.linedefs.length}, sidedefs ${map.sidedefs.length}, '
@@ -635,4 +646,496 @@ bool _textureResolves(WadResources resources, String name) {
             resources.patchAt(placement.patchIndex) != null,
       ) &&
       resources.composite(name) != null;
+}
+
+/// Gameplay-format audit which intentionally consumes only doom_core's public
+/// catalog. It never re-states the core's supported-special or sound lists.
+_GameplaySummary _gameplaySummary(
+  MapData map,
+  WadResources resources,
+  CompiledLevel level,
+) {
+  final _SpecialCoverage lineSpecials = _specialCoverage(<int>[
+    for (final Linedef line in map.linedefs) line.special,
+  ], DoomCoreCatalog.supportedLinedefSpecials);
+  final _SpecialCoverage sectorSpecials = _specialCoverage(<int>[
+    for (final Sector sector in map.sectors) sector.special,
+  ], DoomCoreCatalog.supportedSectorSpecials);
+  final _ThingSummary things = _thingSummary(map.things);
+  final _ProgressionSummary progression = _progressionSummary(
+    map.things,
+    map.linedefs,
+  );
+  final _SoundSummary sounds = _soundSummary(resources);
+  final _AnimationSummary animations = _animationSummary(resources, level);
+  return _GameplaySummary(
+    lineSpecials: lineSpecials,
+    sectorSpecials: sectorSpecials,
+    things: things,
+    progression: progression,
+    sounds: sounds,
+    animations: animations,
+  );
+}
+
+class _GameplaySummary {
+  const _GameplaySummary({
+    required this.lineSpecials,
+    required this.sectorSpecials,
+    required this.things,
+    required this.progression,
+    required this.sounds,
+    required this.animations,
+  });
+
+  final _SpecialCoverage lineSpecials;
+  final _SpecialCoverage sectorSpecials;
+  final _ThingSummary things;
+  final _ProgressionSummary progression;
+  final _SoundSummary sounds;
+  final _AnimationSummary animations;
+
+  bool get hasProgressionGaps =>
+      lineSpecials.unsupported.isNotEmpty ||
+      sectorSpecials.unsupported.isNotEmpty ||
+      things.unknownTypes.isNotEmpty ||
+      progression.hasMissingKeys;
+
+  Map<String, Object?> get json => <String, Object?>{
+    'linedefSpecials': lineSpecials.json,
+    'sectorSpecials': sectorSpecials.json,
+    'things': things.json,
+    'progression': progression.json,
+    'sounds': sounds.json,
+    'animationsAndSwitches': animations.json,
+  };
+
+  String get text {
+    final StringBuffer text = StringBuffer()
+      ..writeln(
+        'linedef specials: ${lineSpecials.supportedUses}/${lineSpecials.uses} '
+        'supported; unsupported ${_formatCounts(lineSpecials.unsupported)}',
+      )
+      ..writeln(
+        'sector specials: ${sectorSpecials.supportedUses}/${sectorSpecials.uses} '
+        'supported; unsupported ${_formatCounts(sectorSpecials.unsupported)}',
+      )
+      ..writeln(
+        'things: player starts ${things.playerStarts}; co-op starts '
+        '${things.coopStarts}; known spawnable ${things.knownSpawnable}; '
+        'known non-spawning ${things.knownNonSpawning}; unknown '
+        '${_formatCounts(things.unknownTypes)}',
+      )
+      ..writeln('things by skill: ${things.skillText}')
+      ..writeln(
+        'exits: ${_formatCounts(progression.exitSpecials)}; locked doors '
+        '${_formatCounts(progression.lockedDoorSpecials)}; '
+        'missing keys ${progression.missingKeysText}',
+      )
+      ..writeln(
+        'sounds: ${sounds.resolved.length}/${sounds.expected.length} expected '
+        'DS* resolved; missing ${_formatNames(sounds.missing)}',
+      )
+      ..writeln(
+        'animations in WAD: ${animations.resolvedSequences} resolved, '
+        '${animations.degradedSequences.length} degraded; switches in WAD: '
+        '${animations.resolvedSwitchPairs} resolved; map emits '
+        '${animations.mapAnimationSequences} animations and '
+        '${animations.mapSwitchPairs} switch pairs; static '
+        '${_formatNames(animations.staticFailures)}',
+      );
+    return text.toString();
+  }
+}
+
+class _SpecialCoverage {
+  const _SpecialCoverage({
+    required this.uses,
+    required this.supportedUses,
+    required this.supported,
+    required this.unsupported,
+  });
+
+  final int uses;
+  final int supportedUses;
+  final Map<int, int> supported;
+  final Map<int, int> unsupported;
+
+  Map<String, Object?> get json => <String, Object?>{
+    'uses': uses,
+    'supportedUses': supportedUses,
+    'supported': _jsonIntCounts(supported),
+    'unsupported': _jsonIntCounts(unsupported),
+  };
+}
+
+_SpecialCoverage _specialCoverage(Iterable<int> specials, Set<int> supported) {
+  final Map<int, int> counts = _countInts(
+    specials.where((int value) => value != 0),
+  );
+  final Map<int, int> supportedCounts = <int, int>{};
+  final Map<int, int> unsupportedCounts = <int, int>{};
+  for (final MapEntry<int, int> entry in counts.entries) {
+    (supported.contains(entry.key)
+            ? supportedCounts
+            : unsupportedCounts)[entry.key] =
+        entry.value;
+  }
+  return _SpecialCoverage(
+    uses: counts.values.fold(0, (int total, int count) => total + count),
+    supportedUses: supportedCounts.values.fold(
+      0,
+      (int total, int count) => total + count,
+    ),
+    supported: supportedCounts,
+    unsupported: unsupportedCounts,
+  );
+}
+
+class _ThingSummary {
+  const _ThingSummary({
+    required this.types,
+    required this.playerStarts,
+    required this.coopStarts,
+    required this.knownSpawnable,
+    required this.knownNonSpawning,
+    required this.unknownTypes,
+    required this.bySkill,
+  });
+
+  final List<Map<String, Object?>> types;
+  final int playerStarts;
+  final int coopStarts;
+  final int knownSpawnable;
+  final int knownNonSpawning;
+  final Map<int, int> unknownTypes;
+  final Map<Skill, _SkillThingCounts> bySkill;
+
+  Map<String, Object?> get json => <String, Object?>{
+    'types': types,
+    'playerStarts': playerStarts,
+    'cooperativeStarts': coopStarts,
+    'knownSpawnable': knownSpawnable,
+    'knownNonSpawning': knownNonSpawning,
+    'unknownTypes': _jsonIntCounts(unknownTypes),
+    'bySkill': <String, Object?>{
+      for (final Skill skill in Skill.values) skill.name: bySkill[skill]!.json,
+    },
+  };
+
+  String get skillText => Skill.values
+      .map(
+        (Skill skill) =>
+            '${skill.name} monsters ${bySkill[skill]!.monsters}, items '
+            '${bySkill[skill]!.items}',
+      )
+      .join('; ');
+}
+
+class _SkillThingCounts {
+  _SkillThingCounts({
+    required this.spawnable,
+    required this.monsters,
+    required this.items,
+  });
+
+  int spawnable;
+  int monsters;
+  int items;
+
+  Map<String, int> get json => <String, int>{
+    'spawnable': spawnable,
+    'monsters': monsters,
+    'items': items,
+  };
+}
+
+_ThingSummary _thingSummary(List<Thing> things) {
+  const Set<int> coopStartTypes = <int>{2, 3, 4};
+  final Map<int, int> allTypes = _countInts(
+    things.map((Thing thing) => thing.type),
+  );
+  final Map<int, int> unknown = <int, int>{};
+  var playerStarts = 0;
+  var coopStarts = 0;
+  var knownSpawnable = 0;
+  var knownNonSpawning = 0;
+  final Map<Skill, _SkillThingCounts> bySkill = <Skill, _SkillThingCounts>{
+    for (final Skill skill in Skill.values)
+      skill: _SkillThingCounts(spawnable: 0, monsters: 0, items: 0),
+  };
+  for (final Thing thing in things) {
+    final MobjInfo? info = DoomCoreCatalog.infoForEdNum(thing.type);
+    final bool isPlayerStart = thing.type == 1;
+    final bool isCoopStart = coopStartTypes.contains(thing.type);
+    if (isPlayerStart) {
+      playerStarts++;
+    } else if (isCoopStart) {
+      coopStarts++;
+      knownNonSpawning++;
+    } else if (info == null) {
+      unknown[thing.type] = (unknown[thing.type] ?? 0) + 1;
+    } else {
+      knownSpawnable++;
+    }
+    for (final Skill skill in Skill.values) {
+      if (!_enabledForSkill(thing, skill) ||
+          (thing.flags & ThingFlags.multiplayerOnly) != 0 ||
+          isCoopStart) {
+        continue;
+      }
+      final _SkillThingCounts counts = bySkill[skill]!;
+      if (isPlayerStart || info != null) counts.spawnable++;
+      if (info?.isMonster ?? false) counts.monsters++;
+      if (info?.isPickup ?? false) counts.items++;
+    }
+  }
+  final List<Map<String, Object?>> types = <Map<String, Object?>>[
+    for (final int type in allTypes.keys.toList()..sort())
+      <String, Object?>{
+        'type': type,
+        'count': allTypes[type],
+        'classification': type == 1
+            ? 'playerStart'
+            : coopStartTypes.contains(type)
+            ? 'cooperativeStart'
+            : DoomCoreCatalog.infoForEdNum(type) == null
+            ? 'unknown'
+            : 'spawnable',
+        'spawnableBySkill': <String, int>{
+          for (final Skill skill in Skill.values)
+            skill.name: things
+                .where(
+                  (Thing thing) =>
+                      thing.type == type &&
+                      !_isCoopStart(thing.type) &&
+                      _enabledForSkill(thing, skill) &&
+                      (thing.flags & ThingFlags.multiplayerOnly) == 0 &&
+                      (thing.type == 1 ||
+                          DoomCoreCatalog.infoForEdNum(thing.type) != null),
+                )
+                .length,
+        },
+      },
+  ];
+  return _ThingSummary(
+    types: types,
+    playerStarts: playerStarts,
+    coopStarts: coopStarts,
+    knownSpawnable: knownSpawnable,
+    knownNonSpawning: knownNonSpawning,
+    unknownTypes: unknown,
+    bySkill: bySkill,
+  );
+}
+
+bool _isCoopStart(int type) => type == 2 || type == 3 || type == 4;
+
+bool _enabledForSkill(Thing thing, Skill skill) {
+  final int flag = switch (skill) {
+    Skill.easy => ThingFlags.easy,
+    Skill.medium => ThingFlags.medium,
+    Skill.hard => ThingFlags.hard,
+  };
+  return thing.flags == 0 || (thing.flags & flag) != 0;
+}
+
+class _ProgressionSummary {
+  const _ProgressionSummary({
+    required this.exitSpecials,
+    required this.lockedDoorSpecials,
+    required this.keysBySkill,
+    required this.missingKeysBySkill,
+  });
+
+  final Map<int, int> exitSpecials;
+  final Map<int, int> lockedDoorSpecials;
+  final Map<Skill, Set<Key>> keysBySkill;
+  final Map<Skill, Set<Key>> missingKeysBySkill;
+
+  bool get hasMissingKeys =>
+      missingKeysBySkill.values.any((Set<Key> keys) => keys.isNotEmpty);
+
+  Map<String, Object?> get json => <String, Object?>{
+    'exitSpecials': _jsonIntCounts(exitSpecials),
+    'hasExit': exitSpecials.isNotEmpty,
+    'lockedDoorSpecials': _jsonIntCounts(lockedDoorSpecials),
+    'keysBySkill': <String, Object?>{
+      for (final Skill skill in Skill.values)
+        skill.name: _keyNames(keysBySkill[skill]!),
+    },
+    'missingKeysBySkill': <String, Object?>{
+      for (final Skill skill in Skill.values)
+        skill.name: _keyNames(missingKeysBySkill[skill]!),
+    },
+  };
+
+  String get missingKeysText => Skill.values
+      .map(
+        (Skill skill) =>
+            '${skill.name} ${_formatNames(_keyNames(missingKeysBySkill[skill]!))}',
+      )
+      .join('; ');
+}
+
+_ProgressionSummary _progressionSummary(
+  List<Thing> things,
+  List<Linedef> lines,
+) {
+  const Set<int> exitSpecials = <int>{11, 51, 52, 124};
+  final Map<int, int> exits = _countInts(
+    lines
+        .where((Linedef line) => exitSpecials.contains(line.special))
+        .map((Linedef line) => line.special),
+  );
+  final Map<int, int> locked = <int, int>{};
+  final Set<Key> required = <Key>{};
+  for (final Linedef line in lines) {
+    final Key? key = DoomCoreCatalog.requiredKeyForLineSpecial(line.special);
+    if (key == null) continue;
+    locked[line.special] = (locked[line.special] ?? 0) + 1;
+    required.add(key);
+  }
+  final Map<Skill, Set<Key>> keysBySkill = <Skill, Set<Key>>{};
+  final Map<Skill, Set<Key>> missingBySkill = <Skill, Set<Key>>{};
+  for (final Skill skill in Skill.values) {
+    final Set<Key> keys = <Key>{};
+    for (final Thing thing in things) {
+      if (!_enabledForSkill(thing, skill) ||
+          (thing.flags & ThingFlags.multiplayerOnly) != 0) {
+        continue;
+      }
+      final Key? key = DoomCoreCatalog.keyForEdNum(thing.type);
+      if (key != null) keys.add(key);
+    }
+    keysBySkill[skill] = keys;
+    missingBySkill[skill] = <Key>{...required}..removeAll(keys);
+  }
+  return _ProgressionSummary(
+    exitSpecials: exits,
+    lockedDoorSpecials: locked,
+    keysBySkill: keysBySkill,
+    missingKeysBySkill: missingBySkill,
+  );
+}
+
+class _SoundSummary {
+  const _SoundSummary({
+    required this.expected,
+    required this.resolved,
+    required this.missing,
+  });
+
+  final List<String> expected;
+  final List<String> resolved;
+  final List<String> missing;
+
+  Map<String, Object?> get json => <String, Object?>{
+    'expected': expected,
+    'resolved': resolved,
+    'missing': missing,
+  };
+}
+
+_SoundSummary _soundSummary(WadResources resources) {
+  final List<String> expected = DoomCoreCatalog.soundIds.toList()..sort();
+  final List<String> resolved = <String>[];
+  final List<String> missing = <String>[];
+  for (final String name in expected) {
+    if (resources.sound(name) == null) {
+      missing.add(name);
+    } else {
+      resolved.add(name);
+    }
+  }
+  return _SoundSummary(
+    expected: expected,
+    resolved: resolved,
+    missing: missing,
+  );
+}
+
+class _AnimationSummary {
+  const _AnimationSummary({
+    required this.resolvedSequences,
+    required this.degradedSequences,
+    required this.resolvedSwitchPairs,
+    required this.mapAnimationSequences,
+    required this.mapSwitchPairs,
+    required this.staticFailures,
+  });
+
+  final int resolvedSequences;
+  final List<String> degradedSequences;
+  final int resolvedSwitchPairs;
+  final int mapAnimationSequences;
+  final int mapSwitchPairs;
+  final List<String> staticFailures;
+
+  Map<String, Object?> get json => <String, Object?>{
+    'wad': <String, Object?>{
+      'resolvedAnimationSequences': resolvedSequences,
+      'degradedAnimationSequences': degradedSequences,
+      'resolvedSwitchPairs': resolvedSwitchPairs,
+    },
+    'map': <String, Object?>{
+      'emittedAnimationSequences': mapAnimationSequences,
+      'emittedSwitchPairs': mapSwitchPairs,
+      'staticFailures': staticFailures,
+    },
+  };
+}
+
+_AnimationSummary _animationSummary(
+  WadResources resources,
+  CompiledLevel level,
+) {
+  final DoomAnimationResolution resolution = resolveDoomAnimations(resources);
+  final List<String> degraded = <String>[
+    for (final DoomAnimationFailure failure in resolution.failures)
+      '${failure.definition.startName}->${failure.definition.endName}: ${failure.reason}',
+  ]..sort();
+  var resolvedSwitchPairs = 0;
+  for (final DoomSwitchPair pair in vanillaDoomSwitches) {
+    if (_textureResolves(resources, pair.offName) &&
+        _textureResolves(resources, pair.onName)) {
+      resolvedSwitchPairs++;
+    }
+  }
+  return _AnimationSummary(
+    resolvedSequences: resolution.animations.length,
+    degradedSequences: degraded,
+    resolvedSwitchPairs: resolvedSwitchPairs,
+    mapAnimationSequences: level.animations.length,
+    mapSwitchPairs: level.switchFrames.length ~/ 2,
+    staticFailures: List<String>.of(level.report.animationFailures)..sort(),
+  );
+}
+
+Map<int, int> _countInts(Iterable<int> values) {
+  final Map<int, int> counts = <int, int>{};
+  for (final int value in values) {
+    counts[value] = (counts[value] ?? 0) + 1;
+  }
+  return counts;
+}
+
+List<Map<String, int>> _jsonIntCounts(Map<int, int> counts) =>
+    <Map<String, int>>[
+      for (final int value in counts.keys.toList()..sort())
+        <String, int>{'number': value, 'count': counts[value]!},
+    ];
+
+List<String> _keyNames(Set<Key> keys) =>
+    keys.map((Key key) => key.name).toList()..sort();
+
+String _formatCounts(Map<int, int> counts) => counts.isEmpty
+    ? 'none'
+    : (counts.keys.toList()..sort())
+          .map((int number) => '$number (${counts[number]})')
+          .join(', ');
+
+String _formatNames(Iterable<String> names) {
+  final List<String> ordered = names.toList()..sort();
+  return ordered.isEmpty ? 'none' : ordered.join(', ');
 }

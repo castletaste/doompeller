@@ -147,37 +147,47 @@ void main() {
 
   test('camera stays below the current moving sector ceiling', () {
     final MapData map = testMap(
-      sectors: twoSectors(backCeiling: 32),
-      sides: twoSides(),
-      lines: <Linedef>[portal(special: LineSpecial.doorOpenWaitClose)],
-      things: const <Thing>[
-        Thing(
-          x: 160,
-          y: 64,
-          angle: 180,
-          type: 1,
-          flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+      sectors: const <Sector>[
+        Sector(
+          floorHeight: 0,
+          ceilingHeight: 32,
+          floorFlat: 'F',
+          ceilingFlat: 'C',
+          lightLevel: 160,
+          special: 0,
+          tag: 7,
+        ),
+        Sector(
+          floorHeight: 0,
+          ceilingHeight: 128,
+          floorFlat: 'F',
+          ceilingFlat: 'C',
+          lightLevel: 160,
+          special: 0,
+          tag: 0,
         ),
       ],
+      sides: twoSides(),
+      lines: <Linedef>[portal(special: LineSpecial.doorOpenWaitClose, tag: 7)],
     );
     final GameState game = GameState.start(
       map,
       const GameConfig(monsters: false),
     );
-    expect(game.playerSectorIndex, 1);
+    expect(game.playerSectorIndex, 0);
     expect(game.player.viewZ, toFixed(28));
 
     game.runTic(const TicCmd(buttons: Buttons.use));
     game.runTic(TicCmd.empty);
-    expect(map.sectors[1].ceilingHeight, 32);
-    expect(game.sectors.elementAt(1).ceilingHeight, toFixed(36));
+    expect(map.sectors[0].ceilingHeight, 32);
+    expect(game.sectors.elementAt(0).ceilingHeight, toFixed(36));
     expect(game.player.viewZ, toFixed(32));
 
-    int previousCeiling = game.sectors.elementAt(1).ceilingHeight;
+    int previousCeiling = game.sectors.elementAt(0).ceilingHeight;
     bool observedDescendingCeiling = false;
     for (int i = 0; i < 220; i++) {
       game.runTic(TicCmd.empty);
-      final int ceiling = game.sectors.elementAt(1).ceilingHeight;
+      final int ceiling = game.sectors.elementAt(0).ceilingHeight;
       if (ceiling < previousCeiling) observedDescendingCeiling = true;
       expect(game.player.viewZ, lessThanOrEqualTo(ceiling - toFixed(4)));
       previousCeiling = ceiling;
@@ -237,7 +247,7 @@ void main() {
     // order and full-search order, and successful movement consumes its own
     // move-count draw. That classic decision order intentionally moves this
     // AI-enabled replay pin.
-    expect(a.hashState(), 0xd3e34da8);
+    expect(a.hashState(), 0x35ec969a);
   });
 
   test(

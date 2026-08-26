@@ -12,7 +12,9 @@ class GameConfig {
     // Kept equal to DoomLimits.defaults.maxSectors. Dart constant evaluation
     // cannot use an instance-field read as a default parameter expression.
     this.maxSoundPropagationVisits = 65535,
-  }) : assert(maxSoundPropagationVisits > 0);
+    this.maxStairBuildVisits = 65535,
+  }) : assert(maxSoundPropagationVisits > 0),
+       assert(maxStairBuildVisits > 0);
 
   final Skill skill;
   final int maxCatchUpTics;
@@ -22,6 +24,10 @@ class GameConfig {
   /// bounded by [DoomLimits.maxSectors], while this also bounds directly
   /// constructed maps used by embedders and adversarial tests.
   final int maxSoundPropagationVisits;
+
+  /// Maximum sectors one stair-building activation may inspect and schedule.
+  /// This protects the tic from cyclic or adversarial sector graphs.
+  final int maxStairBuildVisits;
 }
 
 enum Weapon { fist, pistol, shotgun, chaingun }

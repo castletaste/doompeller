@@ -26,7 +26,7 @@ void main() {
     final ProcessResult result = await _run(<String>[]);
 
     expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
-    expect(result.stdout, contains('VERDICT: READY'));
+    expect(result.stdout, contains('VERDICT: READY\n'));
     expect(result.stderr, isEmpty);
     _expectNoWadContent(result);
   });
@@ -42,9 +42,33 @@ void main() {
     expect(report['resources'], isA<Map<String, Object?>>());
     expect(report['mapCounts'], isA<Map<String, Object?>>());
     expect(report['geometry'], isA<Map<String, Object?>>());
+    expect(report['gameplay'], isA<Map<String, Object?>>());
     expect(report['timingsMs'], isA<Map<String, Object?>>());
     expect(report['missingTextures'], isEmpty);
     expect(report['missingFlats'], isEmpty);
+    final Map<String, Object?> gameplay =
+        report['gameplay']! as Map<String, Object?>;
+    final Map<String, Object?> lineSpecials =
+        gameplay['linedefSpecials']! as Map<String, Object?>;
+    final Map<String, Object?> sectorSpecials =
+        gameplay['sectorSpecials']! as Map<String, Object?>;
+    final Map<String, Object?> things =
+        gameplay['things']! as Map<String, Object?>;
+    final Map<String, Object?> progression =
+        gameplay['progression']! as Map<String, Object?>;
+    final Map<String, Object?> sounds =
+        gameplay['sounds']! as Map<String, Object?>;
+    final Map<String, Object?> animations =
+        gameplay['animationsAndSwitches']! as Map<String, Object?>;
+    expect(lineSpecials['unsupported'], isEmpty);
+    expect(sectorSpecials['unsupported'], isEmpty);
+    expect(things['playerStarts'], 1);
+    expect(things['cooperativeStarts'], 1);
+    expect(things['unknownTypes'], isEmpty);
+    expect(progression['hasExit'], isTrue);
+    expect(sounds['missing'], isEmpty);
+    expect(animations['wad'], isA<Map<String, Object?>>());
+    expect(animations['map'], isA<Map<String, Object?>>());
     _expectNoWadContent(result);
   });
 
@@ -66,6 +90,80 @@ void main() {
     final Map<String, Object?> geometry =
         report['geometry']! as Map<String, Object?>;
     expect(geometry['fallbackSectorCount'], 0);
+    final Map<String, Object?> gameplay =
+        report['gameplay']! as Map<String, Object?>;
+    final Map<String, Object?> sounds =
+        gameplay['sounds']! as Map<String, Object?>;
+    expect(sounds['missing'], isNotEmpty);
+  });
+
+  test(
+    'gameplay gaps name unsupported specials and difficulty-missing keys',
+    () async {
+      final String path = _write(
+        temp,
+        'gameplay-gaps.wad',
+        _fixtureWithGameplayGaps(),
+      );
+
+      final ProcessResult result = await _run(<String>[
+        '--json',
+        '--map',
+        DoomFixtures.mapName,
+        path,
+      ]);
+
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+      expect(result.stderr, isEmpty);
+      final Map<String, Object?> report = _json(result);
+      expect(report['verdict'], 'READY WITH GAPS');
+      final Map<String, Object?> gameplay =
+          report['gameplay']! as Map<String, Object?>;
+      final Map<String, Object?> lineSpecials =
+          gameplay['linedefSpecials']! as Map<String, Object?>;
+      final Map<String, Object?> progression =
+          gameplay['progression']! as Map<String, Object?>;
+      expect(lineSpecials['unsupported'], <Object?>[
+        <String, Object?>{'number': 999, 'count': 1},
+      ]);
+      expect(progression['lockedDoorSpecials'], <Object?>[
+        <String, Object?>{'number': 26, 'count': 1},
+      ]);
+      final Map<String, Object?> missing =
+          progression['missingKeysBySkill']! as Map<String, Object?>;
+      expect(missing['easy'], <String>['blue']);
+      expect(missing['medium'], <String>['blue']);
+      expect(missing['hard'], isEmpty);
+      _expectNoWadContent(result);
+    },
+  );
+
+  test('unknown thing types downgrade READY to READY WITH GAPS', () async {
+    final String path = _write(
+      temp,
+      'unknown-thing.wad',
+      _fixtureWithUnknownThing(),
+    );
+
+    final ProcessResult result = await _run(<String>[
+      '--json',
+      '--map',
+      DoomFixtures.mapName,
+      path,
+    ]);
+
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect(result.stderr, isEmpty);
+    final Map<String, Object?> report = _json(result);
+    expect(report['verdict'], 'READY WITH GAPS');
+    final Map<String, Object?> gameplay =
+        report['gameplay']! as Map<String, Object?>;
+    final Map<String, Object?> things =
+        gameplay['things']! as Map<String, Object?>;
+    expect(things['unknownTypes'], <Object?>[
+      <String, Object?>{'number': 9999, 'count': 1},
+    ]);
+    _expectNoWadContent(result, bytes: _fixtureWithUnknownThing());
   });
 
   test('explicit existing and missing map names have clear outcomes', () async {
@@ -274,18 +372,71 @@ Uint8List _fixtureWithMissingTexture() {
   return bytes;
 }
 
+Uint8List _fixtureWithGameplayGaps() {
+  final Uint8List bytes = Uint8List.fromList(DoomFixtures.pwadBytes());
+  final WadFile wad = WadFile.parse(bytes);
+  final ByteData data = ByteData.sublistView(bytes);
+  final int linedefsOffset = wad.lumps[wad.indexOfLump('LINEDEFS')!].offset;
+  // Linedefs are 14 bytes; special is the uint16 at byte 6.
+  data
+    ..setUint16(linedefsOffset + 6, 999, Endian.little)
+    ..setUint16(linedefsOffset + 14 + 6, 26, Endian.little);
+  final int thingsOffset = wad.lumps[wad.indexOfLump('THINGS')!].offset;
+  // THINGS are 10 bytes; entry 1 becomes a blue key only on hard skill.
+  data
+    ..setUint16(thingsOffset + 10 + 6, 5, Endian.little)
+    ..setUint16(thingsOffset + 10 + 8, 4, Endian.little);
+  return bytes;
+}
+
+Uint8List _fixtureWithUnknownThing() {
+  final Uint8List bytes = Uint8List.fromList(DoomFixtures.pwadBytes());
+  final WadFile wad = WadFile.parse(bytes);
+  final int thingsOffset = wad.lumps[wad.indexOfLump('THINGS')!].offset;
+  // Replace the fixture's cooperative start with an actor the runtime cannot
+  // spawn. The report must surface the unknown type as a progression gap.
+  ByteData.sublistView(
+    bytes,
+  ).setUint16(thingsOffset + 10 + 6, 9999, Endian.little);
+  return bytes;
+}
+
 Map<String, Object?> _json(ProcessResult result) {
   final Object? decoded = jsonDecode(result.stdout as String);
   expect(decoded, isA<Map<String, Object?>>());
   return decoded! as Map<String, Object?>;
 }
 
-void _expectNoWadContent(ProcessResult result) {
-  final String fixtureHash = fnv1a64(
-    DoomFixtures.pwadBytes(),
-  ).toRadixString(16);
+void _expectNoWadContent(ProcessResult result, {Uint8List? bytes}) {
+  final Uint8List wadBytes = bytes ?? DoomFixtures.pwadBytes();
+  final String fixtureHash = fnv1a64(wadBytes).toRadixString(16);
+  final String output = '${result.stdout}\n${result.stderr}';
   expect(result.stdout, isNot(contains(fixtureHash)));
   expect(result.stderr, isNot(contains(fixtureHash)));
-  expect(result.stdout, isNot(contains('PAT1')));
-  expect(result.stderr, isNot(contains('PAT1')));
+  // Dynamic tripwire: reject long raw-byte windows in common dump encodings.
+  // Unlike checking one known lump name, this follows any fixture mutation and
+  // catches whole-WAD or partial payload disclosure as hex, base64, or arrays.
+  const int window = 24;
+  for (var offset = 0; offset + window <= wadBytes.length; offset += window) {
+    final List<int> chunk = wadBytes.sublist(offset, offset + window);
+    final String hex = chunk
+        .map((int byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    expect(output, isNot(contains(hex)), reason: 'hex WAD bytes at $offset');
+    expect(
+      output,
+      isNot(contains(base64Encode(chunk))),
+      reason: 'base64 WAD bytes at $offset',
+    );
+    expect(
+      output,
+      isNot(contains(chunk.join(','))),
+      reason: 'compact byte array at $offset',
+    );
+    expect(
+      output,
+      isNot(contains(chunk.join(', '))),
+      reason: 'byte array at $offset',
+    );
+  }
 }

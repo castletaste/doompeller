@@ -228,6 +228,13 @@ authority: candidates are unioned with the loader-bounded canonical linedef
 list. This intentionally favors fail-closed E1M1 correctness over broadphase
 speed until a separately validated pure-Dart spatial index replaces the union.
 
+Persistent momentum is clamped symmetrically and split into two collision
+steps when either component exceeds half the per-tic maximum. Splitting
+negative as well as positive components is an intentional anti-tunnelling
+strengthening; vanilla only split positive components. Player
+input adds thrust only while `Mobj.isOnGround`, preventing future vertical
+physics from introducing air control.
+
 `GameState.changeJournal` retains ordered floor, ceiling, light, and floor-flat records
 until `consumeChangeJournal()` is called. This prevents a renderer that misses
 one 35 Hz tic from silently losing an earlier plane update; consuming returns

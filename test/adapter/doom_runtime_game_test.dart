@@ -643,32 +643,108 @@ void main() {
     expect(runtime.automap.value.visitedLines, initiallyMapped);
   });
 
-  test('focus loss clears held W and Ctrl before the next TicCmd', () async {
-    final runtime = DoomRuntimeGame(await fixtureLevel());
-    runtime.onKeyEvent(
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.keyW,
-        logicalKey: LogicalKeyboardKey.keyW,
-        timeStamp: Duration.zero,
-      ),
-      <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
-    );
-    runtime.onKeyEvent(
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.controlLeft,
-        logicalKey: LogicalKeyboardKey.controlLeft,
-        timeStamp: Duration.zero,
-      ),
-      <LogicalKeyboardKey>{
-        LogicalKeyboardKey.keyW,
-        LogicalKeyboardKey.controlLeft,
-      },
-    );
+  test(
+    'Shift runs, coexists with automap zoom, and focus loss clears it',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.keyW,
+          logicalKey: LogicalKeyboardKey.keyW,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
+      );
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.shiftLeft,
+          logicalKey: LogicalKeyboardKey.shiftLeft,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.shiftLeft,
+        },
+      );
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.keyD,
+          logicalKey: LogicalKeyboardKey.keyD,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.keyD,
+          LogicalKeyboardKey.shiftLeft,
+        },
+      );
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.equal,
+          logicalKey: LogicalKeyboardKey.add,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.keyD,
+          LogicalKeyboardKey.shiftLeft,
+          LogicalKeyboardKey.add,
+        },
+      );
+      final running = runtime.input.consume().command;
+      expect(running.forwardMove, DoomInputState.runMoveSpeed);
+      expect(running.sideMove, DoomInputState.runStrafeSpeed);
+      expect(
+        runtime.automap.value.zoom,
+        greaterThan(DoomAutomapState.initialZoom),
+      );
 
-    runtime.clearInput();
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.shiftRight,
+          logicalKey: LogicalKeyboardKey.shiftRight,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.keyD,
+          LogicalKeyboardKey.shiftLeft,
+          LogicalKeyboardKey.shiftRight,
+        },
+      );
+      runtime.onKeyEvent(
+        const KeyUpEvent(
+          physicalKey: PhysicalKeyboardKey.shiftLeft,
+          logicalKey: LogicalKeyboardKey.shiftLeft,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.keyD,
+          LogicalKeyboardKey.shiftRight,
+        },
+      );
+      expect(
+        runtime.input.consume().command.forwardMove,
+        DoomInputState.runMoveSpeed,
+      );
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.controlLeft,
+          logicalKey: LogicalKeyboardKey.controlLeft,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{
+          LogicalKeyboardKey.keyW,
+          LogicalKeyboardKey.controlLeft,
+        },
+      );
 
-    expect(runtime.input.consume().command, TicCmd.empty);
-  });
+      runtime.clearInput();
+
+      expect(runtime.input.consume().command, TicCmd.empty);
+    },
+  );
 
   test('actor sync adds, updates and removes stable components', () async {
     final runtime = DoomRuntimeGame(await fixtureLevel());

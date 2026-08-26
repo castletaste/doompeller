@@ -4,6 +4,7 @@ import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_app_controller.dart';
 import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_hud.dart';
+import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart';
 import 'package:flutter/foundation.dart';
@@ -50,12 +51,16 @@ final class FakeRuntime implements DoomRuntimeView {
 
   int clearInputCalls = 0;
   int restartCalls = 0;
+  final DoomInputState input = DoomInputState();
 
   @override
   void addPointerYaw(double deltaX) {}
 
   @override
-  void clearInput() => clearInputCalls++;
+  void clearInput() {
+    clearInputCalls++;
+    input.clear();
+  }
 
   @override
   void restartLevel() {
@@ -199,6 +204,7 @@ void main() {
       ),
     );
 
+    expect(find.textContaining('Shift run'), findsOneWidget);
     await tester.tap(find.byKey(const Key('hide-controls')));
     await tester.pump();
     expect(find.byKey(const Key('controls-hint')), findsNothing);
@@ -375,11 +381,19 @@ void main() {
     focus.focusNode!.requestFocus();
     await tester.pump();
     final before = runtime.clearInputCalls;
+    runtime.input
+      ..press(DoomControl.forward)
+      ..press(DoomControl.runRight);
+    expect(
+      runtime.input.consume().command.forwardMove,
+      DoomInputState.runMoveSpeed,
+    );
 
     focus.focusNode!.unfocus();
     await tester.pump();
 
     expect(runtime.clearInputCalls, before + 1);
+    expect(runtime.input.consume().command, core.TicCmd.empty);
 
     final beforeLifecycle = runtime.clearInputCalls;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);

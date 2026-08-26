@@ -1,4 +1,5 @@
 import 'package:doom_core/doom_core.dart';
+import 'package:doom_core/src/game_state.dart' as game_state_internal;
 import 'package:doom_core/src/mobj_states.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:test/test.dart';
@@ -130,23 +131,45 @@ void main() {
     expect(count, 0);
   });
 
-  test('walk input converges on the fixed-point terminal speed', () {
+  test('walk and run input converge on fixed-point terminal speeds', () {
+    int terminalDelta(int forwardMove) {
+      final GameState game = GameState.start(
+        testMap(vertices: const <MapVertex>[], lines: const <Linedef>[]),
+        const GameConfig(monsters: false),
+      );
+      int previousX = game.player.x;
+      int delta = 0;
+      for (int i = 0; i < 1000; i++) {
+        game.runTic(TicCmd(forwardMove: forwardMove));
+        delta = game.player.x - previousX;
+        previousX = game.player.x;
+      }
+      return delta;
+    }
+
+    final int walkDelta = terminalDelta(25);
+    final int runDelta = terminalDelta(50);
+    print(
+      'terminal speeds: walkFixed=$walkDelta '
+      'walk=${fixedToDouble(walkDelta).toStringAsFixed(6)} '
+      'runFixed=$runDelta '
+      'run=${fixedToDouble(runDelta).toStringAsFixed(6)} units/tic',
+    );
+    expect(walkDelta, 546123);
+    expect(fixedToDouble(runDelta), closeTo(16.67, 0.01));
+  });
+
+  test('airborne player input does not add thrust', () {
     final GameState game = GameState.start(
       testMap(vertices: const <MapVertex>[], lines: const <Linedef>[]),
       const GameConfig(monsters: false),
     );
-    int previousX = game.player.x;
-    int delta = 0;
-    for (int i = 0; i < 1000; i++) {
-      game.runTic(const TicCmd(forwardMove: 25));
-      delta = game.player.x - previousX;
-      previousX = game.player.x;
-    }
-    print(
-      'walk terminal speed: fixed=$delta '
-      'units=${fixedToDouble(delta).toStringAsFixed(6)}/tic',
-    );
-    expect(delta, 546123);
+    final int startX = game.player.x;
+    game_state_internal.setPlayerZForTesting(game, toFixed(1));
+
+    game.runTic(const TicCmd(forwardMove: 50));
+
+    expect(game.player.x, startX);
   });
 
   test('bob remains speed-dependent and bounded at vanilla movement scale', () {
@@ -173,7 +196,7 @@ void main() {
     );
     expect(walkPeak, greaterThan(0));
     expect(walkPeak, lessThan(runPeak));
-    expect(runPeak, lessThanOrEqualTo(toFixed(8)));
+    expect(fixedToDouble(runPeak), closeTo(8.0, 0.001));
   });
 
   test('camera stays below the current moving sector ceiling', () {

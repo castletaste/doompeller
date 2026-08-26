@@ -480,8 +480,8 @@ final class _ControlsHint extends StatelessWidget {
       children: <Widget>[
         Text(
           narrow
-              ? 'WASD · ←→ · CTRL · E'
-              : 'W/S move · A/D strafe · ←/→ turn · Ctrl/click fire · Space/E use · 1–4 weapon · Esc pause',
+              ? 'WASD · SHIFT run · ←→ · CTRL · E'
+              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Ctrl/click fire · Space/E use · 1–4 weapon · Esc pause',
           style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
         IconButton(

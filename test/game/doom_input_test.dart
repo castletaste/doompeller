@@ -48,9 +48,35 @@ void main() {
     expect(input.consume().command, TicCmd.empty);
   });
 
+  test('either Shift selects run speeds until both are released', () {
+    final input = DoomInputState()
+      ..press(DoomControl.forward)
+      ..press(DoomControl.strafeRight)
+      ..press(DoomControl.runLeft);
+
+    final leftShift = input.consume().command;
+    expect(
+      (leftShift.forwardMove, leftShift.sideMove),
+      (DoomInputState.runMoveSpeed, DoomInputState.runStrafeSpeed),
+    );
+
+    input
+      ..press(DoomControl.runRight)
+      ..release(DoomControl.runLeft);
+    final rightShift = input.consume().command;
+    expect(rightShift.forwardMove, DoomInputState.runMoveSpeed);
+    expect(rightShift.sideMove, DoomInputState.runStrafeSpeed);
+
+    input.release(DoomControl.runRight);
+    final walking = input.consume().command;
+    expect(walking.forwardMove, DoomInputState.moveSpeed);
+    expect(walking.sideMove, DoomInputState.strafeSpeed);
+  });
+
   test('focus loss clears held and queued input before the next tic', () {
     final input = DoomInputState()
       ..press(DoomControl.forward)
+      ..press(DoomControl.runRight)
       ..press(DoomControl.attack)
       ..triggerUse()
       ..selectWeapon(3)

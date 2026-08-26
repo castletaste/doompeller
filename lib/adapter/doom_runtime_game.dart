@@ -629,6 +629,10 @@ final class DoomRuntimeGame extends FlameGame3D
       control = DoomControl.turnLeft;
     } else if (key == LogicalKeyboardKey.arrowRight) {
       control = DoomControl.turnRight;
+    } else if (key == LogicalKeyboardKey.shiftLeft) {
+      control = DoomControl.runLeft;
+    } else if (key == LogicalKeyboardKey.shiftRight) {
+      control = DoomControl.runRight;
     } else if (key == LogicalKeyboardKey.controlLeft ||
         key == LogicalKeyboardKey.controlRight) {
       control = DoomControl.attack;

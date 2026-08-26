@@ -7,6 +7,8 @@ enum DoomControl {
   strafeRight,
   turnLeft,
   turnRight,
+  runLeft,
+  runRight,
   attack,
 }
 
@@ -20,7 +22,9 @@ final class DoomInputFrame {
 /// Mutable device state sampled into one deterministic [TicCmd] per game tic.
 final class DoomInputState {
   static const int moveSpeed = 25;
+  static const int runMoveSpeed = 50;
   static const int strafeSpeed = 24;
+  static const int runStrafeSpeed = 40;
   static const int turnSpeed = 640;
 
   final Set<DoomControl> _held = <DoomControl>{};
@@ -53,12 +57,17 @@ final class DoomInputState {
   }
 
   DoomInputFrame consume() {
+    final bool running =
+        _held.contains(DoomControl.runLeft) ||
+        _held.contains(DoomControl.runRight);
+    final int forwardSpeed = running ? runMoveSpeed : moveSpeed;
+    final int sideSpeed = running ? runStrafeSpeed : strafeSpeed;
     final int forward =
-        (_held.contains(DoomControl.forward) ? moveSpeed : 0) -
-        (_held.contains(DoomControl.backward) ? moveSpeed : 0);
+        (_held.contains(DoomControl.forward) ? forwardSpeed : 0) -
+        (_held.contains(DoomControl.backward) ? forwardSpeed : 0);
     final int side =
-        (_held.contains(DoomControl.strafeRight) ? strafeSpeed : 0) -
-        (_held.contains(DoomControl.strafeLeft) ? strafeSpeed : 0);
+        (_held.contains(DoomControl.strafeRight) ? sideSpeed : 0) -
+        (_held.contains(DoomControl.strafeLeft) ? sideSpeed : 0);
     final int turn =
         (_held.contains(DoomControl.turnLeft) ? turnSpeed : 0) -
         (_held.contains(DoomControl.turnRight) ? turnSpeed : 0) +

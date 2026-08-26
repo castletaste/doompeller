@@ -355,8 +355,10 @@ class GameState {
     if (cmd.changingWeapon) _selectWeapon(cmd.requestedWeapon);
     final int forward = wrap32(cmd.forwardMove * _playerThrustPerCommand);
     final int side = wrap32(cmd.sideMove * _playerThrustPerCommand);
-    _playerMobj.thrust(_playerMobj.angle, forward);
-    _playerMobj.thrust(normalizeAngle(_playerMobj.angle - kAng90), side);
+    if (_playerMobj.isOnGround) {
+      _playerMobj.thrust(_playerMobj.angle, forward);
+      _playerMobj.thrust(normalizeAngle(_playerMobj.angle - kAng90), side);
+    }
     _moveMomentum(_playerMobj);
     _playerMobj.momX = fixedMul(_playerMobj.momX, 0xe800);
     _playerMobj.momY = fixedMul(_playerMobj.momY, 0xe800);
@@ -827,6 +829,10 @@ class GameState {
   /// Moves an actor whose position is driven by persistent momentum. Each
   /// axis is bounded before collision, then large moves are traced as two
   /// exact integer parts so a thin blocking line cannot be skipped in one tic.
+  ///
+  /// Splitting both positive and negative components is an intentional
+  /// anti-tunnelling strengthening. Vanilla only split positive
+  /// components.
   bool _moveMomentum(Mobj m) {
     m.momX = _clampMomentum(m.momX);
     m.momY = _clampMomentum(m.momY);
@@ -3148,6 +3154,12 @@ bool activateDonutForTesting(GameState game, int lineIndex) {
     );
   }
   return game._activateDonut(line);
+}
+
+/// Internal test seam for proving that airborne input cannot add thrust.
+/// This is deliberately not exported from doom_core.dart.
+void setPlayerZForTesting(GameState game, int z) {
+  game._playerMobj.z = z;
 }
 
 /// One stable public entry point for format-data capability auditing.

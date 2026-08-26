@@ -54,6 +54,7 @@ final verdicts; `PROBLEMS` exits non-zero.
 
 - `W`/`S` or up/down: move forward/back
 - `A`/`D`: strafe
+- hold either `Shift`: run
 - left/right: turn
 - `Ctrl` or primary click: attack
 - `Space` or `E`: use

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../adapter/adapter.dart';
 import '../game/doom_app_controller.dart';
+import '../game/audio_backend_factory.dart';
 import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
 import '../game/level_preparer.dart';
@@ -14,6 +15,11 @@ import 'doom_automap.dart';
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
     Widget Function(BuildContext context, DoomRuntimeView runtime);
+
+/// Production runtime boundary. Direct [DoomRuntimeGame] construction remains
+/// silent by default for tests and non-UI tools.
+DoomRuntimeView createProductionDoomRuntime(PreparedDoomLevel level) =>
+    DoomRuntimeGame(level, audioBackend: createDefaultAudioBackend());
 
 final class DoomApp extends StatefulWidget {
   const DoomApp({
@@ -204,7 +210,9 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
   @override
   void initState() {
     super.initState();
-    _runtime = (widget.runtimeFactory ?? DoomRuntimeGame.new)(widget.level);
+    _runtime = (widget.runtimeFactory ?? createProductionDoomRuntime)(
+      widget.level,
+    );
     _gameFocusNode = FocusNode(debugLabel: 'Doom game input')
       ..addListener(_handleFocusChange);
     WidgetsBinding.instance.addObserver(this);

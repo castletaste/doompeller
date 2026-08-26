@@ -44,6 +44,22 @@ void expectRuntimeAtlasRect(
   }
 }
 
+final class _FailFirstRuntimeAudioBackend extends FakeAudioBackend {
+  int playAttempts = 0;
+
+  @override
+  Future<void> play(
+    AudioPlayRequest request, {
+    void Function()? onComplete,
+  }) async {
+    playAttempts++;
+    if (playAttempts == 1) {
+      throw StateError('synthetic runtime audio failure');
+    }
+    await super.play(request, onComplete: onComplete);
+  }
+}
+
 Future<PreparedDoomLevel> fixtureLevel() async {
   final content = DoomContentSource(
     environment: const <String, String>{},
@@ -141,6 +157,18 @@ Future<PreparedDoomLevel> fixtureSoundLevel() async {
     geometry: base.geometry,
     gameConfig: const GameConfig(),
     seed: 3,
+  );
+}
+
+Future<PreparedDoomLevel> fixturePlayerSoundLevel() async {
+  final base = await fixtureSoundLevel();
+  return PreparedDoomLevel(
+    content: base.content,
+    resources: base.resources,
+    map: base.map,
+    geometry: base.geometry,
+    gameConfig: const GameConfig(monsters: false),
+    seed: base.seed,
   );
 }
 
@@ -537,6 +565,59 @@ void main() {
       closeTo(1 - 36 / 1200, 1e-12),
       reason: 'listener PlayerView fixed-point coordinates become map units',
     );
+  });
+
+  test(
+    'audio failure is contained and later play, restart, and dispose run',
+    () async {
+      final _FailFirstRuntimeAudioBackend backend =
+          _FailFirstRuntimeAudioBackend();
+      final runtime = DoomRuntimeGame(
+        await fixturePlayerSoundLevel(),
+        audioBackend: backend,
+      );
+
+      runtime.input.press(DoomControl.attack);
+      for (var tic = 0; tic < 40 && backend.playCalls.isEmpty; tic++) {
+        runtime.advanceMicrosForTest(28572);
+        await runtime.soundPlaybackIdleForTest;
+      }
+      runtime.input.release(DoomControl.attack);
+
+      expect(backend.playAttempts, greaterThanOrEqualTo(2));
+      expect(backend.playCalls, isNotEmpty);
+      expect(runtime.soundPlaybackErrorCountForTest, 1);
+      expect(runtime.lastSoundPlaybackErrorForTest, isA<StateError>());
+
+      runtime.restartLevel();
+      await runtime.soundPlaybackIdleForTest;
+      expect(backend.stopCalls, isNotEmpty);
+
+      runtime.onRemove();
+      await runtime.soundPlaybackIdleForTest;
+      expect(backend.disposed, isTrue);
+    },
+  );
+
+  test('clearInput stops active audio after focus or lifecycle loss', () async {
+    final FakeAudioBackend backend = FakeAudioBackend();
+    final runtime = DoomRuntimeGame(
+      await fixturePlayerSoundLevel(),
+      audioBackend: backend,
+    );
+    runtime.input.press(DoomControl.attack);
+    for (var tic = 0; tic < 40 && backend.playCalls.isEmpty; tic++) {
+      runtime.advanceMicrosForTest(28572);
+      await runtime.soundPlaybackIdleForTest;
+    }
+    runtime.input.release(DoomControl.attack);
+    expect(backend.playCalls, isNotEmpty);
+
+    runtime.clearInput();
+    await runtime.soundPlaybackIdleForTest;
+
+    expect(backend.stopCalls, contains(backend.playCalls.last.channelId));
+    expect(runtime.input.consume().command, TicCmd.empty);
   });
 
   test('camera interpolation never advances simulation state', () async {

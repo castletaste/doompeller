@@ -126,6 +126,9 @@ final class DoomRuntimeGame extends FlameGame3D
   final SoundPlaybackManager _soundPlayback;
   late DoomCoreSoundJournal _soundJournal = DoomCoreSoundJournal(gameState);
   Future<void> _soundPlaybackTail = Future<void>.value();
+  int _soundPlaybackErrorCount = 0;
+  Object? _lastSoundPlaybackError;
+  StackTrace? _lastSoundPlaybackStackTrace;
 
   PlayerView _previousPlayer;
   PlayerView _currentPlayer;
@@ -206,6 +209,16 @@ final class DoomRuntimeGame extends FlameGame3D
 
   Future<void> get soundPlaybackIdleForTest => _soundPlaybackTail;
 
+  @visibleForTesting
+  int get soundPlaybackErrorCountForTest => _soundPlaybackErrorCount;
+
+  @visibleForTesting
+  Object? get lastSoundPlaybackErrorForTest => _lastSoundPlaybackError;
+
+  @visibleForTesting
+  StackTrace? get lastSoundPlaybackStackTraceForTest =>
+      _lastSoundPlaybackStackTrace;
+
   ({double x, double y, double z, double targetX, double targetZ})
   get cameraSnapshot => (
     x: camera.position.x,
@@ -246,12 +259,38 @@ final class DoomRuntimeGame extends FlameGame3D
     );
     final AudioListener listener = audioListenerFromPlayer(_currentPlayer);
     final int gameTic = gameState.tic;
-    _soundPlaybackTail = _soundPlaybackTail.then(
-      (_) => _soundPlayback.consumeEvents(
+    _enqueueSoundPlayback(
+      () => _soundPlayback.consumeEvents(
         events: events,
         listener: listener,
         gameTic: gameTic,
       ),
+    );
+  }
+
+  void _enqueueSoundPlayback(Future<void> Function() operation) {
+    final Future<void> previous = _soundPlaybackTail;
+    _soundPlaybackTail = () async {
+      try {
+        await previous;
+      } on Object catch (error, stackTrace) {
+        _recordSoundPlaybackError(error, stackTrace);
+      }
+      try {
+        await operation();
+      } on Object catch (error, stackTrace) {
+        _recordSoundPlaybackError(error, stackTrace);
+      }
+    }();
+  }
+
+  void _recordSoundPlaybackError(Object error, StackTrace stackTrace) {
+    _soundPlaybackErrorCount++;
+    _lastSoundPlaybackError = error;
+    _lastSoundPlaybackStackTrace = stackTrace;
+    debugPrint(
+      'doompeller: audio output failed (${error.runtimeType}); '
+      'count=$_soundPlaybackErrorCount',
     );
   }
 
@@ -552,14 +591,15 @@ final class DoomRuntimeGame extends FlameGame3D
       inwards ? _automap.zoomIn() : _automap.zoomOut();
 
   @override
-  void clearInput() => input.clear();
+  void clearInput() {
+    input.clear();
+    _enqueueSoundPlayback(() => _soundPlayback.stopAll());
+  }
 
   @override
   void restartLevel() {
     input.clear();
-    _soundPlaybackTail = _soundPlaybackTail.then(
-      (_) => _soundPlayback.stopAll(),
-    );
+    _enqueueSoundPlayback(() => _soundPlayback.stopAll());
     gameState = level.createGame();
     tickDriver = FixedTickDriver(
       maxTicsPerFrame: gameState.config.maxCatchUpTics,
@@ -588,9 +628,7 @@ final class DoomRuntimeGame extends FlameGame3D
   @override
   void onRemove() {
     input.clear();
-    _soundPlaybackTail = _soundPlaybackTail.then(
-      (_) => _soundPlayback.dispose(),
-    );
+    _enqueueSoundPlayback(() => _soundPlayback.dispose());
     unawaited(_soundPlaybackTail);
     _hud.dispose();
     _automap.dispose();

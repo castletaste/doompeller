@@ -6,6 +6,7 @@
 /// by [DoomLimits].
 library;
 
+export 'src/animations.dart';
 export 'src/bsp_builder.dart'
     show
         BspNodeOut,

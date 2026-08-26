@@ -36,7 +36,24 @@ void main() {
       isEmpty,
       reason: 'no sector should need the loop fallback',
     );
-    expect(report.geometryHash, 0x73e94bc3);
+    expect(report.geometryHash, 0x50a4e123);
+    expect(
+      level.animations,
+      hasLength(2),
+      reason: 'used NUKAGE and BLODGR sequences must retain runtime ranges',
+    );
+    for (final AnimatedSurfaceRef animation in level.animations) {
+      expect(
+        animation.frames.map((AtlasEntry entry) => entry.page).toSet(),
+        hasLength(1),
+        reason: 'runtime rect mutation cannot change atlas material/page',
+      );
+    }
+    expect(level.atlas.entry('NUKAGE2'), isNotNull);
+    expect(level.atlas.entry('NUKAGE3'), isNotNull);
+    expect(level.atlas.entry('BLODGR2'), isNotNull);
+    expect(level.atlas.entry('BLODGR4'), isNotNull);
+    expect(level.atlas.entry('SW2COMP'), isNotNull);
 
     final int doorLine = map.linedefs.indexWhere(
       (Linedef line) => line.special == 1 && line.tag == 0,

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'atlas.dart';
+
 /// Packed GPU buffers and the in-place update handles the runtime needs.
 ///
 /// ## Coordinate convention
@@ -187,12 +189,14 @@ class SectorPlaneRef {
   SectorPlaneRef({
     required this.sector,
     required this.isCeiling,
+    required this.textureName,
     required this.ranges,
     required this.baseHeight,
   }) : _height = baseHeight;
 
   final int sector;
   final bool isCeiling;
+  final String textureName;
   final List<VertexRange> ranges;
 
   /// Height at compile time, the value the packed buffers were built with.
@@ -245,6 +249,7 @@ class WallBandRef {
   WallBandRef({
     required this.linedef,
     required this.sidedef,
+    required this.textureName,
     required this.band,
     required this.frontSector,
     required this.backSector,
@@ -265,6 +270,7 @@ class WallBandRef {
 
   final int linedef;
   final int sidedef;
+  final String textureName;
   final WallBandKind band;
 
   /// Sector this side faces into.
@@ -374,4 +380,22 @@ class WallBandRef {
     }
     return drawTop > drawBottom;
   }
+}
+
+/// Vertices whose atlas rectangle follows a classic picture animation.
+class AnimatedSurfaceRef {
+  AnimatedSurfaceRef({
+    required this.frames,
+    required this.speed,
+    required this.initialFrame,
+    required this.ranges,
+  });
+
+  final List<AtlasEntry> frames;
+  final int speed;
+  final int initialFrame;
+  final List<VertexRange> ranges;
+
+  int frameAt(int levelTime) =>
+      (initialFrame + levelTime ~/ speed) % frames.length;
 }

@@ -8,6 +8,12 @@ import 'wad_types.dart';
 /// larger resource surface, and tests can supply a handful of synthetic
 /// textures without building a WAD container first.
 abstract class TextureSource {
+  /// Classic animations resolved against this source's real declaration order.
+  DoomAnimationResolution get animationResolution;
+
+  /// Classic two-state switch pairs available to the compiler.
+  List<DoomSwitchPair> get switchPairs;
+
   /// Composited wall texture by TEXTURE1/TEXTURE2 name, or null if absent.
   PatchImage? composite(String name);
 
@@ -34,6 +40,16 @@ class ResourceTextureSource implements TextureSource {
   ResourceTextureSource(this.resources);
 
   final WadResources resources;
+
+  late final DoomAnimationResolution _animations = resolveDoomAnimations(
+    resources,
+  );
+
+  @override
+  DoomAnimationResolution get animationResolution => _animations;
+
+  @override
+  List<DoomSwitchPair> get switchPairs => vanillaDoomSwitches;
 
   final Map<String, PatchImage?> _compositeCache = <String, PatchImage?>{};
   final Map<String, FlatImage?> _flatCache = <String, FlatImage?>{};
@@ -70,15 +86,28 @@ class WadTextureSource implements TextureSource {
     required FlatImage? Function(String name) flat,
     required PatchImage? Function(String name) sprite,
     required TextureDef? Function(String name) textureDef,
-  })  : _compositeFn = composite,
-        _flatFn = flat,
-        _spriteFn = sprite,
-        _defFn = textureDef;
+    this._animations = const DoomAnimationResolution(
+      animations: <DoomAnimation>[],
+      failures: <DoomAnimationFailure>[],
+    ),
+    this._switchPairs = const <DoomSwitchPair>[],
+  }) : _compositeFn = composite,
+       _flatFn = flat,
+       _spriteFn = sprite,
+       _defFn = textureDef;
 
   final PatchImage? Function(String name) _compositeFn;
   final FlatImage? Function(String name) _flatFn;
   final PatchImage? Function(String name) _spriteFn;
   final TextureDef? Function(String name) _defFn;
+  final DoomAnimationResolution _animations;
+  final List<DoomSwitchPair> _switchPairs;
+
+  @override
+  DoomAnimationResolution get animationResolution => _animations;
+
+  @override
+  List<DoomSwitchPair> get switchPairs => _switchPairs;
 
   final Map<String, PatchImage?> _compositeCache = <String, PatchImage?>{};
   final Map<String, FlatImage?> _flatCache = <String, FlatImage?>{};
@@ -108,15 +137,28 @@ class MapTextureSource implements TextureSource {
     Map<String, FlatImage>? flats,
     Map<String, PatchImage>? sprites,
     Map<String, TextureDef>? defs,
-  })  : _composites = composites ?? <String, PatchImage>{},
-        _flats = flats ?? <String, FlatImage>{},
-        _sprites = sprites ?? <String, PatchImage>{},
-        _defs = defs ?? <String, TextureDef>{};
+    this._animations = const DoomAnimationResolution(
+      animations: <DoomAnimation>[],
+      failures: <DoomAnimationFailure>[],
+    ),
+    this._switchPairs = const <DoomSwitchPair>[],
+  }) : _composites = composites ?? <String, PatchImage>{},
+       _flats = flats ?? <String, FlatImage>{},
+       _sprites = sprites ?? <String, PatchImage>{},
+       _defs = defs ?? <String, TextureDef>{};
 
   final Map<String, PatchImage> _composites;
   final Map<String, FlatImage> _flats;
   final Map<String, PatchImage> _sprites;
   final Map<String, TextureDef> _defs;
+  final DoomAnimationResolution _animations;
+  final List<DoomSwitchPair> _switchPairs;
+
+  @override
+  DoomAnimationResolution get animationResolution => _animations;
+
+  @override
+  List<DoomSwitchPair> get switchPairs => _switchPairs;
 
   @override
   PatchImage? composite(String name) => _composites[name];

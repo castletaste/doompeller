@@ -81,7 +81,7 @@ class FixtureGeometry {
     builder.addSector(
       floorHeight: 0,
       ceilingHeight: 128,
-      floorFlat: 'FLOOR0',
+      floorFlat: 'NUKAGE1',
       ceilingFlat: 'CEIL0',
       lightLevel: 192,
     );
@@ -183,7 +183,7 @@ class FixtureGeometry {
         <int>[768, 0],
       ],
       sector: 2,
-      texture: 'WALL3',
+      texture: 'BLODGR1',
       skipEdge: 0,
       skipSecondEdge: 3,
     );
@@ -226,6 +226,7 @@ class FixtureGeometry {
       skipEdge: 0,
       specialEdge: 2,
       special: 11,
+      specialTexture: 'SW1COMP',
     );
 
     // A small, fully generated playable route: arm in sector 0, open the
@@ -358,6 +359,7 @@ class _Builder {
     int skipSecondEdge = -1,
     int specialEdge = -1,
     int special = 0,
+    String? specialTexture,
   }) {
     for (var i = 0; i < points.length; i++) {
       if (i == skipEdge || i == skipSecondEdge) {
@@ -367,7 +369,7 @@ class _Builder {
         points[i],
         points[(i + 1) % points.length],
         sector,
-        texture,
+        i == specialEdge ? specialTexture ?? texture : texture,
         special: i == specialEdge ? special : 0,
       );
     }

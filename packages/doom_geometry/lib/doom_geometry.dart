@@ -17,6 +17,7 @@ export 'src/mesh_packer.dart' show FlatUvMapper, MeshPacker, kFlatTileSize;
 export 'src/packed_mesh.dart'
     show
         DoomVertexAbi,
+        AnimatedSurfaceRef,
         PackedMesh,
         SectorPlaneRef,
         SurfaceKind,
@@ -37,6 +38,11 @@ export 'src/tjunction.dart' show TJunctionRepairResult, repairTJunctions;
 export 'src/wad_types.dart'
     show
         DoomFailure,
+        DoomAnimation,
+        DoomAnimationDefinition,
+        DoomAnimationFailure,
+        DoomAnimationKind,
+        DoomAnimationResolution,
         DoomFormatFailure,
         DoomLimitFailure,
         DoomLimits,

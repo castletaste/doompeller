@@ -22,7 +22,7 @@ void main() {
     expect(outcome, isA<LevelPublished<String>>());
     expect(prepared.map.name, 'MAP01');
     expect(prepared.geometry.report.fallbackSectors, isEmpty);
-    expect(prepared.geometry.report.geometryHash, 0x73e94bc3);
+    expect(prepared.geometry.report.geometryHash, 0x50a4e123);
     expect(prepared.geometry.meshes, isNotEmpty);
     expect(prepared.game.player.health, 100);
     expect(

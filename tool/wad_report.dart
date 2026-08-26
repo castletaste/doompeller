@@ -328,7 +328,7 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
       hasGeometryProblems;
   final String verdict = hasProblems
       ? 'PROBLEMS'
-      : fallbackSectors.isNotEmpty
+      : fallbackSectors.isNotEmpty || report.animationFailures.isNotEmpty
       ? 'READY WITH FALLBACKS'
       : 'READY';
   final int exitCode = verdict == 'PROBLEMS' ? _problemExitCode : _okExitCode;
@@ -385,6 +385,7 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
     },
     'missingTextures': missingTextures,
     'missingFlats': missingFlats,
+    'staticAnimations': report.animationFailures,
     'verdict': verdict,
     'exitCode': exitCode,
   };
@@ -414,6 +415,10 @@ _ReportResult _run(_Arguments options, {int maxWadBytes = defaultMaxWadBytes}) {
     ..writeln(
       'missing flats: '
       '${missingFlats.isEmpty ? "none" : missingFlats.join(', ')}',
+    )
+    ..writeln(
+      'static animations: '
+      '${report.animationFailures.isEmpty ? "none" : report.animationFailures.join(', ')}',
     )
     ..writeln(
       'map $mapName: vertices ${map.vertices.length}, '
@@ -474,6 +479,7 @@ Map<String, Object?> _geometryJson(GeometryReport report) => <String, Object?>{
   'intersectionBudget': report.intersectionBudget,
   'budgetExhausted': report.budgetExhausted,
   'missingTextures': report.missingTextures,
+  'animationFailures': report.animationFailures,
   'geometryHash': '0x${report.geometryHash.toRadixString(16)}',
   'compileMicroseconds': report.compileMicroseconds,
   'repairedTJunctionVertices': report.repairedTJunctionVertices,

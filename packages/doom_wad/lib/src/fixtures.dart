@@ -45,6 +45,11 @@ abstract final class DoomFixtures {
     'PAT3',
     'PAT4',
     'SKYPAN',
+    'ANIMPA',
+    'ANIMPB',
+    'ANIMPC',
+    'SWITCHA',
+    'SWITCHB',
   ];
 
   /// Flat lumps inside F_START/F_END.
@@ -52,6 +57,9 @@ abstract final class DoomFixtures {
     'FLOOR0',
     'CEIL0',
     'FLAT1',
+    'NUKAGE1',
+    'NUKAGE2',
+    'NUKAGE3',
     kSkyFlatName,
   ];
 
@@ -109,6 +117,12 @@ abstract final class DoomFixtures {
     'WALL2',
     'WALL3',
     'SKY1',
+    'BLODGR1',
+    'BLODGR2',
+    'BLODGR3',
+    'BLODGR4',
+    'SW1COMP',
+    'SW2COMP',
   ];
 
   /// Texture names declared in TEXTURE2.
@@ -181,6 +195,25 @@ abstract final class DoomFixtures {
     ]),
     const _FixtureTexture('SKY1', 256, 128, <List<int>>[
       <int>[0, 0, 4],
+    ]),
+    const _FixtureTexture('BLODGR1', 64, 128, <List<int>>[
+      <int>[0, 0, 5],
+    ]),
+    const _FixtureTexture('BLODGR2', 64, 128, <List<int>>[
+      <int>[0, 0, 6],
+    ]),
+    const _FixtureTexture('BLODGR3', 64, 128, <List<int>>[
+      <int>[0, 0, 7],
+    ]),
+    const _FixtureTexture('BLODGR4', 64, 128, <List<int>>[
+      <int>[0, 0, 5],
+      <int>[32, 0, 7],
+    ]),
+    const _FixtureTexture('SW1COMP', 64, 128, <List<int>>[
+      <int>[0, 0, 8],
+    ]),
+    const _FixtureTexture('SW2COMP', 64, 128, <List<int>>[
+      <int>[0, 0, 9],
     ]),
   ]);
 

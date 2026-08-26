@@ -81,6 +81,12 @@ class WadResources {
   DoomMusicInfo? music(String lumpName);   // D_* length + MUS signature only
 }
 
+enum DoomAnimationKind { flat, wall }
+class DoomAnimationDefinition { DoomAnimationKind kind; String startName, endName; int speed; }
+class DoomAnimation { DoomAnimationDefinition definition; List<String> frames; }
+class DoomSwitchPair { String offName, onName; }
+DoomAnimationResolution resolveDoomAnimations(WadResources resources);
+
 /// Raw map lumps, all validated against DoomLimits.
 class MapData {
   static MapData load(WadSet set, String mapName, {DoomLimits limits});
@@ -121,6 +127,7 @@ class CompiledLevel {
   List<SectorPlaneRef> floorPlanes;   // for dynamic height updates
   List<SectorPlaneRef> ceilingPlanes;
   List<WallBandRef> wallBands;        // for door/lift wall updates
+  List<AnimatedSurfaceRef> animations; // page-local atlas-rect mutations
   GeometryReport report;              // triangles, gaps found, degenerate polys, fallbacks
 }
 
@@ -149,6 +156,7 @@ class GameState {
   Iterable<SectorRuntime> get sectors; // current floor/ceiling heights, light, flats
   List<SoundEvent> get soundJournal;   // retained output, excluded from hashState
   List<SoundEvent> consumeSoundJournal();
+  List<SwitchTextureChange> get switchJournal; // retained visual output
   int hashState();                    // deterministic replay oracle
 }
 ```
@@ -162,7 +170,7 @@ The core classifies specials by their explicit map-format values in
 |---|---|---|
 | normal door | 1, 31 | tag-0 uses the used line's back sector; tagged lines target matching sectors; 1 opens, waits 150 tics, then closes; 31 stays open |
 | locked door | 26/32 blue, 27/34 yellow, 28/33 red | requires collected key, otherwise leaves the line inactive; wait-close for 26/27/28, stay-open for 32/33/34 |
-| switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; switch texture mutation is adapter/HUD work |
+| switch doors | 61, 99, 103, 134 | recognized by the same door/key policy; S1 stays pressed, SR resets after 35 tics |
 | lifts | 10, 21, 62, 88, 120..123 | sector floor descends to lowest neighbour, waits 35 tics, then returns |
 | floors | 5 walk, 24 gun | tagged sectors raise to eight below the lowest neighbouring ceiling or by 24 units |
 | switch exit (S1) | 11 normal, 51 secret | front-side player use, once; records `levelComplete` and secret-trigger intent |
@@ -170,7 +178,7 @@ The core classifies specials by their explicit map-format values in
 | sector effects | 1..5, 7..9, 11..13, 17 | deterministic flicker/strobe/glow journals light deltas; 5/7/11 damage at 32-tic cadence; 9 increments one-time secret count |
 
 The implementation does **not** claim demo compatibility, crusher behaviour,
-switch texture state, generalized Boom specials, teleporters, or a complete
+generalized Boom specials, teleporters, or a complete
 commercial-E1M1 audit. Those need separate work and runtime verification with
 the developer-local WAD, never a committed asset.
 
@@ -189,6 +197,14 @@ make replay identity depend on renderer polling. Player bob is likewise
 excluded because it is derived renderer output from the hashed tic and
 momentum. Future-affecting input latch, actor-id allocator, activated one-shot
 lines, mutable actor flags/frame, and mover/actor state are hashed.
+
+Classic flat/wall animation ranges and switch pairs are clean-room Dart data.
+Flat ranges follow WAD directory order; wall ranges follow TEXTURE1/TEXTURE2
+declaration order. Missing endpoints or frame data degrade to static and appear
+in `GeometryReport.animationFailures`. Animation selection is derived from
+`levelTime ~/ speed` and adds no state to `hashState()`. Pressed S1 state and
+SR button timers affect future activation and are hashed; their retained
+renderer journal is output-only and excluded.
 
 `GameState.soundJournal` follows the same retained-until-consumed contract and
 returns immutable `SoundEvent` snapshots containing the DS lump id, fixed-point
@@ -222,6 +238,12 @@ class PaletteMaterial extends Material { ... }     // index atlas -> COLORMAP ->
 class PaletteTextures { ... }                      // uploads atlas/colormap/playpal
 class DoomScene { ... }                            // builds MeshComponents, updates planes
 ```
+
+`DoomScene.updateTextureAnimations(levelTime)` and
+`updateSwitchTexture(change)` rewrite only atlas-rect floats 12..15 for the
+referenced vertices and reuse dirty-range uploads. Every animation/switch group
+is packed atomically on one page; exceeding `maxAtlasPixels` is a typed compile
+failure, never a silently dropped frame.
 
 ## Frame budget
 

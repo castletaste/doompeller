@@ -195,19 +195,10 @@ void main() {
     test('reads the texture directory in declaration order', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
       expect(res.textureNames, <String>[
-        'WALL1',
-        'WALL2',
-        'WALL3',
-        'SKY1',
-        'WALLOVR',
+        ...DoomFixtures.texture1Names,
+        ...DoomFixtures.texture2Names,
       ]);
-      expect(res.patchNames, <String>[
-        'PAT1',
-        'PAT2',
-        'PAT3',
-        'PAT4',
-        'SKYPAN',
-      ]);
+      expect(res.patchNames, DoomFixtures.patchNames);
 
       final TextureDef wall2 = res.textureDef('WALL2')!;
       expect(wall2.width, 128);
@@ -234,6 +225,70 @@ void main() {
         expect(res.textureDef('NOSUCHTEX'), isNull);
       },
     );
+
+    test('TEXTURE1 wins a duplicate texture name over TEXTURE2', () {
+      final WadResources res = WadResources.load(
+        setWith(<LumpSource>[
+          LumpSource('PNAMES', _pnames(<String>['FIRST', 'SECOND'])),
+          LumpSource('FIRST', encodeDoomPatch(_solidPatch(16, 24, 11))),
+          LumpSource('SECOND', encodeDoomPatch(_solidPatch(32, 40, 29))),
+          LumpSource(
+            'TEXTURE1',
+            _textureDirectory(<_TextureSpec>[
+              const _TextureSpec('DUPL', 16, 24, 0),
+            ]),
+          ),
+          LumpSource(
+            'TEXTURE2',
+            _textureDirectory(<_TextureSpec>[
+              const _TextureSpec('DUPL', 32, 40, 1),
+            ]),
+          ),
+        ]),
+      );
+
+      expect(res.textureNames, <String>['DUPL']);
+      expect(
+        (res.textureDef('dupl')!.width, res.textureDef('DUPL')!.height),
+        (16, 24),
+      );
+      expect(res.composite('DUPL')!.indexAt(0, 0), 11);
+    });
+
+    test('a PWAD replacement TEXTURE1 still wins over an IWAD TEXTURE1', () {
+      final WadFile iwad = WadFile.parse(
+        buildWad(<LumpSource>[
+          LumpSource('PLAYPAL', buildFixturePlaypal()),
+          LumpSource('COLORMAP', buildFixtureColormap()),
+          LumpSource('PNAMES', _pnames(<String>['FIRST', 'SECOND'])),
+          LumpSource('FIRST', encodeDoomPatch(_solidPatch(16, 24, 11))),
+          LumpSource('SECOND', encodeDoomPatch(_solidPatch(32, 40, 29))),
+          LumpSource(
+            'TEXTURE1',
+            _textureDirectory(<_TextureSpec>[
+              const _TextureSpec('OVERRIDE', 16, 24, 0),
+            ]),
+          ),
+        ], kind: WadKind.iwad),
+      );
+      final WadFile pwad = WadFile.parse(
+        buildWad(<LumpSource>[
+          LumpSource(
+            'TEXTURE1',
+            _textureDirectory(<_TextureSpec>[
+              const _TextureSpec('OVERRIDE', 32, 40, 1),
+            ]),
+          ),
+        ]),
+      );
+
+      final WadResources res = WadResources.load(WadSet(<WadFile>[iwad, pwad]));
+      expect(
+        (res.textureDef('OVERRIDE')!.width, res.textureDef('OVERRIDE')!.height),
+        (32, 40),
+      );
+      expect(res.composite('OVERRIDE')!.indexAt(0, 0), 29);
+    });
   });
 
   group('composite', () {
@@ -421,7 +476,7 @@ void main() {
   group('flats and sprites', () {
     test('finds flats between F_START and F_END', () {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
-      expect(res.flatNames, <String>['CEIL0', 'FLAT1', 'FLOOR0', 'F_SKY1']);
+      expect(res.flatNames, DoomFixtures.flatNames.toList()..sort());
 
       final FlatImage floor = res.flat('FLOOR0')!;
       expect(floor.width, 64);
@@ -587,3 +642,54 @@ void main() {
     });
   });
 }
+
+class _TextureSpec {
+  const _TextureSpec(this.name, this.width, this.height, this.patch);
+
+  final String name;
+  final int width;
+  final int height;
+  final int patch;
+}
+
+Uint8List _pnames(List<String> names) {
+  final Uint8List bytes = Uint8List(4 + names.length * 8);
+  final ByteData data = ByteData.sublistView(bytes);
+  data.setInt32(0, names.length, Endian.little);
+  for (var i = 0; i < names.length; i++) {
+    encodeLumpName(bytes, 4 + i * 8, names[i]);
+  }
+  return bytes;
+}
+
+Uint8List _textureDirectory(List<_TextureSpec> textures) {
+  const int headerBytes = 22;
+  const int patchBytes = 10;
+  final int first = 4 + textures.length * 4;
+  final Uint8List bytes = Uint8List(
+    first + textures.length * (headerBytes + patchBytes),
+  );
+  final ByteData data = ByteData.sublistView(bytes);
+  data.setInt32(0, textures.length, Endian.little);
+  var offset = first;
+  for (var i = 0; i < textures.length; i++) {
+    final _TextureSpec texture = textures[i];
+    data.setInt32(4 + i * 4, offset, Endian.little);
+    encodeLumpName(bytes, offset, texture.name);
+    data.setInt16(offset + 12, texture.width, Endian.little);
+    data.setInt16(offset + 14, texture.height, Endian.little);
+    data.setInt16(offset + 20, 1, Endian.little);
+    data.setInt16(offset + headerBytes + 4, texture.patch, Endian.little);
+    offset += headerBytes + patchBytes;
+  }
+  return bytes;
+}
+
+PatchImage _solidPatch(int width, int height, int index) => PatchImage(
+  width: width,
+  height: height,
+  leftOffset: 0,
+  topOffset: 0,
+  indices: Uint8List(width * height)..fillRange(0, width * height, index),
+  coverage: Uint8List(width * height)..fillRange(0, width * height, 255),
+);

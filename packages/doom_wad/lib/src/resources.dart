@@ -243,6 +243,7 @@ class WadResources {
     required Map<String, TextureDef> textureMap,
     required List<String> order,
     required Map<String, int> flats,
+    required List<String> flatOrder,
     required Map<String, int> sprites,
   }) : _set = wadSet,
        _limits = budgets,
@@ -250,6 +251,7 @@ class WadResources {
        _textures = textureMap,
        textureNames = List<String>.unmodifiable(order),
        _flatIndices = flats,
+       flatDirectoryOrder = List<String>.unmodifiable(flatOrder),
        _spriteIndices = sprites;
 
   final WadSet _set;
@@ -270,6 +272,9 @@ class WadResources {
   final List<String> textureNames;
 
   final Map<String, int> _flatIndices;
+
+  /// Effective flat names in their actual WAD-directory order.
+  final List<String> flatDirectoryOrder;
   final Map<String, int> _spriteIndices;
 
   final Map<int, PatchImage?> _patchCache = <int, PatchImage?>{};
@@ -312,6 +317,11 @@ class WadResources {
     );
     DoomLimits.check(textures.length, limits.maxTextures, 'maxTextures');
 
+    final Map<String, int> flats = _collectNamespace(
+      set,
+      kFlatStartMarkers,
+      kFlatEndMarkers,
+    );
     return WadResources._(
       wadSet: set,
       budgets: limits,
@@ -320,7 +330,12 @@ class WadResources {
       names: patchNames,
       textureMap: textures,
       order: order,
-      flats: _collectNamespace(set, kFlatStartMarkers, kFlatEndMarkers),
+      flats: flats,
+      flatOrder: _collectNamespaceOrder(
+        set,
+        kFlatStartMarkers,
+        kFlatEndMarkers,
+      ),
       sprites: _collectNamespace(set, kSpriteStartMarkers, kSpriteEndMarkers),
     );
   }
@@ -722,9 +737,14 @@ class WadResources {
         );
       }
 
-      if (!out.containsKey(name)) {
-        order.add(name);
+      // R_InitTextures concatenates TEXTURE1 followed by TEXTURE2, and the
+      // vanilla name lookup returns the first matching entry. The WAD-set
+      // lookup above has already selected a later PWAD's whole TEXTUREx lump;
+      // this only preserves first-wins *within* that effective pair.
+      if (out.containsKey(name)) {
+        continue;
       }
+      order.add(name);
       out[name] = TextureDef(
         name: name,
         width: width,
@@ -758,6 +778,26 @@ class WadResources {
       }
       if (depth > 0 && set.entryAt(i).size > 0) {
         found[name] = i;
+      }
+    }
+    return found;
+  }
+
+  static List<String> _collectNamespaceOrder(
+    WadSet set,
+    List<String> startMarkers,
+    List<String> endMarkers,
+  ) {
+    final List<String> found = <String>[];
+    var depth = 0;
+    for (var i = 0; i < set.length; i++) {
+      final String name = set.nameAt(i);
+      if (startMarkers.contains(name)) {
+        depth++;
+      } else if (endMarkers.contains(name)) {
+        if (depth > 0) depth--;
+      } else if (depth > 0 && set.entryAt(i).size > 0) {
+        found.add(name);
       }
     }
     return found;

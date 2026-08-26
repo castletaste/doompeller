@@ -349,6 +349,167 @@ void main() {
   });
 
   group('atlas', () {
+    test('co-located runtime frames never straddle atlas pages', () {
+      PatchImage image(int fill) => PatchImage(
+        width: 32,
+        height: 32,
+        leftOffset: 0,
+        topOffset: 0,
+        indices: Uint8List(32 * 32)..fillRange(0, 32 * 32, fill),
+        coverage: Uint8List(32 * 32)..fillRange(0, 32 * 32, 255),
+      );
+      final AtlasBuilder builder = AtlasBuilder(
+        MapTextureSource(
+          composites: <String, PatchImage>{
+            'A': image(1),
+            'B': image(2),
+            'C': image(3),
+            'D': image(4),
+            'Z': image(5),
+          },
+        ),
+        const GeometryOptions(atlasPageSize: 64),
+      );
+      for (final String name in <String>['A', 'B', 'C', 'D', 'Z']) {
+        builder.addWallTexture(name);
+      }
+      builder.addCoLocated(<String>['A', 'Z']);
+      final IndexedAtlas atlas = builder.build();
+      expect(atlas.entry('A')!.page, atlas.entry('Z')!.page);
+    });
+
+    test(
+      'overlapping co-location groups merge transitively before packing',
+      () {
+        PatchImage image(int fill) => PatchImage(
+          width: 32,
+          height: 64,
+          leftOffset: 0,
+          topOffset: 0,
+          indices: Uint8List(32 * 64)..fillRange(0, 32 * 64, fill),
+          coverage: Uint8List(32 * 64)..fillRange(0, 32 * 64, 255),
+        );
+        final AtlasBuilder builder = AtlasBuilder(
+          MapTextureSource(
+            composites: <String, PatchImage>{
+              'A': image(1),
+              'B': image(2),
+              'C': image(3),
+            },
+          ),
+          const GeometryOptions(atlasPageSize: 64),
+        );
+        for (final String name in <String>['A', 'B', 'C']) {
+          builder.addWallTexture(name);
+        }
+        builder
+          ..addCoLocated(<String>['A', 'B'])
+          ..addCoLocated(<String>['B', 'C']);
+
+        final IndexedAtlas atlas = builder.build();
+        expect(atlas.entries, isEmpty);
+        expect(atlas.overflowed, unorderedEquals(<String>['A', 'B', 'C']));
+        expect(atlas.totalPixels, 0);
+      },
+    );
+
+    test('cross-page runtime mutation groups fail with a typed error', () {
+      const AtlasEntry a = AtlasEntry(
+        name: 'A',
+        page: 0,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        tiling: true,
+        leftOffset: 0,
+        topOffset: 0,
+      );
+      const AtlasEntry b = AtlasEntry(
+        name: 'B',
+        page: 1,
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        tiling: true,
+        leftOffset: 0,
+        topOffset: 0,
+      );
+      const IndexedAtlas atlas = IndexedAtlas(
+        pages: <AtlasPage>[],
+        pageSize: 64,
+        entries: <String, AtlasEntry>{'A': a, 'B': b},
+        overflowed: <String>[],
+        totalPixels: 2,
+      );
+
+      expect(
+        () => atlas.requireSamePage(<AtlasEntry>[
+          a,
+          b,
+        ], description: 'animation A->B'),
+        throwsA(isA<DoomFormatFailure>()),
+      );
+    });
+
+    test('incomplete animation is static and reported by compilation', () {
+      final MapBuilder b = MapBuilder('STATICANIM');
+      final int s = b.sector(
+        floorFlat: kSkyFlatName,
+        ceilingFlat: kSkyFlatName,
+      );
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s, middle: '-');
+      const DoomAnimationDefinition definition = DoomAnimationDefinition(
+        kind: DoomAnimationKind.flat,
+        startName: 'ANIM1',
+        endName: 'ANIM3',
+      );
+      final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+        b.build(),
+        MapTextureSource(
+          animations: const DoomAnimationResolution(
+            animations: <DoomAnimation>[],
+            failures: <DoomAnimationFailure>[
+              DoomAnimationFailure(definition, 'missing frame data'),
+            ],
+          ),
+        ),
+      );
+      expect(level.animations, isEmpty);
+      expect(level.report.animationFailures.single, contains('ANIM1->ANIM3'));
+    });
+
+    test('resolved but unused animation does not require atlas space', () {
+      final MapBuilder b = MapBuilder('UNUSEDANIM');
+      final int s = b.sector(
+        floorFlat: kSkyFlatName,
+        ceilingFlat: kSkyFlatName,
+      );
+      b.solidLoop(<int>[0, 0, 64, 0, 64, 64, 0, 64], s, middle: '-');
+      const DoomAnimationDefinition definition = DoomAnimationDefinition(
+        kind: DoomAnimationKind.wall,
+        startName: 'ANIM1',
+        endName: 'ANIM2',
+      );
+      final CompiledLevel level = DoomGeometryCompiler.compileWithTextures(
+        b.build(),
+        MapTextureSource(
+          animations: const DoomAnimationResolution(
+            animations: <DoomAnimation>[
+              DoomAnimation(
+                definition: definition,
+                frames: <String>['ANIM1', 'ANIM2'],
+              ),
+            ],
+            failures: <DoomAnimationFailure>[],
+          ),
+        ),
+      );
+      expect(level.animations, isEmpty);
+      expect(level.atlas.pageCount, 0);
+    });
+
     test('all-sky no-texture map is valid with zero atlas pages', () {
       final MapBuilder b = MapBuilder('SKYEMPTY');
       final int s = b.sector(

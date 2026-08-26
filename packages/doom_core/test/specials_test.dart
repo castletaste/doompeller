@@ -129,6 +129,24 @@ List<Sidedef> twoSides() => const <Sidedef>[
     sector: 1,
   ),
 ];
+List<Sidedef> switchSides() => const <Sidedef>[
+  Sidedef(
+    xOffset: 0,
+    yOffset: 0,
+    upperTexture: 'SW1COMP',
+    lowerTexture: '-',
+    middleTexture: '-',
+    sector: 0,
+  ),
+  Sidedef(
+    xOffset: 0,
+    yOffset: 0,
+    upperTexture: '-',
+    lowerTexture: '-',
+    middleTexture: '-',
+    sector: 1,
+  ),
+];
 List<Sector> twoSectors({
   int backFloor = 0,
   int backCeiling = 128,
@@ -372,6 +390,97 @@ void main() {
   });
 
   group('doors, lifts and effects', () {
+    test(
+      'animation frame lookup is derived output and does not mutate hash',
+      () {
+        final GameState game = GameState.start(
+          testMap(),
+          const GameConfig(monsters: false),
+        );
+        final int before = game.hashState();
+        expect(game.animationFrameIndex(frameCount: 3, speed: 8), 0);
+        expect(game.hashState(), before);
+      },
+    );
+
+    test(
+      'S1 switch stays pressed and its future-affecting state is hashed',
+      () {
+        final MapData map = testMap(
+          sectors: twoSectors(backCeiling: 32),
+          sides: switchSides(),
+          lines: <Linedef>[
+            portal(special: LineSpecial.switchDoorOpenWaitClose),
+          ],
+        );
+        final GameState idle = GameState.start(
+          map,
+          const GameConfig(monsters: false),
+        );
+        final GameState pressed = GameState.start(
+          map,
+          const GameConfig(monsters: false),
+        );
+        idle.runTic(TicCmd.empty);
+        pressed.runTic(const TicCmd(buttons: Buttons.use));
+        expect(pressed.switchJournal.single.textureName, 'SW2COMP');
+        expect(pressed.hashState(), isNot(idle.hashState()));
+        final int pressedHash = pressed.hashState();
+        pressed.consumeSwitchJournal();
+        expect(
+          pressed.hashState(),
+          pressedHash,
+          reason: 'journal is output-only',
+        );
+        for (var i = 0; i < 200; i++) {
+          pressed.runTic(TicCmd.empty);
+        }
+        expect(pressed.switchJournal, isEmpty, reason: 'S1 never resets');
+        pressed.runTic(const TicCmd(buttons: Buttons.use));
+        expect(pressed.switchJournal, isEmpty, reason: 'S1 never reactivates');
+      },
+    );
+
+    test('SR switch resets then can toggle on again', () {
+      final GameState game = GameState.start(
+        testMap(
+          sectors: twoSectors(backFloor: 32),
+          sides: switchSides(),
+          lines: <Linedef>[portal(special: LineSpecial.liftDownWaitUpTurbo)],
+        ),
+        const GameConfig(monsters: false),
+      );
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      expect(game.consumeSwitchJournal().single.textureName, 'SW2COMP');
+      game.consumeSoundJournal();
+      for (var i = 0; i < 35; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.consumeSwitchJournal().single.textureName, 'SW1COMP');
+      expect(game.consumeSoundJournal().single.soundId, 'DSSWTCHN');
+      for (var i = 0; i < 30; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      game.runTic(const TicCmd(buttons: Buttons.use));
+      expect(game.consumeSwitchJournal().single.textureName, 'SW2COMP');
+    });
+
+    test('pressed SR timer alone changes future-state hash', () {
+      GameState build(List<Sidedef> sides) => GameState.start(
+        testMap(
+          sectors: twoSectors(backFloor: 32),
+          sides: sides,
+          lines: <Linedef>[portal(special: LineSpecial.liftDownWaitUpTurbo)],
+        ),
+        const GameConfig(monsters: false),
+      );
+      final GameState ordinary = build(twoSides());
+      final GameState switched = build(switchSides());
+      ordinary.runTic(const TicCmd(buttons: Buttons.use));
+      switched.runTic(const TicCmd(buttons: Buttons.use));
+      expect(switched.hashState(), isNot(ordinary.hashState()));
+    });
+
     test('tag zero manual door opens waits then closes', () {
       final MapData map = testMap(
         sectors: twoSectors(backCeiling: 32),
@@ -471,16 +580,25 @@ void main() {
       final GameState game = GameState.start(
         testMap(
           sectors: sectors,
-          sides: twoSides(),
+          sides: switchSides(),
           lines: <Linedef>[portal(special: LineSpecial.floorRaise24, tag: 7)],
         ),
         const GameConfig(monsters: false),
       );
       game.runTic(const TicCmd(buttons: Buttons.attack));
+      expect(game.consumeSwitchJournal().single.textureName, 'SW2COMP');
       for (int i = 0; i < 25; i++) {
         game.runTic(TicCmd.empty);
       }
       expect(game.sectors.elementAt(1).floorHeight, toFixed(24));
+      expect(game.switchJournal, isEmpty, reason: 'gun switch never resets');
+
+      game.runTic(const TicCmd(buttons: Buttons.attack));
+      for (int i = 0; i < 25; i++) {
+        game.runTic(TicCmd.empty);
+      }
+      expect(game.sectors.elementAt(1).floorHeight, toFixed(24));
+      expect(game.switchJournal, isEmpty, reason: 'gun switch is one-shot');
     });
 
     test('sector journal retains multiple tics until consumed', () {

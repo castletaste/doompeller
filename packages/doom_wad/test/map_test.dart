@@ -57,7 +57,7 @@ void main() {
       final MapData map = MapData.load(DoomFixtures.wadSet(), 'MAP01');
       expect(map.sectors[0].floorHeight, 0);
       expect(map.sectors[0].ceilingHeight, 128);
-      expect(map.sectors[0].floorFlat, 'FLOOR0');
+      expect(map.sectors[0].floorFlat, 'NUKAGE1');
       expect(map.sectors[0].lightLevel, 192);
       // Sector 2 sits below the others, exercising negative floor heights.
       expect(map.sectors[2].floorHeight, -32);

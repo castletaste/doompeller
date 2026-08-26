@@ -10,6 +10,7 @@ import 'random.dart';
 import 'sector_runtime.dart';
 import 'sound_events.dart';
 import 'specials.dart';
+import 'switches.dart';
 import 'ticcmd.dart';
 import 'views.dart';
 
@@ -47,6 +48,8 @@ class GameState {
   final List<Mobj> _mobjs = <Mobj>[];
   final List<SectorChange> _changes = <SectorChange>[];
   final List<SoundEvent> _sounds = <SoundEvent>[];
+  final List<SwitchTextureChange> _switchChanges = <SwitchTextureChange>[];
+  final Map<int, _PressedSwitch> _pressedSwitches = <int, _PressedSwitch>{};
   int _droppedSoundEvents = 0;
   int _tic = 0;
   int _nextId = 1;
@@ -80,6 +83,15 @@ class GameState {
     return result;
   }
 
+  List<SwitchTextureChange> get switchJournal =>
+      List<SwitchTextureChange>.unmodifiable(_switchChanges);
+  List<SwitchTextureChange> consumeSwitchJournal() {
+    final List<SwitchTextureChange> result =
+        List<SwitchTextureChange>.unmodifiable(_switchChanges);
+    _switchChanges.clear();
+    return result;
+  }
+
   /// Ordered sound requests retained until consumed. Like [changeJournal],
   /// this is output-only and a renderer may poll less often than 35 Hz.
   List<SoundEvent> get soundJournal => List<SoundEvent>.unmodifiable(_sounds);
@@ -99,6 +111,21 @@ class GameState {
   int get totalItems => _totalItems;
   int get totalSecrets => _totalSecrets;
   int get levelTime => _tic;
+
+  /// Pure renderer selection derived from already-hashed game time.
+  ///
+  /// No animation cursor is stored or hashed: querying or polling animation
+  /// output cannot influence a future simulation tic.
+  int animationFrameIndex({
+    required int frameCount,
+    required int speed,
+    int initialFrame = 0,
+  }) {
+    if (frameCount <= 0 || speed <= 0) {
+      throw ArgumentError('frameCount and speed must be positive');
+    }
+    return (initialFrame + _tic ~/ speed) % frameCount;
+  }
 
   /// Read-only spatial position for renderer/UI consumers. It is derived from
   /// existing gameplay state and does not add a new word to [hashState].
@@ -126,6 +153,7 @@ class GameState {
 
   void runTic(TicCmd cmd) {
     _tic++;
+    _tickSwitchButtons();
     _tickMovers();
     if (_health > 0) _tickPlayer(cmd);
     _tickSectorEffects();
@@ -469,22 +497,31 @@ class GameState {
     }
     if (selected == null) return;
     if (!_isUseSpecial(selected.special)) return;
+    if ((_isOneShotSwitchSpecial(selected.special) &&
+            _activatedOnceLines.contains(selectedIndex)) ||
+        _pressedSwitches.containsKey(selectedIndex)) {
+      return;
+    }
     if (_isDoorSpecial(selected.special)) {
       final bool activated = _tryActivateDoor(selected);
       if (activated && _isSwitchDoorSpecial(selected.special)) {
+        _activateSwitchTexture(selectedIndex, selected);
         _emitPlayerSound('DSSWTCHN');
       }
     }
     if (_isUseLiftSpecial(selected.special) && _activateLift(selected)) {
+      _activateSwitchTexture(selectedIndex, selected);
       _emitPlayerSound('DSSWTCHN');
     }
     if (selected.special == LineSpecial.exitSwitchOnce ||
         selected.special == LineSpecial.secretExitSwitchOnce) {
       if (!_isOnFrontSide(selected, _playerMobj.x, _playerMobj.y)) return;
-      _completeExit(
+      if (_completeExit(
         selectedIndex,
         secret: selected.special == LineSpecial.secretExitSwitchOnce,
-      );
+      )) {
+        _activateSwitchTexture(selectedIndex, selected);
+      }
     }
   }
 
@@ -497,12 +534,84 @@ class GameState {
     return cross <= 0;
   }
 
-  void _completeExit(int lineIndex, {required bool secret}) {
-    if (_levelComplete) return;
-    if (!_activatedOnceLines.add(lineIndex)) return;
+  bool _completeExit(int lineIndex, {required bool secret}) {
+    if (_levelComplete) return false;
+    if (!_activatedOnceLines.add(lineIndex)) return false;
     _levelComplete = true;
     _secretExit = secret;
     _emitNonPositionalSound('DSSWTCHX');
+    return true;
+  }
+
+  void _activateSwitchTexture(int lineIndex, Linedef line) {
+    if (_isOneShotSwitchSpecial(line.special)) {
+      _activatedOnceLines.add(lineIndex);
+    }
+    final int sidedef = line.rightSidedef;
+    if (sidedef < 0 || sidedef >= _runtime.map.sidedefs.length) return;
+    final Sidedef side = _runtime.map.sidedefs[sidedef];
+    final List<(SwitchTextureSlot, String)> candidates =
+        <(SwitchTextureSlot, String)>[
+          (SwitchTextureSlot.upper, side.upperTexture),
+          (SwitchTextureSlot.middle, side.middleTexture),
+          (SwitchTextureSlot.lower, side.lowerTexture),
+        ];
+    for (final (SwitchTextureSlot slot, String name) in candidates) {
+      DoomSwitchPair? matched;
+      String? next;
+      for (final DoomSwitchPair pair in vanillaDoomSwitches) {
+        next = pair.opposite(name);
+        if (next != null) {
+          matched = pair;
+          break;
+        }
+      }
+      if (matched == null || next == null) continue;
+      final bool repeatable = _isRepeatableSwitchSpecial(line.special);
+      _pressedSwitches[lineIndex] = _PressedSwitch(
+        linedef: lineIndex,
+        sidedef: sidedef,
+        slot: slot,
+        offName: name,
+        onName: next,
+        remaining: repeatable ? 35 : -1,
+      );
+      _switchChanges.add(
+        SwitchTextureChange(
+          linedef: lineIndex,
+          sidedef: sidedef,
+          slot: slot,
+          textureName: next,
+          tic: _tic,
+        ),
+      );
+      return;
+    }
+  }
+
+  void _tickSwitchButtons() {
+    final List<int> reset = <int>[];
+    for (final MapEntry<int, _PressedSwitch> entry
+        in _pressedSwitches.entries) {
+      final _PressedSwitch pressed = entry.value;
+      if (pressed.remaining < 0) continue;
+      pressed.remaining--;
+      if (pressed.remaining > 0) continue;
+      _switchChanges.add(
+        SwitchTextureChange(
+          linedef: pressed.linedef,
+          sidedef: pressed.sidedef,
+          slot: pressed.slot,
+          textureName: pressed.offName,
+          tic: _tic,
+        ),
+      );
+      _emitPlayerSound('DSSWTCHN');
+      reset.add(entry.key);
+    }
+    for (final int line in reset) {
+      _pressedSwitches.remove(line);
+    }
   }
 
   void _shootSpecialLine() {
@@ -512,8 +621,10 @@ class GameState {
     final int rayY =
         _playerMobj.y + fixedMul(range, Trig.sin(_playerMobj.angle));
     Linedef? selected;
+    int selectedIndex = -1;
     int selectedDistance = 0x7fffffffffffffff;
-    for (final Linedef line in _runtime.map.linedefs) {
+    for (var i = 0; i < _runtime.map.linedefs.length; i++) {
+      final Linedef line = _runtime.map.linedefs[i];
       final MapVertex a = _runtime.map.vertices[line.v1];
       final MapVertex b = _runtime.map.vertices[line.v2];
       if (!_segmentsIntersect(
@@ -532,10 +643,13 @@ class GameState {
       if (distance < selectedDistance) {
         selectedDistance = distance;
         selected = line;
+        selectedIndex = i;
       }
     }
     if (selected?.special == LineSpecial.floorRaise24 &&
+        !_activatedOnceLines.contains(selectedIndex) &&
         _activateFloor(selected!)) {
+      _activateSwitchTexture(selectedIndex, selected);
       _emitPlayerSound('DSSWTCHN');
     }
   }
@@ -1177,6 +1291,20 @@ class GameState {
     for (int i = 0; i < _runtime.map.linedefs.length; i++) {
       add(_activatedOnceLines.contains(i) ? 1 : 0);
     }
+    // Preserve the established replay schema for the overwhelmingly common
+    // no-button state, while making every active future-affecting button timer
+    // distinguishable. The sentinel prevents aliasing with preceding words.
+    if (_pressedSwitches.isNotEmpty) {
+      add(0x53574954); // "SWIT"
+      add(_pressedSwitches.length);
+      for (final int line in _pressedSwitches.keys.toList()..sort()) {
+        final _PressedSwitch pressed = _pressedSwitches[line]!;
+        add(line);
+        add(pressed.sidedef);
+        add(pressed.slot.index);
+        add(pressed.remaining);
+      }
+    }
     for (final SectorRuntime s in _runtime.sectors) {
       add(s.floorHeight);
       add(s.ceilingHeight);
@@ -1217,11 +1345,29 @@ class GameState {
       add(m.removed ? 1 : 0);
     }
     // _bob is a pure function of already-hashed tic and player momentum.
-    // _changes and _sounds are output journals: consuming them cannot affect simulation
+    // _changes, _sounds and _switchChanges are output journals: consuming them cannot affect simulation
     // state or future tics, so including it would make replay hashes depend on
     // renderer polling rather than seed + TicCmd stream.
     return h;
   }
+}
+
+class _PressedSwitch {
+  _PressedSwitch({
+    required this.linedef,
+    required this.sidedef,
+    required this.slot,
+    required this.offName,
+    required this.onName,
+    required this.remaining,
+  });
+
+  final int linedef;
+  final int sidedef;
+  final SwitchTextureSlot slot;
+  final String offName;
+  final String onName;
+  int remaining;
 }
 
 class _DoorMover extends SectorMover {
@@ -1357,6 +1503,10 @@ bool _isUseSpecial(int special) =>
     _isUseLiftSpecial(special) ||
     special == LineSpecial.exitSwitchOnce ||
     special == LineSpecial.secretExitSwitchOnce;
+bool _isRepeatableSwitchSpecial(int special) =>
+    <int>{61, 62, 99, 123, 134}.contains(special);
+bool _isOneShotSwitchSpecial(int special) =>
+    <int>{11, 21, 24, 51, 103, 122}.contains(special);
 
 const MobjInfo _playerInfo = MobjInfo(
   id: MobjType.player,

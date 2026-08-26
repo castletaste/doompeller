@@ -88,7 +88,8 @@ class SectorFinding {
   bool get isClean => issues.isEmpty;
 
   @override
-  String toString() => 'sector $sector: '
+  String toString() =>
+      'sector $sector: '
       '${issues.isEmpty ? "clean" : issues.map((GeometryIssue i) => i.name).join(",")} '
       'bsp=${bspArea.toStringAsFixed(2)} loop=${loopArea.toStringAsFixed(2)}'
       '${usedFallback ? " [fallback]" : ""}';
@@ -115,6 +116,7 @@ class GeometryReport {
     required this.missingTextures,
     required this.geometryHash,
     required this.compileMicroseconds,
+    this.animationFailures = const <String>[],
     this.repairedTJunctionVertices = 0,
     this.repairedRegions = 0,
   });
@@ -154,6 +156,10 @@ class GeometryReport {
   final int geometryHash;
 
   final int compileMicroseconds;
+
+  /// Animation/switch ranges that were kept static because source data was
+  /// incomplete or unsafe for an in-place page-local mutation.
+  final List<String> animationFailures;
 
   /// Vertices inserted to close T-junction cracks between subsectors.
   ///
@@ -215,19 +221,24 @@ class GeometryReport {
 
   /// Sectors that failed, worst area delta first, for triage.
   List<SectorFinding> worstSectors([int limit = 10]) {
-    final List<SectorFinding> bad = <SectorFinding>[
-      for (final SectorFinding f in findings)
-        if (!f.isClean) f,
-    ]..sort((SectorFinding a, SectorFinding b) =>
-        b.areaDelta.compareTo(a.areaDelta));
+    final List<SectorFinding> bad =
+        <SectorFinding>[
+          for (final SectorFinding f in findings)
+            if (!f.isClean) f,
+        ]..sort(
+          (SectorFinding a, SectorFinding b) =>
+              b.areaDelta.compareTo(a.areaDelta),
+        );
     return bad.length <= limit ? bad : bad.sublist(0, limit);
   }
 
   String summary() {
     final StringBuffer sb = StringBuffer()
       ..writeln('GeometryReport $map')
-      ..writeln('  mode            : ${bspFirst ? "bsp-first" : "loops-only"}'
-          '${validated ? " (validated)" : " (unvalidated)"}')
+      ..writeln(
+        '  mode            : ${bspFirst ? "bsp-first" : "loops-only"}'
+        '${validated ? " (validated)" : " (unvalidated)"}',
+      )
       ..writeln('  meshes          : $meshCount over $atlasPages atlas page(s)')
       ..writeln('  triangles       : $totalTriangles')
       ..writeln('  vertices        : $totalVertices')
@@ -235,8 +246,10 @@ class GeometryReport {
       ..writeln('  max bsp depth   : $maxBspDepth')
       ..writeln('  area delta      : ${totalAreaDelta.toStringAsFixed(4)}')
       ..writeln('  t-junctions     : $tJunctionCount')
-      ..writeln('  tjunc repaired  : $repairedTJunctionVertices vertices '
-          'in $repairedRegions region(s)')
+      ..writeln(
+        '  tjunc repaired  : $repairedTJunctionVertices vertices '
+        'in $repairedRegions region(s)',
+      )
       ..writeln('  degenerate tris : $degenerateTriangleCount')
       ..writeln('  fallback sectors: ${fallbackSectors.length}')
       ..writeln('  checks          : $intersectionChecks / $intersectionBudget')
@@ -244,6 +257,9 @@ class GeometryReport {
       ..writeln('  compile         : $compileMicroseconds us');
     if (missingTextures.isNotEmpty) {
       sb.writeln('  missing textures: ${missingTextures.join(", ")}');
+    }
+    if (animationFailures.isNotEmpty) {
+      sb.writeln('  static animations: ${animationFailures.join(", ")}');
     }
     for (final SectorFinding f in worstSectors()) {
       sb.writeln('  ! $f');
@@ -262,9 +278,7 @@ class GeometryReport {
 class SectorMesh2D {
   const SectorMesh2D(this.xy, this.indices);
 
-  SectorMesh2D.empty()
-      : xy = Float64List(0),
-        indices = Uint32List(0);
+  SectorMesh2D.empty() : xy = Float64List(0), indices = Uint32List(0);
 
   final Float64List xy;
   final Uint32List indices;
@@ -278,9 +292,10 @@ class SectorMesh2D {
       final int a = indices[t] * 2;
       final int b = indices[t + 1] * 2;
       final int c = indices[t + 2] * 2;
-      sum += ((xy[b] - xy[a]) * (xy[c + 1] - xy[a + 1]) -
-              (xy[c] - xy[a]) * (xy[b + 1] - xy[a + 1]))
-          .abs();
+      sum +=
+          ((xy[b] - xy[a]) * (xy[c + 1] - xy[a + 1]) -
+                  (xy[c] - xy[a]) * (xy[b + 1] - xy[a + 1]))
+              .abs();
     }
     return sum * 0.5;
   }

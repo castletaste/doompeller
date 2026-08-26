@@ -240,6 +240,10 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   void _consumeSectorJournal() {
+    scene.updateTextureAnimations(gameState.levelTime);
+    for (final SwitchTextureChange change in gameState.consumeSwitchJournal()) {
+      scene.updateSwitchTexture(change);
+    }
     final Set<int> automapHeightChanges = <int>{};
     for (final change in gameState.consumeChangeJournal()) {
       switch (change.kind) {

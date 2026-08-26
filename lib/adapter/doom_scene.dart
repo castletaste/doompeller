@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
 import 'package:flame_3d/camera.dart';
@@ -573,6 +574,86 @@ final class DoomScene {
       }
     }
     return changed;
+  }
+
+  /// Advances classic texture/flat animations by rewriting atlas rectangles.
+  /// Only ranges whose frame changed are dirtied; geometry and GPU buffers stay
+  /// allocated. Frames are co-located on one page by the geometry compiler.
+  int updateTextureAnimations(int levelTime) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('updateTextureAnimations requires fromCompiledLevel');
+    }
+    var touched = 0;
+    for (final animation in compiled.animations) {
+      final entry = animation.frames[animation.frameAt(levelTime)];
+      for (final range in animation.ranges) {
+        final mesh = compiled.meshes[range.meshIndex];
+        final int rectOffset =
+            range.firstVertex * geometry.DoomVertexAbi.floatsPerVertex +
+            geometry.DoomVertexAbi.atlasRectOffset;
+        final current = mesh.vertices[rectOffset];
+        final next = entry.u0(compiled.atlas.pageSize);
+        if (current == next &&
+            mesh.vertices[rectOffset + 1] ==
+                entry.v0(compiled.atlas.pageSize) &&
+            mesh.vertices[rectOffset + 2] ==
+                entry.u1(compiled.atlas.pageSize) &&
+            mesh.vertices[rectOffset + 3] ==
+                entry.v1(compiled.atlas.pageSize)) {
+          continue;
+        }
+        _writeAtlasRect(
+          mesh.vertices,
+          range.firstVertex,
+          range.vertexCount,
+          entry,
+          compiled.atlas.pageSize,
+        );
+        _geometryBindings[range.meshIndex]!.surface.markVertexRangeDirty(
+          range.firstVertex,
+          range.vertexCount,
+        );
+        touched += range.vertexCount;
+      }
+    }
+    if (touched > 0) diagnostics.onDynamicUpdate();
+    return touched;
+  }
+
+  int updateAnimationFrames(int levelTime) =>
+      updateTextureAnimations(levelTime);
+
+  int updateSwitchTexture(core.SwitchTextureChange change) {
+    final compiled = _compiledLevel;
+    if (compiled == null) {
+      throw StateError('updateSwitchTexture requires fromCompiledLevel');
+    }
+    final geometry.AtlasEntry? entry = compiled.atlas.entry(change.textureName);
+    if (entry == null) return 0;
+    var touched = 0;
+    for (final band in compiled.wallBands) {
+      if (band.linedef != change.linedef ||
+          band.sidedef != change.sidedef ||
+          !_slotMatches(change.slot, band.band)) {
+        continue;
+      }
+      if (compiled.meshes[band.meshIndex].atlasPage != entry.page) continue;
+      _writeAtlasRect(
+        compiled.meshes[band.meshIndex].vertices,
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+        entry,
+        compiled.atlas.pageSize,
+      );
+      _geometryBindings[band.meshIndex]!.surface.markVertexRangeDirty(
+        band.firstVertex,
+        geometry.WallBandRef.verticesPerQuad,
+      );
+      touched += geometry.WallBandRef.verticesPerQuad;
+    }
+    if (touched > 0) diagnostics.onDynamicUpdate();
+    return touched;
   }
 
   /// Recomputes every wall quad touching [sectorIndex] through geometry's
@@ -1808,3 +1889,34 @@ final class _GeometryBinding {
 final class DoomSceneRoot extends Component3D {
   DoomSceneRoot({super.position, super.children});
 }
+
+void _writeAtlasRect(
+  Float32List vertices,
+  int firstVertex,
+  int vertexCount,
+  geometry.AtlasEntry entry,
+  int pageSize,
+) {
+  final double u0 = entry.u0(pageSize);
+  final double v0 = entry.v0(pageSize);
+  final double u1 = entry.u1(pageSize);
+  final double v1 = entry.v1(pageSize);
+  for (var vertex = firstVertex; vertex < firstVertex + vertexCount; vertex++) {
+    final int offset =
+        vertex * geometry.DoomVertexAbi.floatsPerVertex +
+        geometry.DoomVertexAbi.atlasRectOffset;
+    vertices[offset] = u0;
+    vertices[offset + 1] = v0;
+    vertices[offset + 2] = u1;
+    vertices[offset + 3] = v1;
+  }
+}
+
+bool _slotMatches(core.SwitchTextureSlot slot, geometry.WallBandKind band) =>
+    switch (slot) {
+      core.SwitchTextureSlot.upper => band == geometry.WallBandKind.upper,
+      core.SwitchTextureSlot.middle =>
+        band == geometry.WallBandKind.middle ||
+            band == geometry.WallBandKind.solid,
+      core.SwitchTextureSlot.lower => band == geometry.WallBandKind.lower,
+    };

@@ -6,6 +6,7 @@ export 'src/replay.dart';
 export 'src/sector_runtime.dart';
 export 'src/sound_events.dart';
 export 'src/specials.dart';
+export 'src/switches.dart';
 export 'src/tick_driver.dart';
 export 'src/ticcmd.dart';
 export 'src/views.dart';

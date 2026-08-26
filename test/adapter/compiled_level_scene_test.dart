@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
+import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_wad/doom_wad.dart' as wad;
 import 'package:doompeller/adapter/adapter.dart';
 import 'package:flame_3d/camera.dart';
@@ -10,6 +11,34 @@ import 'package:flame_3d/resources.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_gpu_backend.dart';
+
+void expectPackedAtlasRect(
+  geometry.CompiledLevel level,
+  geometry.VertexRange range,
+  geometry.AtlasEntry entry,
+) {
+  final List<double> expected = <double>[
+    entry.u0(level.atlas.pageSize),
+    entry.v0(level.atlas.pageSize),
+    entry.u1(level.atlas.pageSize),
+    entry.v1(level.atlas.pageSize),
+  ];
+  final vertices = level.meshes[range.meshIndex].vertices;
+  for (
+    var vertex = range.firstVertex;
+    vertex < range.firstVertex + range.vertexCount;
+    vertex++
+  ) {
+    final int offset =
+        vertex * geometry.DoomVertexAbi.floatsPerVertex +
+        geometry.DoomVertexAbi.atlasRectOffset;
+    expect(
+      vertices.sublist(offset, offset + expected.length),
+      expected,
+      reason: 'mesh ${range.meshIndex} vertex $vertex atlas rect',
+    );
+  }
+}
 
 void main() {
   late FakeGpuBackend backend;
@@ -142,6 +171,77 @@ void main() {
     }
     expect(backend.buffers.length, initialBuffers);
     expect(diagnostics.gpuBuffersCreated, initialBuffers);
+  });
+
+  test('animation and switch rewrite packed atlas rect values', () {
+    final scene = DoomScene.fromCompiledLevel(level, resources);
+    for (final surface in scene.surfaces) {
+      surface.resource;
+    }
+    final int buffers = backend.buffers.length;
+    final animation = level.animations.first;
+    final geometry.AtlasEntry animated =
+        animation.frames[animation.frameAt(animation.speed)];
+    expect(scene.updateAnimationFrames(animation.speed), greaterThan(0));
+    for (final geometry.VertexRange range in animation.ranges) {
+      expectPackedAtlasRect(level, range, animated);
+    }
+    expect(scene.flushPendingUploads(), greaterThan(0));
+    for (final geometry.VertexRange range in animation.ranges) {
+      final FakeGpuBuffer buffer = backend.buffers[range.meshIndex];
+      for (
+        var vertex = range.firstVertex;
+        vertex < range.firstVertex + range.vertexCount;
+        vertex++
+      ) {
+        final int rectByteOffset =
+            DoomVertexAbi.byteOffsetOf(vertex) +
+            geometry.DoomVertexAbi.atlasRectOffset *
+                Float32List.bytesPerElement;
+        expect(
+          <double>[
+            for (var component = 0; component < 4; component++)
+              buffer.floatAt(
+                rectByteOffset + component * Float32List.bytesPerElement,
+              ),
+          ],
+          <double>[
+            animated.u0(level.atlas.pageSize),
+            animated.v0(level.atlas.pageSize),
+            animated.u1(level.atlas.pageSize),
+            animated.v1(level.atlas.pageSize),
+          ],
+          reason: 'uploaded mesh ${range.meshIndex} vertex $vertex atlas rect',
+        );
+      }
+    }
+    expect(backend.buffers.length, buffers, reason: 'no buffer recreation');
+
+    final geometry.WallBandRef switchBand = level.wallBands.firstWhere(
+      (geometry.WallBandRef band) => band.textureName == 'SW1COMP',
+    );
+    expect(
+      scene.updateSwitchTexture(
+        core.SwitchTextureChange(
+          linedef: switchBand.linedef,
+          sidedef: switchBand.sidedef,
+          slot: core.SwitchTextureSlot.middle,
+          textureName: 'SW2COMP',
+          tic: 1,
+        ),
+      ),
+      geometry.WallBandRef.verticesPerQuad,
+    );
+    final geometry.AtlasEntry switched = level.atlas.entry('SW2COMP')!;
+    final int rectOffset =
+        switchBand.firstVertex * geometry.DoomVertexAbi.floatsPerVertex +
+        geometry.DoomVertexAbi.atlasRectOffset;
+    expect(
+      level.meshes[switchBand.meshIndex].vertices[rectOffset],
+      switched.u0(level.atlas.pageSize),
+    );
+    expect(scene.flushPendingUploads(), 1);
+    expect(backend.buffers.length, buffers);
   });
 
   test('external plane and wall mutations keep cached positions coherent', () {

@@ -23,6 +23,8 @@ class CompiledLevel {
     required this.floorPlanes,
     required this.ceilingPlanes,
     required this.wallBands,
+    this.animations = const <AnimatedSurfaceRef>[],
+    this.switchFrames = const <String, AtlasEntry>{},
     required this.report,
     required this.skyTextureName,
   });
@@ -36,6 +38,10 @@ class CompiledLevel {
 
   /// One per emitted wall quad, for door and lift updates.
   final List<WallBandRef> wallBands;
+  final List<AnimatedSurfaceRef> animations;
+
+  /// Alternate atlas entries for switch textures, keyed by original name.
+  final Map<String, AtlasEntry> switchFrames;
 
   final GeometryReport report;
 
@@ -357,6 +363,36 @@ class _Compiler {
     for (var i = 0; i < walls.quads.length; i++) {
       atlasBuilder.addWallTexture(walls.quads[i].texture);
     }
+    final DoomAnimationResolution animationResolution =
+        textures.animationResolution;
+    final Set<String> usedPictures = <String>{
+      for (final Sector sector in map.sectors) ...<String>[
+        sector.floorFlat,
+        sector.ceilingFlat,
+      ],
+      for (final WallQuad quad in walls.quads) quad.texture,
+    };
+    for (final DoomAnimation animation in animationResolution.animations) {
+      if (!animation.frames.any(usedPictures.contains)) continue;
+      for (final String frame in animation.frames) {
+        if (animation.definition.kind == DoomAnimationKind.flat) {
+          atlasBuilder.addFlat(frame);
+        } else {
+          atlasBuilder.addWallTexture(frame);
+        }
+      }
+      atlasBuilder.addCoLocated(animation.frames);
+    }
+    for (final DoomSwitchPair pair in textures.switchPairs) {
+      if (!usedPictures.contains(pair.offName) &&
+          !usedPictures.contains(pair.onName)) {
+        continue;
+      }
+      atlasBuilder
+        ..addWallTexture(pair.offName)
+        ..addWallTexture(pair.onName)
+        ..addCoLocated(<String>[pair.offName, pair.onName]);
+    }
     if (usesSky) {
       atlasBuilder.addWallTexture(options.skyTextureName);
     }
@@ -390,6 +426,37 @@ class _Compiler {
     final List<SectorPlaneRef> ceilings = <SectorPlaneRef>[];
     _packPlanes(chosen, atlas, floors, ceilings);
     final List<WallBandRef> bands = _packWalls(walls, atlas);
+    final List<AnimatedSurfaceRef> animations = _buildAnimationRefs(
+      animationResolution,
+      atlas,
+      floors,
+      ceilings,
+      bands,
+    );
+    final Map<String, AtlasEntry> switchFrames = <String, AtlasEntry>{};
+    final List<String> animationFailures = <String>[
+      for (final DoomAnimationFailure failure in animationResolution.failures)
+        '${failure.definition.startName}->${failure.definition.endName}: ${failure.reason}',
+    ];
+    for (final DoomSwitchPair pair in textures.switchPairs) {
+      final AtlasEntry? off = atlas.entry(pair.offName);
+      final AtlasEntry? on = atlas.entry(pair.onName);
+      if (off == null || on == null) {
+        if (usedPictures.contains(pair.offName) ||
+            usedPictures.contains(pair.onName)) {
+          animationFailures.add(
+            '${pair.offName}<->${pair.onName}: missing frame',
+          );
+        }
+        continue;
+      }
+      atlas.requireSamePage(<AtlasEntry>[
+        off,
+        on,
+      ], description: 'switch ${pair.offName}<->${pair.onName}');
+      switchFrames[pair.offName] = on;
+      switchFrames[pair.onName] = off;
+    }
 
     final List<PackedMesh> meshes = _packer.finish();
     clock.stop();
@@ -413,6 +480,7 @@ class _Compiler {
       missingTextures: missingTextures.toList()..sort(),
       geometryHash: _hash(meshes),
       compileMicroseconds: clock.elapsedMicroseconds,
+      animationFailures: List<String>.unmodifiable(animationFailures),
       repairedTJunctionVertices: repairedVertices,
       repairedRegions: repairedRegions,
     );
@@ -423,6 +491,8 @@ class _Compiler {
       floorPlanes: floors,
       ceilingPlanes: ceilings,
       wallBands: bands,
+      animations: animations,
+      switchFrames: Map<String, AtlasEntry>.unmodifiable(switchFrames),
       report: report,
       skyTextureName: atlas.entry(options.skyTextureName) == null
           ? null
@@ -617,6 +687,7 @@ class _Compiler {
     return SectorPlaneRef(
       sector: sector,
       isCeiling: isCeiling,
+      textureName: flatName,
       ranges: ranges,
       baseHeight: height,
     );
@@ -706,6 +777,7 @@ class _Compiler {
         WallBandRef(
           linedef: quad.linedef,
           sidedef: quad.sidedef,
+          textureName: quad.texture,
           band: quad.band,
           frontSector: quad.frontSector,
           backSector: quad.backSector,
@@ -725,6 +797,59 @@ class _Compiler {
       );
     }
     return bands;
+  }
+
+  List<AnimatedSurfaceRef> _buildAnimationRefs(
+    DoomAnimationResolution resolution,
+    IndexedAtlas atlas,
+    List<SectorPlaneRef> floors,
+    List<SectorPlaneRef> ceilings,
+    List<WallBandRef> bands,
+  ) {
+    final List<AnimatedSurfaceRef> result = <AnimatedSurfaceRef>[];
+    for (final DoomAnimation animation in resolution.animations) {
+      final List<AtlasEntry?> resolvedFrames = <AtlasEntry?>[
+        for (final String name in animation.frames) atlas.entry(name),
+      ];
+      // A real IWAD publishes many valid animation ranges that a particular
+      // map never references. Only used ranges were queued into this level's
+      // bounded atlas, so absent entries here mean "unused", not corruption.
+      if (resolvedFrames.any((AtlasEntry? entry) => entry == null)) continue;
+      final List<AtlasEntry> frames = resolvedFrames.cast<AtlasEntry>();
+      atlas.requireSamePage(
+        frames,
+        description:
+            'animation ${animation.definition.startName}->${animation.definition.endName}',
+      );
+      for (var initial = 0; initial < animation.frames.length; initial++) {
+        final String name = animation.frames[initial];
+        final List<VertexRange> ranges = <VertexRange>[
+          for (final SectorPlaneRef plane in <SectorPlaneRef>[
+            ...floors,
+            ...ceilings,
+          ])
+            if (plane.textureName == name) ...plane.ranges,
+          for (final WallBandRef band in bands)
+            if (band.textureName == name)
+              VertexRange(
+                meshIndex: band.meshIndex,
+                firstVertex: band.firstVertex,
+                vertexCount: WallBandRef.verticesPerQuad,
+              ),
+        ];
+        if (ranges.isNotEmpty) {
+          result.add(
+            AnimatedSurfaceRef(
+              frames: frames,
+              speed: animation.definition.speed,
+              initialFrame: initial,
+              ranges: ranges,
+            ),
+          );
+        }
+      }
+    }
+    return result;
   }
 
   static double _length(double dx, double dy) {

@@ -36,14 +36,14 @@ void main() {
     test('has the expected content hash', () {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
-      expect(DoomFixtures.hash(), 0xf1adef0308524d5c);
+      expect(DoomFixtures.hash(), 0x541af06eec5d95ea);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(DoomFixtures.pwadBytes().lengthInBytes, 169267);
-      expect(wad.length, 71);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 202789);
+      expect(wad.length, 79);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 
@@ -80,8 +80,8 @@ void main() {
       final WadResources res = WadResources.load(DoomFixtures.wadSet());
       expect(res.playpal.length, 14);
       expect(res.colormap.length, 34);
-      expect(res.textureNames.length, 5);
-      expect(res.flatNames.length, 4);
+      expect(res.textureNames.length, 11);
+      expect(res.flatNames.length, 7);
       expect(res.spriteNames.length, DoomFixtures.spriteNames.length);
       expect(res.soundNames.length, DoomFixtures.soundNames.length);
       for (final String name in res.textureNames) {

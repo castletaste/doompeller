@@ -13,6 +13,34 @@ import 'package:flutter/services.dart';
 
 import 'fake_gpu_backend.dart';
 
+void expectRuntimeAtlasRect(
+  geometry.CompiledLevel level,
+  geometry.VertexRange range,
+  geometry.AtlasEntry entry,
+) {
+  final List<double> expected = <double>[
+    entry.u0(level.atlas.pageSize),
+    entry.v0(level.atlas.pageSize),
+    entry.u1(level.atlas.pageSize),
+    entry.v1(level.atlas.pageSize),
+  ];
+  final vertices = level.meshes[range.meshIndex].vertices;
+  for (
+    var vertex = range.firstVertex;
+    vertex < range.firstVertex + range.vertexCount;
+    vertex++
+  ) {
+    final int offset =
+        vertex * geometry.DoomVertexAbi.floatsPerVertex +
+        geometry.DoomVertexAbi.atlasRectOffset;
+    expect(
+      vertices.sublist(offset, offset + expected.length),
+      expected,
+      reason: 'runtime mesh ${range.meshIndex} vertex $vertex atlas rect',
+    );
+  }
+}
+
 Future<PreparedDoomLevel> fixtureLevel() async {
   final content = DoomContentSource(
     environment: const <String, String>{},
@@ -123,6 +151,24 @@ void main() {
     expect(runtime.gameState.tic, 35);
     expect(runtime.tickDriver.executedTics, 35);
     expect(runtime.tickDriver.droppedTics, 0);
+  });
+
+  test('production runtime advances packed texture animation frames', () async {
+    final PreparedDoomLevel prepared = await fixtureLevel();
+    final runtime = DoomRuntimeGame(prepared);
+    final geometry.AnimatedSurfaceRef animation =
+        prepared.geometry.animations.first;
+
+    for (var tic = 0; tic < animation.speed; tic++) {
+      runtime.advanceMicrosForTest(28572);
+    }
+
+    expect(runtime.gameState.levelTime, greaterThanOrEqualTo(animation.speed));
+    final geometry.AtlasEntry expected =
+        animation.frames[animation.frameAt(runtime.gameState.levelTime)];
+    for (final geometry.VertexRange range in animation.ranges) {
+      expectRuntimeAtlasRect(prepared.geometry, range, expected);
+    }
   });
 
   test('runtime routes fire, door, and death journals to backend', () async {

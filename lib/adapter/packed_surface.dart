@@ -323,6 +323,9 @@ final class PackedFlameSurface extends Surface {
   }
 
   void _uploadDirtyRanges(GpuBuffer buffer) {
+    // Dirty tracking is vertex-granular. Even if a caller changed only atlas
+    // rect floats 12..15, each upload covers the complete 80-byte records for
+    // the touched vertices; it does not issue strided 16-byte writes.
     for (final range in _dirtyRanges) {
       final firstByte = DoomVertexAbi.byteOffsetOf(range.$1);
       final lastByte = DoomVertexAbi.byteOffsetOf(range.$2 + 1);

@@ -130,6 +130,21 @@ class IndexedAtlas {
 
   AtlasEntry? entry(String name) => entries[name];
 
+  /// Rejects a runtime-mutated group that would require a material/page swap.
+  void requireSamePage(
+    Iterable<AtlasEntry> group, {
+    required String description,
+  }) {
+    final Set<int> groupPages = <int>{
+      for (final AtlasEntry entry in group) entry.page,
+    };
+    if (groupPages.length > 1) {
+      throw DoomFormatFailure(
+        '$description spans atlas pages ${(groupPages.toList()..sort()).join(', ')}',
+      );
+    }
+  }
+
   int get pageCount => pages.length;
 }
 
@@ -145,6 +160,17 @@ class AtlasBuilder {
   final GeometryOptions options;
 
   final Map<String, _PendingImage> _pending = <String, _PendingImage>{};
+  final List<List<String>> _coLocated = <List<String>>[];
+
+  /// Keeps all present [names] on one page so a runtime atlas-rect mutation
+  /// never also needs a material/page change.
+  void addCoLocated(Iterable<String> names) {
+    final List<String> group = <String>[
+      for (final String name in names)
+        if (_pending.containsKey(name)) name,
+    ];
+    if (group.length > 1) _coLocated.add(group);
+  }
 
   /// Queues a wall texture (tiling).
   void addWallTexture(String name) {
@@ -214,8 +240,22 @@ class AtlasBuilder {
 
   IndexedAtlas build() {
     final int pageSize = options.atlasPageSize;
-    final List<_PendingImage> queue = _pending.values.toList()
-      ..sort(_byHeightThenName);
+    final List<List<String>> coLocated = _mergedCoLocatedGroups();
+    final Set<String> groupedNames = <String>{
+      for (final List<String> group in coLocated) ...group,
+    };
+    final List<List<_PendingImage>> queue = <List<_PendingImage>>[
+      for (final List<String> names in coLocated)
+        <_PendingImage>[for (final String name in names) _pending[name]!],
+      for (final _PendingImage image
+          in (_pending.values
+              .where(
+                (_PendingImage image) => !groupedNames.contains(image.name),
+              )
+              .toList()
+            ..sort(_byHeightThenName)))
+        <_PendingImage>[image],
+    ];
 
     final List<AtlasPage> pages = <AtlasPage>[];
     final Map<String, AtlasEntry> entries = <String, AtlasEntry>{};
@@ -227,62 +267,89 @@ class AtlasBuilder {
     var pageIndex = -1;
     var totalPixels = 0;
 
-    for (final _PendingImage img in queue) {
-      final int gutter = img.tiling ? 0 : options.spriteGutter;
-      final int w = img.width + gutter * 2;
-      final int h = img.height + gutter * 2;
-      if (w > pageSize || h > pageSize) {
-        overflow.add(img.name);
+    for (final List<_PendingImage> group in queue) {
+      final int groupWidth = group.fold<int>(
+        0,
+        (int width, _PendingImage image) =>
+            width + image.width + (image.tiling ? 0 : options.spriteGutter * 2),
+      );
+      final int groupHeight = group.fold<int>(0, (
+        int height,
+        _PendingImage image,
+      ) {
+        final int candidate =
+            image.height + (image.tiling ? 0 : options.spriteGutter * 2);
+        return candidate > height ? candidate : height;
+      });
+      if (groupWidth > pageSize || groupHeight > pageSize) {
+        overflow.addAll(group.map((_PendingImage image) => image.name));
         continue;
       }
-      if (pageIndex < 0) {
-        if (!_canAllocatePage(pages.length + 1, pageSize)) {
-          overflow.add(img.name);
-          continue;
-        }
-        pages.add(AtlasPage(pages.length, pageSize));
-        pageIndex = pages.length - 1;
-        shelfY = 0;
-        shelfHeight = 0;
-        cursorX = 0;
-      }
-      if (cursorX + w > pageSize) {
-        // Next shelf.
+      if (pageIndex >= 0 && cursorX + groupWidth > pageSize) {
         shelfY += shelfHeight;
         shelfHeight = 0;
         cursorX = 0;
       }
-      if (shelfY + h > pageSize) {
-        // Next page.
-        if (!_canAllocatePage(pages.length + 1, pageSize)) {
+      if (pageIndex >= 0 && shelfY + groupHeight > pageSize) {
+        pageIndex = -1;
+      }
+      for (final _PendingImage img in group) {
+        final int gutter = img.tiling ? 0 : options.spriteGutter;
+        final int w = img.width + gutter * 2;
+        final int h = img.height + gutter * 2;
+        if (w > pageSize || h > pageSize) {
           overflow.add(img.name);
           continue;
         }
-        pages.add(AtlasPage(pages.length, pageSize));
-        pageIndex = pages.length - 1;
-        shelfY = 0;
-        shelfHeight = 0;
-        cursorX = 0;
-      }
-      final AtlasPage page = pages[pageIndex];
-      final int originX = cursorX + gutter;
-      final int originY = shelfY + gutter;
-      _blit(page, img, originX, originY, gutter);
-      entries[img.name] = AtlasEntry(
-        name: img.name,
-        page: pageIndex,
-        x: originX,
-        y: originY,
-        width: img.width,
-        height: img.height,
-        tiling: img.tiling,
-        leftOffset: img.leftOffset,
-        topOffset: img.topOffset,
-      );
-      totalPixels += img.width * img.height;
-      cursorX += w;
-      if (h > shelfHeight) {
-        shelfHeight = h;
+        if (pageIndex < 0) {
+          if (!_canAllocatePage(pages.length + 1, pageSize)) {
+            overflow.add(img.name);
+            continue;
+          }
+          pages.add(AtlasPage(pages.length, pageSize));
+          pageIndex = pages.length - 1;
+          shelfY = 0;
+          shelfHeight = 0;
+          cursorX = 0;
+        }
+        if (cursorX + w > pageSize) {
+          // Next shelf.
+          shelfY += shelfHeight;
+          shelfHeight = 0;
+          cursorX = 0;
+        }
+        if (shelfY + h > pageSize) {
+          // Next page.
+          if (!_canAllocatePage(pages.length + 1, pageSize)) {
+            overflow.add(img.name);
+            continue;
+          }
+          pages.add(AtlasPage(pages.length, pageSize));
+          pageIndex = pages.length - 1;
+          shelfY = 0;
+          shelfHeight = 0;
+          cursorX = 0;
+        }
+        final AtlasPage page = pages[pageIndex];
+        final int originX = cursorX + gutter;
+        final int originY = shelfY + gutter;
+        _blit(page, img, originX, originY, gutter);
+        entries[img.name] = AtlasEntry(
+          name: img.name,
+          page: pageIndex,
+          x: originX,
+          y: originY,
+          width: img.width,
+          height: img.height,
+          tiling: img.tiling,
+          leftOffset: img.leftOffset,
+          topOffset: img.topOffset,
+        );
+        totalPixels += img.width * img.height;
+        cursorX += w;
+        if (h > shelfHeight) {
+          shelfHeight = h;
+        }
       }
     }
 
@@ -293,6 +360,37 @@ class AtlasBuilder {
       overflowed: overflow,
       totalPixels: totalPixels,
     );
+  }
+
+  /// Merges overlapping animation/switch groups transitively before packing.
+  /// A picture shared by two groups is emitted once as part of their union.
+  List<List<String>> _mergedCoLocatedGroups() {
+    final Map<String, String> parent = <String, String>{};
+
+    String find(String name) {
+      final String current = parent.putIfAbsent(name, () => name);
+      if (current == name) return name;
+      return parent[name] = find(current);
+    }
+
+    for (final List<String> group in _coLocated) {
+      if (group.isEmpty) continue;
+      final String first = find(group.first);
+      for (final String name in group.skip(1)) {
+        final String root = find(name);
+        if (root != first) parent[root] = first;
+      }
+    }
+
+    final Map<String, List<String>> merged = <String, List<String>>{};
+    final Set<String> seen = <String>{};
+    for (final List<String> group in _coLocated) {
+      for (final String name in group) {
+        if (!seen.add(name)) continue;
+        merged.putIfAbsent(find(name), () => <String>[]).add(name);
+      }
+    }
+    return merged.values.toList(growable: false);
   }
 
   bool _canAllocatePage(int pageCount, int pageSize) =>
@@ -354,7 +452,8 @@ class AtlasBuilder {
     return byHeight != 0 ? byHeight : a.name.compareTo(b.name);
   }
 
-  static Uint8List _opaque(int length) => Uint8List(length)..fillRange(0, length, 255);
+  static Uint8List _opaque(int length) =>
+      Uint8List(length)..fillRange(0, length, 255);
 }
 
 class _PendingImage {

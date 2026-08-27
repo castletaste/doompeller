@@ -75,8 +75,10 @@ void main() {
           setup.wallB.x.toDouble(),
           setup.wallB.y.toDouble(),
         ),
-        lessThan(1),
-        reason: 'PUFF must land on the original E1M1 wall, not mid-air',
+        inInclusiveRange(3, 5),
+        reason:
+            'classic PUFF sits four map units in front of the original E1M1 '
+            'wall so its billboard is visible without becoming a mid-air hit',
       );
       expect(flashComponent, isNotNull);
       puffRuntime.input.release(DoomControl.attack);

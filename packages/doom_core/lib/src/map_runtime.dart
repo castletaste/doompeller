@@ -168,6 +168,83 @@ class MapRuntime {
     )) {
       return false;
     }
+    return _lineBlocksActor(lineIndex, actorBottom, actorHeight);
+  }
+
+  /// Whether the actor circle's entire center path touches a blocking line.
+  ///
+  /// Destination-only collision can miss a chord through the rounded capsule
+  /// at a linedef endpoint: both endpoints are legal while the path between
+  /// them penetrates the actor radius. This uses a conservative 8.8 segment
+  /// distance so the same result is exact on the Dart VM and Wasm.
+  bool blocksAlongMove(
+    int lineIndex,
+    int fromX,
+    int fromY,
+    int toX,
+    int toY,
+    int radius,
+    int actorBottom,
+    int actorHeight,
+  ) {
+    final Linedef line = map.linedefs[lineIndex];
+    final MapVertex a = map.vertices[line.v1];
+    final MapVertex b = map.vertices[line.v2];
+    final int ax = toFixed(a.x);
+    final int ay = toFixed(a.y);
+    final int bx = toFixed(b.x);
+    final int by = toFixed(b.y);
+    final int moveMinX = (fromX < toX ? fromX : toX) - radius;
+    final int moveMaxX = (fromX > toX ? fromX : toX) + radius;
+    final int moveMinY = (fromY < toY ? fromY : toY) - radius;
+    final int moveMaxY = (fromY > toY ? fromY : toY) + radius;
+    if (moveMaxX < (ax < bx ? ax : bx) ||
+        moveMinX > (ax > bx ? ax : bx) ||
+        moveMaxY < (ay < by ? ay : by) ||
+        moveMinY > (ay > by ? ay : by) ||
+        !_lineBlocksActor(lineIndex, actorBottom, actorHeight)) {
+      return false;
+    }
+    const int quantum = 1 << 8;
+    final int scaledRadius = ((radius + quantum - 1) ~/ quantum) + 2;
+    return _minimumSegmentDistanceQuantized(
+          fromX,
+          fromY,
+          toX,
+          toY,
+          ax,
+          ay,
+          bx,
+          by,
+        ) <=
+        scaledRadius;
+  }
+
+  /// Minimum center-path to linedef distance in 1/256 map-unit quanta.
+  int minimumDistanceToLineAlongMoveQuantized(
+    int lineIndex,
+    int fromX,
+    int fromY,
+    int toX,
+    int toY,
+  ) {
+    final Linedef line = map.linedefs[lineIndex];
+    final MapVertex a = map.vertices[line.v1];
+    final MapVertex b = map.vertices[line.v2];
+    return _minimumSegmentDistanceQuantized(
+      fromX,
+      fromY,
+      toX,
+      toY,
+      toFixed(a.x),
+      toFixed(a.y),
+      toFixed(b.x),
+      toFixed(b.y),
+    );
+  }
+
+  bool _lineBlocksActor(int lineIndex, int actorBottom, int actorHeight) {
+    final Linedef line = map.linedefs[lineIndex];
     if (line.blocksMovement || !line.isTwoSided) return true;
     final int front = frontSector(line);
     final int? back = backSector(line);
@@ -183,6 +260,46 @@ class MapRuntime {
     return top - bottom < actorHeight ||
         actorBottom < bottom - toFixed(24) ||
         actorBottom + actorHeight > top;
+  }
+
+  /// Point-to-linedef distance in 1/256 map-unit quanta.
+  ///
+  /// Movement uses this only to distinguish penetration from motion that is
+  /// parallel to, or away from, a blocker the actor already touches. The
+  /// quantized implementation shares the Wasm-safe arithmetic used by the
+  /// conservative overlap predicate.
+  int distanceToLineQuantized(int lineIndex, int x, int y) {
+    final Linedef line = map.linedefs[lineIndex];
+    final MapVertex a = map.vertices[line.v1];
+    final MapVertex b = map.vertices[line.v2];
+    return _distanceToSegmentQuantized(
+      x,
+      y,
+      toFixed(a.x),
+      toFixed(a.y),
+      toFixed(b.x),
+      toFixed(b.y),
+    );
+  }
+
+  /// Whether [x], [y] lies on the front/right side of a linedef.
+  ///
+  /// Doom one-sided walls own only a right sidedef, so a tangent slide may be
+  /// relaxed only from this legal side. Quantizing before the cross product
+  /// keeps the sign test below the exact-integer limit of Wasm numbers.
+  bool isOnFrontSide(int lineIndex, int x, int y) {
+    final Linedef line = map.linedefs[lineIndex];
+    final MapVertex a = map.vertices[line.v1];
+    final MapVertex b = map.vertices[line.v2];
+    const int quantum = 1 << 8;
+    // Keep the line delta in map units. Shifting a possible 16-bit endpoint
+    // delta through 16.16 would wrap at 32768 units before it is reduced to
+    // 8.8, reversing the side on long valid WAD linedefs.
+    final int lineX = b.x - a.x;
+    final int lineY = b.y - a.y;
+    final int pointX = (x - toFixed(a.x)) ~/ quantum;
+    final int pointY = (y - toFixed(a.y)) ~/ quantum;
+    return lineX * pointY - lineY * pointX <= 0;
   }
 
   ({int bottom, int top})? openingFor(int lineIndex) {
@@ -238,6 +355,68 @@ class MapRuntime {
     final int cross = (abx * apy - aby * apx).abs();
     final int length = _integerSqrtCeil(lengthSquared);
     return (cross + length - 1) ~/ length;
+  }
+
+  static int _minimumSegmentDistanceQuantized(
+    int ax,
+    int ay,
+    int bx,
+    int by,
+    int cx,
+    int cy,
+    int dx,
+    int dy,
+  ) {
+    if (_segmentsIntersectQuantized(ax, ay, bx, by, cx, cy, dx, dy)) {
+      return 0;
+    }
+    int best = _distanceToSegmentQuantized(ax, ay, cx, cy, dx, dy);
+    int distance = _distanceToSegmentQuantized(bx, by, cx, cy, dx, dy);
+    if (distance < best) best = distance;
+    distance = _distanceToSegmentQuantized(cx, cy, ax, ay, bx, by);
+    if (distance < best) best = distance;
+    distance = _distanceToSegmentQuantized(dx, dy, ax, ay, bx, by);
+    return distance < best ? distance : best;
+  }
+
+  static bool _segmentsIntersectQuantized(
+    int ax,
+    int ay,
+    int bx,
+    int by,
+    int cx,
+    int cy,
+    int dx,
+    int dy,
+  ) {
+    const int quantum = 1 << 8;
+    final int qax = ax ~/ quantum;
+    final int qay = ay ~/ quantum;
+    final int qbx = bx ~/ quantum;
+    final int qby = by ~/ quantum;
+    final int qcx = cx ~/ quantum;
+    final int qcy = cy ~/ quantum;
+    final int qdx = dx ~/ quantum;
+    final int qdy = dy ~/ quantum;
+
+    int side(int x1, int y1, int x2, int y2, int px, int py) =>
+        (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+    bool between(int value, int first, int second) =>
+        value >= (first < second ? first : second) &&
+        value <= (first > second ? first : second);
+    bool onSegment(int x1, int y1, int x2, int y2, int px, int py) =>
+        between(px, x1, x2) && between(py, y1, y2);
+
+    final int abC = side(qax, qay, qbx, qby, qcx, qcy);
+    final int abD = side(qax, qay, qbx, qby, qdx, qdy);
+    final int cdA = side(qcx, qcy, qdx, qdy, qax, qay);
+    final int cdB = side(qcx, qcy, qdx, qdy, qbx, qby);
+    if (abC == 0 && onSegment(qax, qay, qbx, qby, qcx, qcy)) return true;
+    if (abD == 0 && onSegment(qax, qay, qbx, qby, qdx, qdy)) return true;
+    if (cdA == 0 && onSegment(qcx, qcy, qdx, qdy, qax, qay)) return true;
+    if (cdB == 0 && onSegment(qcx, qcy, qdx, qdy, qbx, qby)) return true;
+    return ((abC < 0 && abD > 0) || (abC > 0 && abD < 0)) &&
+        ((cdA < 0 && cdB > 0) || (cdA > 0 && cdB < 0));
   }
 
   /// Conservative circle/segment overlap without overflowing 16.16 products.

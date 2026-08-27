@@ -40,8 +40,8 @@ void main() {
     expect(first.totalSecrets, 1);
     expect(first.player.keys, contains(Key.blue));
     expect(first.mobjs.length, lessThanOrEqualTo(initialActors));
-    // Updated when long-linedef collision stopped overflowing its projection.
-    expect(hashes.last, 0x610c6f12);
+    // Updated after deterministic pickup state and unified actor hit effects.
+    expect(hashes.last, 0x9113cff2);
 
     final GameState second = GameState.start(
       map,

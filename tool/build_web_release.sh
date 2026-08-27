@@ -77,6 +77,10 @@ if ! grep -Fq '"compileTarget":"dart2wasm"' build/web/flutter_bootstrap.js; then
   echo "error: Flutter bootstrap does not contain the Wasm build" >&2
   exit 1
 fi
+if ! grep -Fq '"renderer":"skwasm"' build/web/flutter_bootstrap.js; then
+  echo "error: Flutter bootstrap does not select the skwasm renderer" >&2
+  exit 1
+fi
 if grep -Fq '"compileTarget":"dart2js"' build/web/flutter_bootstrap.js ||
   [[ -e build/web/main.dart.js ]]; then
   echo "error: dart2js fallback remains in the Wasm-only release" >&2
@@ -99,5 +103,37 @@ if [[ -n "$unexpected_wads" ]]; then
   echo "$unexpected_wads" >&2
   exit 1
 fi
+
+require_route_header() {
+  local route="$1"
+  local header="$2"
+  if ! awk -v route="$route" -v header="  $header" '
+    $0 == route { active = 1; next }
+    active && /^[^[:space:]]/ { exit }
+    active && $0 == header { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' build/web/_headers; then
+    echo "error: copied _headers is missing '$header' for '$route'" >&2
+    exit 1
+  fi
+}
+
+require_route_header '/*' 'Cross-Origin-Embedder-Policy: credentialless'
+require_route_header '/*' 'Cross-Origin-Opener-Policy: same-origin'
+require_route_header '/*' "Content-Security-Policy: frame-ancestors 'none'"
+require_route_header '/*' 'Permissions-Policy: camera=(), geolocation=(), microphone=(), payment=(), usb=()'
+require_route_header '/*' 'Strict-Transport-Security: max-age=31536000'
+require_route_header '/*' 'X-Frame-Options: DENY'
+require_route_header '/*' 'X-Content-Type-Options: nosniff'
+require_route_header '/*' 'Referrer-Policy: strict-origin-when-cross-origin'
+require_route_header '/index.html' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/flutter_bootstrap.js' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/flutter_service_worker.js' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/version.json' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/main.dart.wasm' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/main.dart.mjs' 'Cache-Control: public, max-age=0, must-revalidate'
+require_route_header '/assets/.local/doom/DOOM1.WAD' 'Cache-Control: public, max-age=31536000, immutable'
+
+sh tool/audit_project_contracts.sh
 
 echo "Wasm/WebGPU release verified: $(wc -c < build/web/main.dart.wasm | tr -d ' ') bytes main.dart.wasm; $destination_iwad_bytes bytes bundled DOOM1.WAD"

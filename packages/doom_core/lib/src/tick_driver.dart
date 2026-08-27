@@ -17,18 +17,42 @@ class FixedTickDriver {
   double get interpolationAlpha => _scaledRemainder / _microsPerSecond;
 
   int advanceMicros(int elapsedMicros, void Function(TicCmd) run, TicCmd cmd) {
+    return advanceMicrosWhile(elapsedMicros, (TicCmd command) {
+      run(command);
+      return true;
+    }, cmd);
+  }
+
+  /// Advances due tics while [run] returns true.
+  ///
+  /// A false result means the tic just run reached a terminal state. That tic
+  /// is counted, later callbacks from the same elapsed interval are skipped,
+  /// and their post-terminal time is not reported as dropped simulation work.
+  /// The existing [advanceMicros] API is the always-continue form.
+  int advanceMicrosWhile(
+    int elapsedMicros,
+    bool Function(TicCmd) run,
+    TicCmd cmd,
+  ) {
     if (elapsedMicros < 0) {
       throw ArgumentError.value(elapsedMicros, 'elapsedMicros');
     }
     _scaledRemainder += elapsedMicros * kTicRate;
     final int due = _scaledRemainder ~/ _microsPerSecond;
     _scaledRemainder %= _microsPerSecond;
-    final int executed = due > maxTicsPerFrame ? maxTicsPerFrame : due;
-    for (int i = 0; i < executed; i++) {
-      run(cmd);
+    final int limit = due > maxTicsPerFrame ? maxTicsPerFrame : due;
+    var executed = 0;
+    var terminated = false;
+    for (var i = 0; i < limit; i++) {
+      final bool shouldContinue = run(cmd);
+      executed++;
+      if (!shouldContinue) {
+        terminated = true;
+        break;
+      }
     }
     executedTics += executed;
-    if (due > executed) {
+    if (!terminated && due > executed) {
       droppedTics += due - executed;
     }
     return executed;

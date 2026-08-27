@@ -20,6 +20,15 @@ void main() {
     expect(input.consume().command.attacking, isFalse);
   });
 
+  test('attack press and release before a tic is consumed exactly once', () {
+    final input = DoomInputState()
+      ..press(DoomControl.attack)
+      ..release(DoomControl.attack);
+
+    expect(input.consume().command.attacking, isTrue);
+    expect(input.consume().command.attacking, isFalse);
+  });
+
   test('use, weapon, pointer turn and pause are one-shot', () {
     final input = DoomInputState()
       ..triggerUse()

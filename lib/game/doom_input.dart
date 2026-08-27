@@ -28,12 +28,18 @@ final class DoomInputState {
   static const int turnSpeed = 640;
 
   final Set<DoomControl> _held = <DoomControl>{};
+  bool _attackPending = false;
   bool _usePending = false;
   bool _pausePending = false;
   int? _weaponPending;
   int _pointerTurnPending = 0;
 
-  void press(DoomControl control) => _held.add(control);
+  void press(DoomControl control) {
+    final bool newlyHeld = _held.add(control);
+    if (newlyHeld && control == DoomControl.attack) {
+      _attackPending = true;
+    }
+  }
 
   void release(DoomControl control) => _held.remove(control);
 
@@ -72,7 +78,9 @@ final class DoomInputState {
         (_held.contains(DoomControl.turnLeft) ? turnSpeed : 0) -
         (_held.contains(DoomControl.turnRight) ? turnSpeed : 0) +
         _pointerTurnPending;
-    var buttons = _held.contains(DoomControl.attack) ? Buttons.attack : 0;
+    var buttons = _held.contains(DoomControl.attack) || _attackPending
+        ? Buttons.attack
+        : 0;
     if (_usePending) {
       buttons |= Buttons.use;
     }
@@ -89,6 +97,7 @@ final class DoomInputState {
       ),
       togglePause: takePauseToggle(),
     );
+    _attackPending = false;
     _usePending = false;
     _weaponPending = null;
     _pointerTurnPending = 0;
@@ -100,6 +109,7 @@ final class DoomInputState {
   /// Nothing queued before the loss may leak into a later simulation tic.
   void clear() {
     _held.clear();
+    _attackPending = false;
     _usePending = false;
     _pausePending = false;
     _weaponPending = null;

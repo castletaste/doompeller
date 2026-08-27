@@ -118,6 +118,25 @@ void main() {
     expect(count, 2);
   });
 
+  test(
+    'fixed driver counts a terminating tic without dropping later due time',
+    () {
+      final FixedTickDriver driver = FixedTickDriver(maxTicsPerFrame: 4);
+      var callbacks = 0;
+
+      final int executed = driver.advanceMicrosWhile(1000000, (_) {
+        callbacks++;
+        return false;
+      }, TicCmd.empty);
+
+      expect(callbacks, 1);
+      expect(executed, 1);
+      expect(driver.executedTics, 1);
+      expect(driver.droppedTics, 0);
+      expect(driver.interpolationNumerator, 0);
+    },
+  );
+
   test('interpolation reads never execute simulation', () {
     final FixedTickDriver driver = FixedTickDriver();
     var count = 0;
@@ -295,8 +314,10 @@ void main() {
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
     // The long-linedef collision predicate changes the recorded position and
     // momentum; ordered actor ids, state records, and shared chase RNG remain
-    // part of the same future-affecting replay identity.
-    expect(a.hashState(), 0x5f346a1d);
+    // part of the same future-affecting replay identity. Barrel no-blood flags
+    // and exact monster ray-circle targeting and actor hit effects are
+    // future-affecting too.
+    expect(a.hashState(), 0xe553be3f);
   });
 
   test('replay hash ignores an unused actor-state table insertion', () {
@@ -406,36 +427,43 @@ void main() {
     expect(pending.hashState(), consumed.hashState());
   });
 
-  test('next actor id affects hash after a no-op pickup is removed', () {
-    final GameState base = GameState.start(
-      testMap(),
-      const GameConfig(monsters: false),
-    );
-    final GameState allocated = GameState.start(
-      testMap(
-        things: const <Thing>[
-          Thing(
-            x: 64,
-            y: 64,
-            angle: 0,
-            type: 1,
-            flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
-          ),
-          Thing(
-            x: 64,
-            y: 64,
-            angle: 0,
-            type: 2011,
-            flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
-          ),
-        ],
-      ),
-      const GameConfig(monsters: false),
-    );
-    base.runTic(TicCmd.empty);
-    allocated.runTic(TicCmd.empty);
-    expect(base.player.health, allocated.player.health);
-    expect(base.mobjs.length, allocated.mobjs.length);
-    expect(base.hashState(), isNot(allocated.hashState()));
-  });
+  test(
+    'no-benefit health pickup remains while actor identity stays hashed',
+    () {
+      final GameState base = GameState.start(
+        testMap(),
+        const GameConfig(monsters: false),
+      );
+      final GameState allocated = GameState.start(
+        testMap(
+          things: const <Thing>[
+            Thing(
+              x: 64,
+              y: 64,
+              angle: 0,
+              type: 1,
+              flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+            ),
+            Thing(
+              x: 64,
+              y: 64,
+              angle: 0,
+              type: 2011,
+              flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+            ),
+          ],
+        ),
+        const GameConfig(monsters: false),
+      );
+      base.runTic(TicCmd.empty);
+      allocated.runTic(TicCmd.empty);
+      expect(base.player.health, allocated.player.health);
+      expect(
+        allocated.mobjs.map((MobjView actor) => actor.sprite),
+        contains('STIM'),
+      );
+      expect(allocated.mobjs.length, base.mobjs.length + 1);
+      expect(base.hashState(), isNot(allocated.hashState()));
+    },
+  );
 }

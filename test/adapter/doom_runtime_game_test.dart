@@ -10,6 +10,8 @@ import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/game/sound_playback.dart';
+import 'package:flame/components.dart' show Component;
+import 'package:flame_3d/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
@@ -60,6 +62,16 @@ final class _FailFirstRuntimeAudioBackend extends FakeAudioBackend {
   }
 }
 
+final class _UpdateDeltaProbe extends Component {
+  final List<double> deltas = <double>[];
+
+  @override
+  void update(double dt) {
+    deltas.add(dt);
+    super.update(dt);
+  }
+}
+
 Future<PreparedDoomLevel> fixtureLevel() async {
   final content = DoomContentSource(
     environment: const <String, String>{},
@@ -76,7 +88,7 @@ Future<PreparedDoomLevel> fixtureLevel() async {
   );
 }
 
-Future<PreparedDoomLevel> fixtureExitLevel() async {
+Future<PreparedDoomLevel> fixtureExitLevel({bool secretExit = false}) async {
   final base = await fixtureLevel();
   final source = base.map;
   final linedefs = List<Linedef>.of(source.linedefs);
@@ -103,7 +115,9 @@ Future<PreparedDoomLevel> fixtureExitLevel() async {
     v1: v1,
     v2: v2,
     flags: old.flags,
-    special: LineSpecial.exitSwitchOnce,
+    special: secretExit
+        ? LineSpecial.secretExitSwitchOnce
+        : LineSpecial.exitSwitchOnce,
     tag: old.tag,
     rightSidedef: old.rightSidedef,
     leftSidedef: old.leftSidedef,
@@ -567,6 +581,20 @@ void main() {
     );
   });
 
+  test('short pointer click fires the pistol exactly once', () async {
+    final runtime = DoomRuntimeGame(await fixturePlayerSoundLevel());
+    final int bulletsBefore = runtime.gameState.player.ammo.bullets;
+
+    runtime
+      ..setPointerAttack(true)
+      ..setPointerAttack(false);
+    for (var tic = 0; tic < 5; tic++) {
+      expect(runtime.advanceMicrosForTest(28572), 1);
+    }
+
+    expect(runtime.gameState.player.ammo.bullets, bulletsBefore - 1);
+  });
+
   test(
     'audio failure is contained and later play, restart, and dispose run',
     () async {
@@ -827,6 +855,159 @@ void main() {
     },
   );
 
+  test('physical movement keys work under a non-Latin layout', () async {
+    final runtime = DoomRuntimeGame(await fixtureLevel());
+    final cases =
+        <
+          ({
+            PhysicalKeyboardKey physical,
+            LogicalKeyboardKey logical,
+            String character,
+            TicCmd expected,
+          })
+        >[
+          (
+            physical: PhysicalKeyboardKey.keyW,
+            logical: const LogicalKeyboardKey(0x00000446),
+            character: 'ц',
+            expected: const TicCmd(forwardMove: DoomInputState.moveSpeed),
+          ),
+          (
+            physical: PhysicalKeyboardKey.keyS,
+            logical: const LogicalKeyboardKey(0x0000044b),
+            character: 'ы',
+            expected: const TicCmd(forwardMove: -DoomInputState.moveSpeed),
+          ),
+          (
+            physical: PhysicalKeyboardKey.keyA,
+            logical: const LogicalKeyboardKey(0x00000444),
+            character: 'ф',
+            expected: const TicCmd(sideMove: -DoomInputState.strafeSpeed),
+          ),
+          (
+            physical: PhysicalKeyboardKey.keyD,
+            logical: const LogicalKeyboardKey(0x00000432),
+            character: 'в',
+            expected: const TicCmd(sideMove: DoomInputState.strafeSpeed),
+          ),
+        ];
+    for (final entry in cases) {
+      runtime.onKeyEvent(
+        KeyDownEvent(
+          physicalKey: entry.physical,
+          logicalKey: entry.logical,
+          character: entry.character,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{entry.logical},
+      );
+      expect(runtime.input.consume().command, entry.expected);
+      runtime.onKeyEvent(
+        KeyUpEvent(
+          physicalKey: entry.physical,
+          logicalKey: entry.logical,
+          timeStamp: Duration.zero,
+        ),
+        const <LogicalKeyboardKey>{},
+      );
+      expect(runtime.input.consume().command, TicCmd.empty);
+    }
+
+    const LogicalKeyboardKey cyrillicU = LogicalKeyboardKey(0x00000443);
+    runtime.onKeyEvent(
+      const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyE,
+        logicalKey: cyrillicU,
+        character: 'у',
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{cyrillicU},
+    );
+    expect(runtime.input.consume().command.buttons & Buttons.use, isNot(0));
+  });
+
+  test('key up releases the control captured for its physical key', () async {
+    final runtime = DoomRuntimeGame(await fixtureLevel());
+    runtime.onKeyEvent(
+      const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyZ,
+        logicalKey: LogicalKeyboardKey.keyW,
+        character: 'w',
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
+    );
+    expect(
+      runtime.input.consume().command.forwardMove,
+      DoomInputState.moveSpeed,
+    );
+
+    runtime.onKeyEvent(
+      const KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.keyZ,
+        logicalKey: LogicalKeyboardKey.keyZ,
+        timeStamp: Duration.zero,
+      ),
+      const <LogicalKeyboardKey>{},
+    );
+
+    expect(runtime.input.consume().command, TicCmd.empty);
+
+    runtime.onKeyEvent(
+      const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyW,
+        logicalKey: LogicalKeyboardKey.keyS,
+        character: 's',
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{LogicalKeyboardKey.keyS},
+    );
+    expect(
+      runtime.input.consume().command.forwardMove,
+      DoomInputState.moveSpeed,
+      reason: 'physical WASD has explicit precedence over logical movement',
+    );
+  });
+
+  test('releasing one movement alias keeps the other alias held', () async {
+    final runtime = DoomRuntimeGame(await fixtureLevel());
+    runtime.onKeyEvent(
+      const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyW,
+        logicalKey: LogicalKeyboardKey.keyW,
+        character: 'w',
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
+    );
+    runtime.onKeyEvent(
+      const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.arrowUp,
+        logicalKey: LogicalKeyboardKey.arrowUp,
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{LogicalKeyboardKey.keyW, LogicalKeyboardKey.arrowUp},
+    );
+    expect(
+      runtime.input.consume().command.forwardMove,
+      DoomInputState.moveSpeed,
+    );
+
+    runtime.onKeyEvent(
+      const KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.keyW,
+        logicalKey: LogicalKeyboardKey.keyW,
+        timeStamp: Duration.zero,
+      ),
+      <LogicalKeyboardKey>{LogicalKeyboardKey.arrowUp},
+    );
+
+    expect(
+      runtime.input.consume().command.forwardMove,
+      DoomInputState.moveSpeed,
+    );
+  });
+
   test('actor sync adds, updates and removes stable components', () async {
     final runtime = DoomRuntimeGame(await fixtureLevel());
     const first = MobjView(
@@ -862,6 +1043,34 @@ void main() {
 
     runtime.syncActorViewsForTest(const <MobjView>[]);
     expect(runtime.actorIds, isEmpty);
+  });
+
+  test('runtime camera sync faces a retained actor before rendering', () async {
+    final runtime = DoomRuntimeGame(await fixtureLevel());
+    const actor = MobjView(
+      id: 95,
+      x: 0,
+      y: 0,
+      z: 0,
+      angle: 0,
+      sprite: 'TEST',
+      frame: 0,
+      flags: 0,
+      health: 1,
+    );
+    runtime.syncActorViewsForTest(const <MobjView>[actor]);
+    final component = runtime.actorComponentForTest(actor.id)!;
+
+    runtime.renderCameraAtForTest(0);
+
+    final camera = runtime.cameraSnapshot;
+    final double dx = camera.x - component.position.x;
+    final double dz = camera.z - component.position.z;
+    final expected = Quaternion.axisAngle(Vector3(0, 1, 0), math.atan2(dx, dz));
+    expect(component.rotation.x, closeTo(expected.x, 1e-6));
+    expect(component.rotation.y, closeTo(expected.y, 1e-6));
+    expect(component.rotation.z, closeTo(expected.z, 1e-6));
+    expect(component.rotation.w, closeTo(expected.w, 1e-6));
   });
 
   test(
@@ -1200,6 +1409,220 @@ void main() {
     expect(runtime.gameState.levelComplete, isFalse);
     expect(runtime.gameState.player.health, 100);
     expect(runtime.gameState.hashState(), initialHash);
+  });
+
+  test(
+    'exclusive replay input fails closed on every terminal mismatch',
+    () async {
+      final PreparedDoomLevel prepared = await fixtureExitLevel();
+      final GameState reference = prepared.createGame()
+        ..runTic(const TicCmd(buttons: Buttons.use));
+      expect(reference.levelComplete, isTrue);
+      final int completedHash = reference.hashState();
+
+      expect(
+        () => DoomRuntimeGame(
+          prepared,
+          input: DoomInputState(),
+          replayInput: DoomReplayInput(
+            commands: const <TicCmd>[],
+            expectedFinalHash: completedHash,
+          ),
+        ),
+        throwsArgumentError,
+      );
+
+      final DoomRuntimeGame earlyEnd = DoomRuntimeGame(
+        prepared,
+        replayInput: DoomReplayInput(
+          commands: const <TicCmd>[],
+          expectedFinalHash: completedHash,
+        ),
+      );
+      expect(earlyEnd.advanceMicrosForTest(28572), 0);
+      expect(earlyEnd.replayResult?.status, DoomReplayStatus.earlyEnd);
+      expect(earlyEnd.replayCommandCount, 0);
+      expect(earlyEnd.gameState.tic, 0);
+      expect(earlyEnd.tickDriver.executedTics, 0);
+      expect(earlyEnd.tickDriver.droppedTics, 0);
+      expect(earlyEnd.advanceMicrosForTest(500000), 0);
+
+      var earlyExitCompletions = 0;
+      final DoomRuntimeGame earlyExit = DoomRuntimeGame(
+        prepared,
+        replayInput: DoomReplayInput(
+          commands: const <TicCmd>[
+            TicCmd(buttons: Buttons.use),
+            TicCmd.empty,
+          ],
+          expectedFinalHash: completedHash,
+        ),
+        onLevelComplete: (_) => earlyExitCompletions++,
+      );
+      earlyExit.advanceMicrosForTest(28572);
+      expect(earlyExit.replayResult?.status, DoomReplayStatus.earlyExit);
+      expect(earlyExitCompletions, 0);
+      expect(earlyExit.replayCommandCount, 1);
+      expect(earlyExit.gameState.tic, 1);
+      expect(earlyExit.advanceMicrosForTest(500000), 0);
+
+      var mismatchCompletions = 0;
+      final DoomRuntimeGame hashMismatch = DoomRuntimeGame(
+        prepared,
+        replayInput: DoomReplayInput(
+          commands: const <TicCmd>[TicCmd(buttons: Buttons.use)],
+          expectedFinalHash: completedHash ^ 1,
+        ),
+        onLevelComplete: (_) => mismatchCompletions++,
+      );
+      hashMismatch.advanceMicrosForTest(28572);
+      expect(hashMismatch.replayResult?.status, DoomReplayStatus.hashMismatch);
+      expect(mismatchCompletions, 0);
+      expect(hashMismatch.replayResult?.actualHash, completedHash);
+      expect(hashMismatch.replayCommandCount, 1);
+      expect(hashMismatch.gameState.tic, 1);
+      expect(hashMismatch.advanceMicrosForTest(500000), 0);
+
+      var successfulCompletions = 0;
+      (int, int)? countersSeenByCallback;
+      late final DoomRuntimeGame successful;
+      successful = DoomRuntimeGame(
+        prepared,
+        replayInput: DoomReplayInput(
+          commands: const <TicCmd>[TicCmd(buttons: Buttons.use)],
+          expectedFinalHash: completedHash,
+          onFinished: (_) {
+            countersSeenByCallback = (
+              successful.tickDriver.executedTics,
+              successful.tickDriver.droppedTics,
+            );
+          },
+        ),
+        onLevelComplete: (_) => successfulCompletions++,
+      );
+      expect(successful.advanceMicrosForTest(1000000), 1);
+      expect(successful.replayResult?.status, DoomReplayStatus.complete);
+      expect(successful.gameState.tic, 1);
+      expect(successful.tickDriver.executedTics, 1);
+      expect(successful.tickDriver.droppedTics, 0);
+      expect(countersSeenByCallback, (1, 0));
+      expect(successfulCompletions, 1);
+      successful.advanceMicrosForTest(500000);
+      expect(successfulCompletions, 1);
+    },
+  );
+
+  test(
+    'first render delta establishes whole Flame tree clock origin',
+    () async {
+      final PreparedDoomLevel prepared = await fixtureExitLevel();
+      final DoomRuntimeGame runtime = DoomRuntimeGame(prepared);
+      final _UpdateDeltaProbe probe = _UpdateDeltaProbe();
+      await runtime.add(probe);
+
+      // GameWidget performs a zero-delta load update; Flame may deliver
+      // another zero before the ticker's first positive elapsed interval.
+      runtime
+        ..update(0)
+        ..update(0)
+        ..update(48);
+
+      expect(probe.deltas, isNotEmpty);
+      expect(probe.deltas, everyElement(0));
+      expect(runtime.gameState.tic, 0);
+      expect(runtime.tickDriver.executedTics, 0);
+      expect(runtime.tickDriver.droppedTics, 0);
+
+      runtime.update(0.03);
+
+      expect(probe.deltas.last, closeTo(0.03, 1e-12));
+      expect(runtime.gameState.tic, 1);
+      expect(runtime.tickDriver.executedTics, 1);
+      expect(runtime.tickDriver.droppedTics, 0);
+    },
+  );
+
+  test(
+    'deferred replay callback restart cannot consume catch-up commands',
+    () async {
+      final PreparedDoomLevel prepared = await fixtureExitLevel(
+        secretExit: true,
+      );
+      final GameState reference = prepared.createGame()
+        ..runTic(const TicCmd(buttons: Buttons.use));
+      expect(reference.levelComplete, isTrue);
+      expect(reference.usedSecretExit, isTrue);
+      final List<String> callbacks = <String>[];
+      final List<int> callbackDriverTics = <int>[];
+      var deliveries = 0;
+      late final DoomRuntimeGame runtime;
+      runtime = DoomRuntimeGame(
+        prepared,
+        replayInput: DoomReplayInput(
+          commands: const <TicCmd>[TicCmd(buttons: Buttons.use)],
+          expectedFinalHash: reference.hashState(),
+          onFinished: (DoomReplayResult result) {
+            deliveries++;
+            callbacks.add('finished:${result.gameTic}');
+            callbackDriverTics.add(runtime.tickDriver.executedTics);
+            if (deliveries == 1) runtime.restartLevel();
+          },
+        ),
+        onLevelComplete: (bool secretExit) {
+          callbacks.add('level:${runtime.gameState.tic}:$secretExit');
+        },
+      );
+
+      expect(runtime.advanceMicrosForTest(1000000), 1);
+      expect(callbackDriverTics, <int>[1]);
+      expect(callbacks, <String>['level:1:true', 'finished:1']);
+      expect(runtime.gameState.tic, 0);
+      expect(runtime.tickDriver.executedTics, 0);
+      expect(runtime.replayCommandCount, 0);
+      expect(runtime.replayResult, isNull);
+
+      expect(runtime.advanceMicrosForTest(28572), 1);
+      expect(callbackDriverTics, <int>[1, 1]);
+      expect(callbacks, <String>[
+        'level:1:true',
+        'finished:1',
+        'level:1:true',
+        'finished:1',
+      ]);
+      expect(runtime.gameState.tic, 1);
+      expect(runtime.tickDriver.executedTics, 1);
+      expect(runtime.replayResult?.status, DoomReplayStatus.complete);
+    },
+  );
+
+  test('level completion hides frozen transient effects and flash', () async {
+    final runtime = DoomRuntimeGame(await fixtureExitLevel());
+    runtime.input.press(DoomControl.attack);
+    for (var tic = 0; tic < 5; tic++) {
+      runtime.advanceMicrosForTest(28572);
+    }
+    final MobjView puff = runtime.gameState.mobjs.firstWhere(
+      (actor) => actor.sprite == 'PUFF',
+    );
+    final ActorSpriteComponent component = runtime.actorComponentForTest(
+      puff.id,
+    )!;
+    expect(runtime.scene.isActorSpriteActive(component), isTrue);
+    expect(runtime.weaponFlashVisible, isTrue);
+
+    runtime.input.release(DoomControl.attack);
+    runtime.input.triggerUse();
+    runtime.advanceMicrosForTest(28572);
+
+    expect(runtime.gameState.levelComplete, isTrue);
+    expect(runtime.actorComponentForTest(puff.id), isNull);
+    expect(runtime.scene.isActorSpriteActive(component), isFalse);
+    expect(runtime.weaponFlashVisible, isFalse);
+    final int completedAt = runtime.gameState.tic;
+    expect(runtime.advanceMicrosForTest(500000), 0);
+    expect(runtime.gameState.tic, completedAt);
+    expect(runtime.actorComponentForTest(puff.id), isNull);
+    expect(runtime.weaponFlashVisible, isFalse);
   });
 
   test(

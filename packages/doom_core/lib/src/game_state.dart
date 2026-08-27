@@ -16,7 +16,6 @@ import 'switches.dart';
 import 'ticcmd.dart';
 import 'views.dart';
 
-const int _playerRadius = 16 * kFracUnit;
 const int _maxStep = 24 * kFracUnit;
 const int _playerThrustPerCommand = 2048;
 const int _maxMove = 30 * kFracUnit;
@@ -33,6 +32,18 @@ const int _baseMonsterThreshold = 100;
 const int _weaponTop = 32;
 const int _weaponBottom = 128;
 const int _weaponMovePerTic = 6;
+const int _wallPuffImpactOffset = 4 * kFracUnit;
+const int _actorImpactOffset = 10 * kFracUnit;
+
+int _integerSqrtFloor(int value) {
+  if (value <= 1) return value < 0 ? 0 : value;
+  int root = 1 << ((value.bitLength + 1) >> 1);
+  while (true) {
+    final int next = (root + value ~/ root) >> 1;
+    if (next >= root) return root;
+    root = next;
+  }
+}
 
 enum _WeaponAction { fire, refire }
 
@@ -598,26 +609,73 @@ class GameState {
 
   void _hitscan(int range, int damage, {int spread = 0}) {
     Mobj? target;
-    int best = range;
+    int bestEntry = range;
     final int angle = normalizeAngle(_playerMobj.angle + spread);
+    final int rayCos = Trig.cos(angle);
+    final int raySin = Trig.sin(angle);
     for (final Mobj m in _mobjs) {
       if (!m.isShootable || m.removed || identical(m, _playerMobj)) continue;
-      final int dx = m.x - _playerMobj.x, dy = m.y - _playerMobj.y;
-      final int distance = approxDistance(dx, dy);
-      if (distance > best) continue;
-      final int delta = angleDelta(Trig.atan2(dy, dx), angle).abs();
-      if (delta < 0x06000000 && _hasSight(_playerMobj, m)) {
-        target = m;
-        best = distance;
+      final int? rayEntry = _boundedRayCircleEntry(
+        startX: _playerMobj.x,
+        startY: _playerMobj.y,
+        rayCos: rayCos,
+        raySin: raySin,
+        range: range,
+        target: m,
+      );
+      if (rayEntry == null ||
+          rayEntry > bestEntry ||
+          !_hasSight(_playerMobj, m)) {
+        continue;
       }
+      target = m;
+      bestEntry = rayEntry;
     }
     if (target != null) {
-      _spawnBlood(target, damage);
+      final int impactDistance = bestEntry > _actorImpactOffset
+          ? bestEntry - _actorImpactOffset
+          : 0;
+      _spawnActorHitEffect(
+        target,
+        damage,
+        wrap32(_playerMobj.x + fixedMul(impactDistance, rayCos)),
+        wrap32(_playerMobj.y + fixedMul(impactDistance, raySin)),
+      );
       _damage(target, damage, _playerMobj);
       return;
     }
     final ({int x, int y})? impact = _nearestWallImpact(angle, range);
-    if (impact != null) _spawnPuff(impact.x, impact.y);
+    if (impact != null) _spawnWallPuff(impact.x, impact.y, angle);
+  }
+
+  /// Exact fixed-point entry distance for a bounded ray against an actor's
+  /// collision circle. The axis bound runs before projection and squaring, so
+  /// the intermediates stay below 2^53 for both the Dart VM and Wasm.
+  int? _boundedRayCircleEntry({
+    required int startX,
+    required int startY,
+    required int rayCos,
+    required int raySin,
+    required int range,
+    required Mobj target,
+  }) {
+    final int dx = target.x - startX;
+    final int dy = target.y - startY;
+    final int maximumCenterDistance = range + target.radius;
+    if (dx.abs() > maximumCenterDistance || dy.abs() > maximumCenterDistance) {
+      return null;
+    }
+    final int along = fixedMul(dx, rayCos) + fixedMul(dy, raySin);
+    final int perpendicular = (fixedMul(dy, rayCos) - fixedMul(dx, raySin))
+        .abs();
+    if (perpendicular > target.radius) return null;
+    final int halfChord = _integerSqrtFloor(
+      target.radius * target.radius - perpendicular * perpendicular,
+    );
+    if (along + halfChord < 0) return null;
+    final int entry = along - halfChord;
+    final int boundedEntry = entry < 0 ? 0 : entry;
+    return boundedEntry <= range ? boundedEntry : null;
   }
 
   /// Finds the nearest blocking line hit by a 16.16 ray, quantizing only the
@@ -687,23 +745,61 @@ class GameState {
         opening.bottom >= _playerMobj.viewZ;
   }
 
-  void _spawnPuff(int x, int y) {
-    final Mobj puff = _add(_puffInfo, fixedToInt(x), fixedToInt(y), 0, 1);
-    puff.x = x;
-    puff.y = y;
-    puff.z = _playerMobj.viewZ;
+  void _spawnWallPuff(int x, int y, int angle) {
+    final int impactX = wrap32(
+      x - fixedMul(_wallPuffImpactOffset, Trig.cos(angle)),
+    );
+    final int impactY = wrap32(
+      y - fixedMul(_wallPuffImpactOffset, Trig.sin(angle)),
+    );
+    _spawnPuffAt(impactX, impactY, _playerMobj.viewZ);
   }
 
-  void _spawnBlood(Mobj target, int damage) {
-    final Mobj blood = _add(
-      _bloodInfo,
-      fixedToInt(target.x),
-      fixedToInt(target.y),
+  void _spawnActorHitEffect(Mobj target, int damage, int impactX, int impactY) {
+    if ((target.flags & MobjFlags.noBlood) != 0) {
+      _spawnPuffAt(impactX, impactY, target.z + (target.height ~/ 2));
+    } else {
+      _spawnBloodAt(target, damage, impactX, impactY);
+    }
+  }
+
+  void _spawnPuffAt(int impactX, int impactY, int impactZ) {
+    final Mobj puff = _add(
+      _puffInfo,
+      fixedToInt(impactX),
+      fixedToInt(impactY),
       0,
       1,
     );
-    blood.x = target.x;
-    blood.y = target.y;
+    puff.x = impactX;
+    puff.y = impactY;
+    puff.z = impactZ;
+  }
+
+  void _spawnBlood(Mobj target, int damage, {int? impactAngle}) {
+    final int impactX = impactAngle == null
+        ? target.x
+        : wrap32(
+            target.x - fixedMul(_actorImpactOffset, Trig.cos(impactAngle)),
+          );
+    final int impactY = impactAngle == null
+        ? target.y
+        : wrap32(
+            target.y - fixedMul(_actorImpactOffset, Trig.sin(impactAngle)),
+          );
+    _spawnBloodAt(target, damage, impactX, impactY);
+  }
+
+  void _spawnBloodAt(Mobj target, int damage, int impactX, int impactY) {
+    final Mobj blood = _add(
+      _bloodInfo,
+      fixedToInt(impactX),
+      fixedToInt(impactY),
+      0,
+      1,
+    );
+    blood.x = impactX;
+    blood.y = impactY;
     blood.z = target.z + (target.height ~/ 2);
     _setMobjState(blood, MobjStateTable.bloodImpactStart(damage));
   }
@@ -748,16 +844,51 @@ class GameState {
     final int nx = wrap32(m.x + dx), ny = wrap32(m.y + dy);
     final int radius = m.radius;
     for (final int i in _runtime.candidateLines(nx, ny, radius)) {
-      if (_runtime.blocksAt(i, nx, ny, radius, m.z, m.height)) {
+      final bool destinationBlocked = _runtime.blocksAt(
+        i,
+        nx,
+        ny,
+        radius,
+        m.z,
+        m.height,
+      );
+      final bool sweptPathBlocked =
+          !destinationBlocked &&
+          _runtime.blocksAlongMove(i, m.x, m.y, nx, ny, radius, m.z, m.height);
+      if (destinationBlocked || sweptPathBlocked) {
+        final Linedef line = _runtime.map.linedefs[i];
+        // A conservative circle/line overlap includes exact tangency. Once an
+        // actor already touches that blocker, reject only movement that gets
+        // closer anywhere along its swept path; equal or increasing distance
+        // is a valid wall slide/escape.
+        final bool alreadyTouching = _runtime.blocksAt(
+          i,
+          m.x,
+          m.y,
+          radius,
+          m.z,
+          m.height,
+        );
+        if (alreadyTouching &&
+            (line.isTwoSided || _runtime.isOnFrontSide(i, m.x, m.y)) &&
+            _runtime.distanceToLineQuantized(i, nx, ny) >=
+                _runtime.distanceToLineQuantized(i, m.x, m.y) &&
+            _runtime.minimumDistanceToLineAlongMoveQuantized(
+                  i,
+                  m.x,
+                  m.y,
+                  nx,
+                  ny,
+                ) >=
+                _runtime.distanceToLineQuantized(i, m.x, m.y)) {
+          continue;
+        }
         // Classic-feeling wall slide: discard the velocity axis that crosses
         // the blocking line most directly, then retry once.
-        final Linedef l = _runtime.map.linedefs[i];
-        final MapVertex a = _runtime.map.vertices[l.v1],
-            b = _runtime.map.vertices[l.v2];
+        final MapVertex a = _runtime.map.vertices[line.v1],
+            b = _runtime.map.vertices[line.v2];
         final int lx = b.x - a.x, ly = b.y - a.y;
-        if (!allowSlide || dx == 0 || dy == 0) {
-          return false;
-        }
+        if (!allowSlide || dx == 0 || dy == 0) return false;
         if (lx.abs() > ly.abs()) {
           return _tryMove(
             m,
@@ -1974,15 +2105,28 @@ class GameState {
           return;
         }
         m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
-        final Mobj? struck = _monsterHitscanTarget(m, m.angle);
-        if (struck == null) return;
+        final int rayCos = Trig.cos(m.angle);
+        final int raySin = Trig.sin(m.angle);
+        final ({int entry, Mobj target})? hit = _monsterHitscanTarget(
+          m,
+          rayCos,
+          raySin,
+        );
+        if (hit == null) return;
+        final Mobj struck = hit.target;
+        final int impactDistance = hit.entry > _actorImpactOffset
+            ? hit.entry - _actorImpactOffset
+            : 0;
+        final int impactX = wrap32(m.x + fixedMul(impactDistance, rayCos));
+        final int impactY = wrap32(m.y + fixedMul(impactDistance, raySin));
         final int pellets = m.info.id == MobjType.shotguy ? 3 : 1;
         for (int i = 0; i < pellets; i++) {
           final int damage = 3 * (1 + (_random.next() % 5));
+          if (struck.health <= 0) continue;
+          _spawnActorHitEffect(struck, damage, impactX, impactY);
           if (identical(struck, _playerMobj)) {
             _damagePlayer(damage, source: m);
-          } else if (struck.health > 0) {
-            _spawnBlood(struck, damage);
+          } else {
             _damage(struck, damage, m);
           }
         }
@@ -2021,24 +2165,35 @@ class GameState {
     }
   }
 
-  Mobj? _monsterHitscanTarget(Mobj shooter, int angle) {
-    Mobj? result;
-    int best = toFixed(2048);
+  ({int entry, Mobj target})? _monsterHitscanTarget(
+    Mobj shooter,
+    int rayCos,
+    int raySin,
+  ) {
+    const int range = 2048 * kFracUnit;
+    ({int entry, Mobj target})? result;
+    int bestEntry = range;
     for (final Mobj candidate in _mobjs) {
       if (identical(candidate, shooter) ||
           candidate.removed ||
           !candidate.isShootable) {
         continue;
       }
-      final int dx = candidate.x - shooter.x;
-      final int dy = candidate.y - shooter.y;
-      final int distance = approxDistance(dx, dy);
-      if (distance > best) continue;
-      final int delta = angleDelta(Trig.atan2(dy, dx), angle).abs();
-      if (delta < 0x06000000 && _hasSight(shooter, candidate)) {
-        result = candidate;
-        best = distance;
+      final int? entry = _boundedRayCircleEntry(
+        startX: shooter.x,
+        startY: shooter.y,
+        rayCos: rayCos,
+        raySin: raySin,
+        range: range,
+        target: candidate,
+      );
+      if (entry == null ||
+          entry > bestEntry ||
+          !_hasSight(shooter, candidate)) {
+        continue;
       }
+      result = (entry: entry, target: candidate);
+      bestEntry = entry;
     }
     return result;
   }
@@ -2288,11 +2443,17 @@ class GameState {
   }
 
   void _collectPickups() {
+    if (_health <= 0) return;
     for (final Mobj m in _mobjs) {
-      if (m.removed ||
-          !m.info.isPickup ||
-          approxDistance(m.x - _playerMobj.x, m.y - _playerMobj.y) >
-              _playerRadius + m.radius) {
+      if (m.removed || !m.info.isPickup) continue;
+      final int combinedRadius = _playerMobj.radius + m.radius;
+      final int dx = fixedAbs(m.x - _playerMobj.x);
+      final int dy = fixedAbs(m.y - _playerMobj.y);
+      final int dz = wrap32(m.z - _playerMobj.z);
+      if (dx >= combinedRadius ||
+          dy >= combinedRadius ||
+          dz < -8 * kFracUnit ||
+          dz > _playerMobj.height) {
         continue;
       }
       final Key? key = _keyForMobjType(m.info.id);
@@ -2332,16 +2493,22 @@ class GameState {
             // subset, but they are still collectable special artifacts.
             break;
           case MobjType.misc0:
-            if (_armor < 100) _armor = 100;
+            if (_armor >= 100) continue;
+            _armor = 100;
           case MobjType.misc10:
             _health = _health < 200 ? _health + 1 : 200;
           case MobjType.misc11:
             _armor = _armor < 200 ? _armor + 1 : 200;
           case MobjType.misc12:
+            if (_health >= 100) continue;
             _health = (_health + 25 > 100) ? 100 : _health + 25;
+          case MobjType.misc1:
+            if (_health >= 100) continue;
+            _health = (_health + 10 > 100) ? 100 : _health + 10;
           case MobjType.misc17:
             _shells += 4;
           case MobjType.megaArmor:
+            if (_armor >= 200) continue;
             _armor = 200;
           case MobjType.bulletBox:
             _bullets += 50;
@@ -2356,6 +2523,10 @@ class GameState {
             _health = (_health + 10 > 100) ? 100 : _health + 10;
         }
       }
+      // PLAY is part of the actor snapshot and replay hash. Keep its health
+      // identical to the public player state after every health-giving item,
+      // just as damage already does in [_damagePlayer].
+      _playerMobj.health = _health;
       if ((m.info.flags & MobjFlags.countItem) != 0) _itemCount++;
       _emitPlayerSound('DSITEMUP');
       m.removed = true;
@@ -3640,7 +3811,7 @@ const MobjInfo _barrelInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'BAR1',
-  flags: MobjFlags.solid | MobjFlags.shootable,
+  flags: MobjFlags.solid | MobjFlags.shootable | MobjFlags.noBlood,
 );
 const MobjInfo _floorLampInfo = MobjInfo(
   id: MobjType.misc31,
@@ -3807,7 +3978,7 @@ const MobjInfo _bloodyPoolInfo = MobjInfo(
   reactionTime: 8,
   painChance: 0,
   damage: 0,
-  spriteName: 'POB1',
+  spriteName: 'POL5',
   flags: 0,
 );
 const MobjInfo _rocketLauncherInfo = MobjInfo(

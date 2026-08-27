@@ -231,7 +231,7 @@ void main() {
             (19, 'SPOS', 20, 16, 0),
             (10, 'PLAY', 20, 16, 0),
             (12, 'PLAY', 20, 16, 0),
-            (24, 'POB1', 20, 16, 0),
+            (24, 'POL5', 20, 16, 0),
             (2003, 'LAUN', 20, 16, MobjFlags.special),
             (2019, 'ARM2', 20, 16, MobjFlags.special),
             (2046, 'BROK', 20, 16, MobjFlags.special),

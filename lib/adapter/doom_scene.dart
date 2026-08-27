@@ -474,6 +474,22 @@ final class DoomScene {
   final Map<PackedFlameSurface, ActorSpriteComponent> _actorBySurface =
       <PackedFlameSurface, ActorSpriteComponent>{};
 
+  /// Applies the authoritative camera pose to view-dependent scene objects.
+  ///
+  /// Flame exposes `currentCamera` only while traversing the render tree, not
+  /// during component updates. Keeping this explicit lets the normal runtime
+  /// update billboards, sky, and weapon immediately before rendering without
+  /// relying on that transient static.
+  void syncToCamera(CameraComponent3D camera) {
+    for (final Component3D child in root.children.whereType<Component3D>()) {
+      if (child is CameraLockedMeshComponent) {
+        child.syncToCamera(camera);
+      } else if (child is YawBillboardMeshComponent) {
+        child.syncToCamera(camera);
+      }
+    }
+  }
+
   /// Exact source mesh identity used by the compiler's dynamic references.
   PackedFlameSurface surfaceForMesh(int meshIndex) {
     final binding = _geometryBindings[meshIndex];
@@ -1702,15 +1718,6 @@ PackedFlameSurface _buildSkySurface({
 class CameraLockedMeshComponent extends MeshComponent {
   CameraLockedMeshComponent({required super.mesh});
 
-  @override
-  void update(double dt) {
-    super.update(dt);
-    final camera = CameraComponent3D.currentCamera;
-    if (camera != null) {
-      syncToCamera(camera);
-    }
-  }
-
   void syncToCamera(CameraComponent3D camera) {
     position.setFrom(camera.position);
   }
@@ -1757,15 +1764,6 @@ class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
 /// Upright actor sprite that rotates only around world Y.
 class YawBillboardMeshComponent extends MeshComponent {
   YawBillboardMeshComponent({required super.mesh, super.position});
-
-  @override
-  void update(double dt) {
-    super.update(dt);
-    final camera = CameraComponent3D.currentCamera;
-    if (camera != null) {
-      syncToCamera(camera);
-    }
-  }
 
   void syncToCamera(CameraComponent3D camera) {
     final dx = camera.position.x - position.x;

@@ -450,6 +450,7 @@ final class RendererSmokeGame extends FlameGame3D {
     final pose = _cameraTrajectory.sample(seconds, _floors);
     camera.position.setValues(pose.x, pose.y, pose.z);
     camera.target.setValues(pose.targetX, pose.targetY, pose.targetZ);
+    _scene?.syncToCamera(camera);
   }
 
   void _applyDynamicWorkload(DoomScene scene, double seconds) {

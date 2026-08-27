@@ -11,19 +11,17 @@ import 'package:doom_wad/doom_wad.dart';
 import 'wad_report.dart' show readWadBytes;
 
 const String _wadPathEnvironment = 'DOOM_WAD_PATH';
+const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const String _mapName = 'E1M1';
 
 Future<void> main(List<String> arguments) async {
+  final String environmentPath =
+      Platform.environment[_wadPathEnvironment]?.trim() ?? '';
   final String path = arguments.isNotEmpty
       ? arguments.single
-      : (Platform.environment[_wadPathEnvironment]?.trim() ?? '');
-  if (path.isEmpty) {
-    stderr.writeln(
-      'Set DOOM_WAD_PATH to a legally obtained IWAD or pass its path.',
-    );
-    exitCode = 2;
-    return;
-  }
+      : environmentPath.isNotEmpty
+      ? environmentPath
+      : _defaultWadPath;
 
   try {
     final WadFile wad = WadFile.parse(readWadBytes(path));
@@ -51,6 +49,17 @@ final class E1m1PlaythroughResult {
     required this.secrets,
     required this.totalSecrets,
     required this.commands,
+    required this.skill,
+    required this.monsters,
+    required this.seed,
+    required this.maxArmor,
+    required this.armorTic,
+    required this.doorTic,
+    required this.liftStartTic,
+    required this.liftMoveTic,
+    required this.damageTic,
+    required this.switchTic,
+    required this.exitTic,
     required this.doorOpened,
     required this.liftActivated,
     required this.liftMoved,
@@ -69,6 +78,17 @@ final class E1m1PlaythroughResult {
   final int finalSector;
   final int kills, totalKills, items, totalItems, secrets, totalSecrets;
   final List<TicCmd> commands;
+  final Skill skill;
+  final bool monsters;
+  final int seed;
+  final int maxArmor;
+  final int? armorTic;
+  final int? doorTic;
+  final int? liftStartTic;
+  final int? liftMoveTic;
+  final int? damageTic;
+  final int? switchTic;
+  final int? exitTic;
   final bool doorOpened;
   final bool liftActivated;
   final bool liftMoved;
@@ -85,6 +105,10 @@ final class E1m1PlaythroughResult {
       'tics=$tics health=$health sector=$finalSector '
       'kills=$kills/$totalKills items=$items/$totalItems '
       'secrets=$secrets/$totalSecrets '
+      'skill=${skill.name} monsters=$monsters seed=$seed maxArmor=$maxArmor '
+      'milestones=armor@$armorTic,door@$doorTic,'
+      'lift@$liftStartTic/$liftMoveTic,damage@$damageTic,'
+      'switch@$switchTic,exit@$exitTic '
       'doors=$doorOpened lift=$liftActivated/$liftMoved '
       'damage=$damageObserved floor=$floorInvariantHeld wall=$wallInvariantHeld '
       'maxStationary=$maxStationaryTics '
@@ -95,21 +119,36 @@ final class E1m1PlaythroughResult {
 /// Finds a route from the player start through a lift and damaging sector to
 /// an exit, then drives that route through the real 35 Hz simulation.
 final class E1m1PlaythroughRunner {
-  E1m1PlaythroughRunner(this.map);
+  E1m1PlaythroughRunner(
+    this.map, {
+    TicCmd Function(TicCmd)? sampleCommand,
+    this.gameConfig = const GameConfig(),
+    this.seed = 0,
+    this.includeArmor = true,
+  }) : _sampleCommand = sampleCommand ?? _identityCommand;
 
   final MapData map;
+  final TicCmd Function(TicCmd) _sampleCommand;
+  final GameConfig gameConfig;
+  final int seed;
+  final bool includeArmor;
 
   E1m1PlaythroughResult run() {
     final Thing start = map.things.firstWhere((Thing thing) => thing.type == 1);
     final _Planner planner = _Planner(map, _Point(start.x, start.y));
-    final _PlannedRoute route = planner.plan();
-    final GameState game = GameState.start(
-      map,
-      const GameConfig(monsters: false),
-      seed: 0xE1,
-    );
-    final _Driver driver = _Driver(map, game);
+    final _PlannedRoute route = planner.plan(includeArmor: includeArmor);
+    final GameState game = GameState.start(map, gameConfig, seed: seed);
+    final _Driver driver = _Driver(map, game, _sampleCommand);
 
+    if (includeArmor) {
+      _stage('route to ARM1', () => driver.follow(route.toArmor));
+      if (game.player.armor < 100) {
+        throw StateError(
+          'route to ARM1: pickup not observed at tic=${game.tic} '
+          'position=(${fixedToDouble(game.player.x)},${fixedToDouble(game.player.y)})',
+        );
+      }
+    }
     _stage('route to lift', () => driver.follow(route.toLift));
     if (_Planner._liftUseSpecials.contains(
       map.linedefs[route.liftLine].special,
@@ -150,6 +189,17 @@ final class E1m1PlaythroughRunner {
       secrets: game.secretsFound,
       totalSecrets: game.totalSecrets,
       commands: List<TicCmd>.unmodifiable(driver.commands),
+      skill: gameConfig.skill,
+      monsters: gameConfig.monsters,
+      seed: seed,
+      maxArmor: driver.maxArmor,
+      armorTic: driver.armorTic,
+      doorTic: driver.doorTic,
+      liftStartTic: driver.liftStartTic,
+      liftMoveTic: driver.liftMoveTic,
+      damageTic: driver.damageTic,
+      switchTic: driver.switchTic,
+      exitTic: driver.exitTic,
       doorOpened: driver.doorOpened,
       liftActivated: driver.liftActivated,
       liftMoved: driver.liftMoved,
@@ -172,8 +222,11 @@ final class E1m1PlaythroughRunner {
   }
 }
 
+TicCmd _identityCommand(TicCmd command) => command;
+
 final class _PlannedRoute {
   const _PlannedRoute({
+    required this.toArmor,
     required this.toLift,
     required this.liftLine,
     required this.toDamage,
@@ -181,6 +234,7 @@ final class _PlannedRoute {
     required this.exitLine,
   });
 
+  final List<_Point> toArmor;
   final List<_Point> toLift;
   final int liftLine;
   final List<_Point> toDamage;
@@ -255,7 +309,23 @@ final class _Planner {
       ? null
       : map.sidedefs[line.leftSidedef].sector;
 
-  _PlannedRoute plan() {
+  _PlannedRoute plan({bool includeArmor = false}) {
+    var routeOrigin = origin;
+    List<_Point> armorPath = const <_Point>[];
+    if (includeArmor) {
+      final Thing armor = map.things.singleWhere(
+        (Thing thing) => thing.type == 2018,
+      );
+      final _Point target = _Point(armor.x, armor.y);
+      final List<_Point>? path = _search(
+        routeOrigin,
+        (point) => point.distance2(target) <= 24 * 24,
+        allowBackDoorCrossing: true,
+      );
+      if (path == null) throw StateError('no reachable ARM1 pickup route');
+      armorPath = <_Point>[...path, target];
+      routeOrigin = target;
+    }
     final List<int> lifts = <int>[
       for (var i = 0; i < map.linedefs.length; i++)
         if (_liftUseSpecials.contains(map.linedefs[i].special) ||
@@ -279,7 +349,7 @@ final class _Planner {
     for (final int line in lifts) {
       for (final _Point target in _frontActionPoints(line)) {
         final List<_Point>? path = _search(
-          origin,
+          routeOrigin,
           (p) => p.distance2(target) <= 256,
           allowBackDoorCrossing: true,
         );
@@ -338,6 +408,7 @@ final class _Planner {
     }
 
     return _PlannedRoute(
+      toArmor: armorPath,
       toLift: <_Point>[...bestLift.path, bestLift.target],
       liftLine: bestLift.line,
       toDamage: bestDamagePath,
@@ -641,13 +712,14 @@ final class _Planner {
 }
 
 final class _Driver {
-  _Driver(this.map, this.game)
+  _Driver(this.map, this.game, this.sampleCommand)
     : _lastX = game.player.x,
       _lastY = game.player.y,
       _lastLiftFloors = <int>[for (final s in game.sectors) s.floorHeight];
 
   final MapData map;
   final GameState game;
+  final TicCmd Function(TicCmd) sampleCommand;
   final List<TicCmd> commands = <TicCmd>[];
   final List<int> tickMicros = <int>[];
   List<int> _lastLiftFloors;
@@ -657,6 +729,14 @@ final class _Driver {
   int _estimatedMomY = 0;
   int _stationary = 0;
   int maxStationaryTics = 0;
+  int maxArmor = 0;
+  int? armorTic;
+  int? doorTic;
+  int? liftStartTic;
+  int? liftMoveTic;
+  int? damageTic;
+  int? switchTic;
+  int? exitTic;
   bool doorOpened = false;
   int doorOpenEvents = 0;
   bool liftActivated = false;
@@ -703,6 +783,9 @@ final class _Driver {
           'waypoint $index/${points.length - 1}: ${error.message}; '
           'doorOpened=$doorOpened liftActivated=$liftActivated '
           'tic=${game.tic} '
+          'position=(${fixedToDouble(game.player.x).toStringAsFixed(1)},'
+          '${fixedToDouble(game.player.y).toStringAsFixed(1)}) '
+          'target=(${points[index].x},${points[index].y}) '
           'sector=${game.playerSectorIndex}/${_sectorAt(_Point(fixedToInt(game.player.x), fixedToInt(game.player.y)))}->${_sectorAt(points[index])} '
           'nearby=${_nearbySpecials()} '
           'doors=${_nearbyDoorLines().length}/${_nearbyDoorCount()} '
@@ -843,6 +926,14 @@ final class _Driver {
     var bestDistance2 = 0x7fffffffffffffff;
     var stalled = 0;
     for (var attempt = 0; attempt < 600; attempt++) {
+      if (game.player.health <= 0) {
+        throw StateError(
+          'player died at tic=${game.tic} '
+          'position=(${fixedToDouble(game.player.x).toStringAsFixed(1)},'
+          '${fixedToDouble(game.player.y).toStringAsFixed(1)}) '
+          'armor=${game.player.armor} kills=${game.killCount}/${game.totalKills}',
+        );
+      }
       final int dx = toFixed(target.x) - game.player.x;
       final int dy = toFixed(target.y) - game.player.y;
       final int distance2 = dx * dx + dy * dy;
@@ -865,27 +956,33 @@ final class _Driver {
       } else {
         stalled++;
       }
-      final int desired = Trig.atan2(dy, dx);
-      final int delta = angleDelta(desired, game.player.angle);
+      final int moveAngle = Trig.atan2(dy, dx);
+      final MobjView? threat = _nearestVisibleMonster();
+      // Aim at the threat while projecting the waypoint impulse into the
+      // post-turn view axes, so combat never replaces route steering.
+      final int aimAngle = threat == null
+          ? moveAngle
+          : Trig.atan2(threat.y - game.player.y, threat.x - game.player.x);
+      final int delta = angleDelta(aimAngle, game.player.angle);
       final int turn = (delta >> 16).clamp(-8192, 8192);
+      final int facing = normalizeAngle(game.player.angle + (turn << 16));
       final int distance = approxDistance(dx, dy);
       final int speed = settle && withinTarget && reachedSector
           ? 0
           : math.min(distance, toFixed(4));
-      final int cosine = Trig.cos(desired);
-      final int sine = Trig.sin(desired);
-      final int impulseX = fixedMul(speed, cosine) - _estimatedMomX;
-      final int impulseY = fixedMul(speed, sine) - _estimatedMomY;
+      final int moveCosine = Trig.cos(moveAngle);
+      final int moveSine = Trig.sin(moveAngle);
+      final int impulseX = fixedMul(speed, moveCosine) - _estimatedMomX;
+      final int impulseY = fixedMul(speed, moveSine) - _estimatedMomY;
+      final int facingCosine = Trig.cos(facing);
+      final int facingSine = Trig.sin(facing);
       int forward = _fixedToCommand(
-        fixedMul(impulseX, cosine) + fixedMul(impulseY, sine),
+        fixedMul(impulseX, facingCosine) + fixedMul(impulseY, facingSine),
       ).clamp(-25, 25);
       int side = _fixedToCommand(
-        fixedMul(impulseX, sine) - fixedMul(impulseY, cosine),
+        fixedMul(impulseX, facingSine) - fixedMul(impulseY, facingCosine),
       ).clamp(-25, 25);
-      // Static actors still participate in collision when AI is disabled.
-      // Attack along the route so the proof cannot phase through a blocking
-      // E1M1 thing and remains an input-only traversal.
-      int buttons = Buttons.attack;
+      final int buttons = threat == null ? 0 : Buttons.attack;
       final int appliedTurn = turn;
       if (allowDoorRecovery &&
           (stalled == 10 || (attempt > 0 && attempt % 50 == 0))) {
@@ -919,6 +1016,95 @@ final class _Driver {
   int _fixedToCommand(int fixed) => fixed >= 0
       ? (fixed + (_playerThrustPerCommand ~/ 2)) ~/ _playerThrustPerCommand
       : -((-fixed + (_playerThrustPerCommand ~/ 2)) ~/ _playerThrustPerCommand);
+
+  MobjView? _nearestVisibleMonster() {
+    MobjView? result;
+    var bestDistance = toFixed(1024);
+    for (final MobjView actor in game.mobjs) {
+      if (actor.health <= 0 ||
+          (actor.flags & MobjFlags.countKill) == 0 ||
+          (actor.flags & MobjFlags.shootable) == 0) {
+        continue;
+      }
+      final int dx = actor.x - game.player.x;
+      final int dy = actor.y - game.player.y;
+      final int distance = approxDistance(dx, dy);
+      if (distance > bestDistance || !_hasSight(actor)) continue;
+      result = actor;
+      bestDistance = distance;
+    }
+    return result;
+  }
+
+  bool _hasSight(MobjView actor) {
+    final PlayerView player = game.player;
+    final List<SectorRuntime> sectors = game.sectors.toList(growable: false);
+    final int playerEye = player.z + toFixed(41);
+    final int actorEye = actor.z + toFixed(41);
+    final int lowEye = math.min(playerEye, actorEye);
+    final int highEye = math.max(playerEye, actorEye);
+    for (final Linedef line in map.linedefs) {
+      final MapVertex a = map.vertices[line.v1];
+      final MapVertex b = map.vertices[line.v2];
+      if (!_fixedSegmentsIntersect(
+        player.x,
+        player.y,
+        actor.x,
+        actor.y,
+        toFixed(a.x),
+        toFixed(a.y),
+        toFixed(b.x),
+        toFixed(b.y),
+      )) {
+        continue;
+      }
+      if (line.blocksMovement || !line.isTwoSided) return false;
+      final int front = map.sidedefs[line.rightSidedef].sector;
+      final int back = map.sidedefs[line.leftSidedef].sector;
+      final int bottom = math.max(
+        sectors[front].floorHeight,
+        sectors[back].floorHeight,
+      );
+      final int top = math.min(
+        sectors[front].ceilingHeight,
+        sectors[back].ceilingHeight,
+      );
+      if (top <= lowEye || bottom >= highEye) return false;
+    }
+    return true;
+  }
+
+  static bool _fixedSegmentsIntersect(
+    int ax,
+    int ay,
+    int bx,
+    int by,
+    int cx,
+    int cy,
+    int dx,
+    int dy,
+  ) {
+    int cross(int x1, int y1, int x2, int y2, int x3, int y3) =>
+        (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+    final int a = cross(ax, ay, bx, by, cx, cy);
+    final int b = cross(ax, ay, bx, by, dx, dy);
+    final int c = cross(cx, cy, dx, dy, ax, ay);
+    final int d = cross(cx, cy, dx, dy, bx, by);
+    if (!(((a >= 0 && b <= 0) || (a <= 0 && b >= 0)) &&
+        ((c >= 0 && d <= 0) || (c <= 0 && d >= 0)))) {
+      return false;
+    }
+    if (a != 0 || b != 0 || c != 0 || d != 0) return true;
+    bool overlaps(int a1, int a2, int b1, int b2) {
+      final int minA = math.min(a1, a2);
+      final int maxA = math.max(a1, a2);
+      final int minB = math.min(b1, b2);
+      final int maxB = math.max(b1, b2);
+      return minA <= maxB && minB <= maxA;
+    }
+
+    return overlaps(ax, bx, cx, dx) && overlaps(ay, by, cy, dy);
+  }
 
   bool _tryNearbyDoors() {
     final int before = doorOpenEvents;
@@ -999,6 +1185,7 @@ final class _Driver {
       );
       final int delta = angleDelta(desired, game.player.angle);
       _tick(TicCmd(angleTurn: delta >> 16, buttons: Buttons.use));
+      if (untilComplete && game.levelComplete) return;
       _tick(TicCmd.empty);
       if (!untilComplete || game.levelComplete) return;
     }
@@ -1026,8 +1213,22 @@ final class _Driver {
 
   void wait(int tics) {
     for (var i = 0; i < tics; i++) {
-      _tick(TicCmd.empty);
+      _tick(_combatCommand());
     }
+  }
+
+  TicCmd _combatCommand() {
+    final MobjView? threat = _nearestVisibleMonster();
+    if (threat == null) return TicCmd.empty;
+    final int desired = Trig.atan2(
+      threat.y - game.player.y,
+      threat.x - game.player.x,
+    );
+    final int delta = angleDelta(desired, game.player.angle);
+    return TicCmd(
+      angleTurn: (delta >> 16).clamp(-8192, 8192),
+      buttons: Buttons.attack,
+    );
   }
 
   void waitForSectorDamage() {
@@ -1037,21 +1238,23 @@ final class _Driver {
     }
     final int health = game.player.health;
     for (var i = 0; i < 40 && game.player.health == health; i++) {
-      _tick(TicCmd.empty);
+      _tick(_combatCommand());
     }
     if (game.player.health >= health) {
       throw StateError('damaging sector did not reduce player health');
     }
     damageObserved = true;
+    damageTic ??= game.tic;
   }
 
   void _tick(TicCmd command) {
     final int beforeX = game.player.x;
     final int beforeY = game.player.y;
     final Stopwatch stopwatch = Stopwatch()..start();
-    game.runTic(command);
+    final TicCmd sampled = sampleCommand(command);
+    game.runTic(sampled);
     stopwatch.stop();
-    commands.add(command);
+    commands.add(sampled);
     tickMicros.add(stopwatch.elapsedMicroseconds);
     _estimatedMomX = fixedMul(game.player.x - beforeX, 0xe800);
     _estimatedMomY = fixedMul(game.player.y - beforeY, 0xe800);
@@ -1059,17 +1262,30 @@ final class _Driver {
     for (final SoundEvent event in game.consumeSoundJournal()) {
       if (event.soundId == 'DSDOROPN') {
         doorOpened = true;
+        doorTic ??= game.tic;
         doorOpenEvents++;
       }
-      if (event.soundId == 'DSPSTART') liftActivated = true;
+      if (event.soundId == 'DSPSTART') {
+        liftActivated = true;
+        liftStartTic ??= game.tic;
+      }
     }
     final List<int> floors = <int>[for (final s in game.sectors) s.floorHeight];
     for (var i = 0; i < floors.length; i++) {
-      if (floors[i] != _lastLiftFloors[i] && liftActivated) liftMoved = true;
+      if (floors[i] != _lastLiftFloors[i] && liftActivated) {
+        liftMoved = true;
+        liftMoveTic ??= game.tic;
+      }
     }
     _lastLiftFloors = floors;
 
     final PlayerView player = game.player;
+    maxArmor = math.max(maxArmor, player.armor);
+    if (armorTic == null && player.armor >= 100) armorTic = game.tic;
+    if (switchTic == null && game.switchJournal.isNotEmpty) {
+      switchTic = game.tic;
+    }
+    if (exitTic == null && game.levelComplete) exitTic = game.tic;
     if (player.x == _lastX && player.y == _lastY) {
       _stationary++;
       maxStationaryTics = math.max(maxStationaryTics, _stationary);

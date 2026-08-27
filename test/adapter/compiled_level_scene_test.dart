@@ -703,7 +703,7 @@ void main() {
           16,
           math.cos(i * math.pi / 4) * 32,
         );
-        actor.syncToCamera(camera);
+        scene.syncToCamera(camera);
         actor.surface.resource;
         seen.add(actor.lumpName);
         sawMirror = sawMirror || actor.mirrored;

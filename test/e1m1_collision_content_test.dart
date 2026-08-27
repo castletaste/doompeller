@@ -234,7 +234,196 @@ void main() {
       reason: 'player penetrated original E1M1 one-sided linedefs $penetrated',
     );
   });
+
+  test('original E1M1 tangent player can advance parallel to a wall', () async {
+    final ByteData asset = await rootBundle.load(_defaultWadPath);
+    final Uint8List bytes = asset.buffer.asUint8List(
+      asset.offsetInBytes,
+      asset.lengthInBytes,
+    );
+    final MapData original = MapData.load(
+      WadSet(<WadFile>[WadFile.parse(bytes)]),
+      'E1M1',
+    );
+    final Linedef wall = original.linedefs[37];
+    final MapVertex a = original.vertices[wall.v1];
+    final MapVertex b = original.vertices[wall.v2];
+    expect((a.x, a.y, b.x, b.y), (1376, -3648, 1376, -3360));
+    expect(wall.isTwoSided, isFalse);
+
+    final GameState game = GameState.start(
+      _withPlayer(original, x: 1392, y: -3504, angle: 90),
+      const GameConfig(monsters: false),
+    );
+    final int startY = game.player.y;
+    for (var tic = 0; tic < 12; tic++) {
+      game.runTic(const TicCmd(forwardMove: 25));
+    }
+
+    expect(
+      game.player.y,
+      greaterThan(startY + toFixed(16)),
+      reason: 'touching a wall must not lock movement along its tangent',
+    );
+    expect(
+      game.player.x,
+      greaterThanOrEqualTo(toFixed(1392)),
+      reason: 'parallel movement must not penetrate original linedef 37',
+    );
+
+    final GameState intoWall = GameState.start(
+      _withPlayer(original, x: 1392, y: -3504, angle: 270),
+      const GameConfig(monsters: false),
+    );
+    for (var tic = 0; tic < 12; tic++) {
+      intoWall.runTic(const TicCmd(forwardMove: 25));
+    }
+    expect(
+      intoWall.player.x,
+      greaterThanOrEqualTo(toFixed(1376)),
+      reason: 'an inward move must not cross the one-sided wall',
+    );
+
+    final GameState awayFromWall = GameState.start(
+      _withPlayer(original, x: 1392, y: -3504, angle: 0),
+      const GameConfig(monsters: false),
+    );
+    for (var tic = 0; tic < 12; tic++) {
+      awayFromWall.runTic(const TicCmd(forwardMove: 25));
+    }
+    expect(
+      awayFromWall.player.x,
+      greaterThan(toFixed(1392)),
+      reason: 'an outward move must escape the wall contact',
+    );
+
+    final GameState invalidBackSide = GameState.start(
+      _withPlayer(original, x: 1360, y: -3504, angle: 90),
+      const GameConfig(monsters: false),
+    );
+    final int invalidStartY = invalidBackSide.player.y;
+    for (var tic = 0; tic < 12; tic++) {
+      invalidBackSide.runTic(const TicCmd(forwardMove: 25));
+    }
+    expect(
+      invalidBackSide.player.y,
+      invalidStartY,
+      reason: 'a back-side actor must not use the legal tangent-slide bypass',
+    );
+  });
+
+  test('original E1M1 true spawn strafe remains contained at diagonal cap', () async {
+    final ByteData asset = await rootBundle.load(_defaultWadPath);
+    final Uint8List bytes = asset.buffer.asUint8List(
+      asset.offsetInBytes,
+      asset.lengthInBytes,
+    );
+    final MapData original = MapData.load(
+      WadSet(<WadFile>[WadFile.parse(bytes)]),
+      'E1M1',
+    );
+    final GameState game = GameState.start(
+      _withPlayer(original, x: 1056, y: -3616, angle: 90),
+      const GameConfig(monsters: false),
+    );
+    final Linedef wall = original.linedefs[6];
+    final MapVertex a = original.vertices[wall.v1];
+    final MapVertex b = original.vertices[wall.v2];
+    expect((a.x, a.y, b.x, b.y), (960, -3648, 832, -3552));
+    expect(wall.isTwoSided, isFalse);
+
+    final int startX = game.player.x;
+    final int startY = game.player.y;
+    var crossedWall = false;
+    var penetratedWall = false;
+    void tick(TicCmd command) {
+      final int beforeX = game.player.x;
+      final int beforeY = game.player.y;
+      game.runTic(command);
+      crossedWall = crossedWall ||
+          _properlyIntersects(
+            beforeX,
+            beforeY,
+            game.player.x,
+            game.player.y,
+            toFixed(a.x),
+            toFixed(a.y),
+            toFixed(b.x),
+            toFixed(b.y),
+          );
+      final double distance = _distanceToSegmentMapUnits(
+        fixedToDouble(game.player.x),
+        fixedToDouble(game.player.y),
+        a.x.toDouble(),
+        a.y.toDouble(),
+        b.x.toDouble(),
+        b.y.toDouble(),
+      );
+      penetratedWall = penetratedWall || distance < 16 - 1 / 256;
+    }
+
+    // Reach the diagonal cap with the real keyboard strafe command, let the
+    // residual momentum settle, then walk north along the wall.
+    for (var tic = 0; tic < 22; tic++) {
+      tick(const TicCmd(sideMove: -24));
+    }
+    for (var tic = 0; tic < 30; tic++) {
+      tick(TicCmd.empty);
+    }
+    for (var tic = 0; tic < 30; tic++) {
+      tick(const TicCmd(forwardMove: 25));
+    }
+
+    expect(crossedWall, isFalse, reason: 'crossed original E1M1 linedef 6');
+    expect(
+      penetratedWall,
+      isFalse,
+      reason: 'entered the radius of original E1M1 linedef 6',
+    );
+    expect(
+      game.player.y,
+      greaterThan(startY + toFixed(128)),
+      reason: 'the true-spawn route must continue past the diagonal cap',
+    );
+    expect(
+      game.player.x,
+      lessThan(startX - toFixed(64)),
+      reason: 'the player must make progress while skimming the cap',
+    );
+    expect(
+      _side(a, b, fixedToInt(game.player.x), fixedToInt(game.player.y)),
+      lessThan(0),
+      reason: 'the player must remain on linedef 6 front side',
+    );
+  });
 }
+
+MapData _withPlayer(
+  MapData source, {
+  required int x,
+  required int y,
+  required int angle,
+}) => MapData(
+  name: source.name,
+  vertices: source.vertices,
+  linedefs: source.linedefs,
+  sidedefs: source.sidedefs,
+  sectors: source.sectors,
+  segs: source.segs,
+  subsectors: source.subsectors,
+  nodes: source.nodes,
+  things: <Thing>[
+    Thing(
+      x: x,
+      y: y,
+      angle: angle,
+      type: 1,
+      flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,
+    ),
+  ],
+  blockmap: source.blockmap,
+  reject: source.reject,
+);
 
 double _distanceToSegmentMapUnits(
   double px,

@@ -135,10 +135,79 @@ void main() {
         const GameConfig(monsters: false),
       );
       game.runTic(TicCmd.empty);
-      expect(game.player.health, 100);
+      expect(game.player.health, 101);
       expect(game.player.armor, 1);
       expect(game.player.ammo.shells, 4);
+      expect(
+        game.mobjs.map((MobjView actor) => actor.sprite),
+        contains('MEDI'),
+      );
     });
+
+    test('full-health stimpack and medikit remain available', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2011, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2012, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+
+      game.runTic(TicCmd.empty);
+
+      expect(game.player.health, 100);
+      expect(
+        game.mobjs.map((MobjView actor) => actor.sprite),
+        containsAll(<String>['STIM', 'MEDI']),
+      );
+    });
+
+    for (final (type, sprite) in <(int, String)>[
+      (2011, 'STIM'),
+      (2012, 'MEDI'),
+    ]) {
+      test('$sprite pickup keeps PLAY actor health in sync', () {
+        final GameState game = GameState.start(
+          testMap(
+            sectors: const <Sector>[
+              Sector(
+                floorHeight: 0,
+                ceilingHeight: 128,
+                floorFlat: 'F',
+                ceilingFlat: 'C',
+                lightLevel: 160,
+                special: SectorSpecial.damage10,
+                tag: 0,
+              ),
+            ],
+            things: <Thing>[
+              const Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+              Thing(x: 64, y: 64, angle: 0, type: type, flags: _skills),
+            ],
+          ),
+          const GameConfig(monsters: false),
+        );
+
+        for (var tic = 0; tic < 31; tic++) {
+          game.runTic(TicCmd.empty);
+        }
+        expect(game.player.health, 100);
+        expect(
+          game.mobjs.where((actor) => actor.sprite == sprite),
+          hasLength(1),
+        );
+
+        game.runTic(TicCmd.empty);
+
+        expect(game.player.health, 100);
+        expect(
+          game.mobjs.singleWhere((actor) => actor.sprite == 'PLAY').health,
+          game.player.health,
+        );
+        expect(game.mobjs.where((actor) => actor.sprite == sprite), isEmpty);
+      });
+    }
 
     test(
       'E1M1 ammo boxes and mega armor apply without fake rocket effects',
@@ -174,6 +243,25 @@ void main() {
         );
       },
     );
+
+    test('mega armor at the 200 cap leaves one colocated pickup', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2019, flags: _skills),
+          Thing(x: 64, y: 64, angle: 0, type: 2019, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+      );
+
+      game.runTic(TicCmd.empty);
+
+      expect(game.player.armor, 200);
+      expect(
+        game.mobjs.where((MobjView actor) => actor.sprite == 'ARM2'),
+        hasLength(1),
+      );
+    });
 
     test('weapon cannot be selected before it is owned', () {
       final GameState game = GameState.start(
@@ -421,16 +509,238 @@ void main() {
         for (var tic = 0; tic < 5; tic++) {
           target.runTic(const TicCmd(buttons: Buttons.attack));
         }
-        expect(
-          target.mobjs.where((MobjView m) => m.sprite == 'BLUD'),
-          isNotEmpty,
+        final MobjView blood = target.mobjs.firstWhere(
+          (MobjView m) => m.sprite == 'BLUD',
         );
+        expect(fixedToDouble(blood.x), closeTo(66, 0.01));
+        expect(fixedToDouble(blood.y), closeTo(64, 0.01));
         for (int i = 0; i < 30; i++) {
           target.runTic(TicCmd.empty);
         }
         expect(target.mobjs.where((MobjView m) => m.sprite == 'BLUD'), isEmpty);
       },
     );
+
+    test('DoomEd 2035 barrel uses a puff ten units before actor entry', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 96, y: 64, angle: 0, type: 2035, flags: _skills),
+        ]),
+        const GameConfig(monsters: false),
+        seed: 3,
+      );
+      final MobjView barrel = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'BAR1',
+      );
+      expect(barrel.flags & MobjFlags.noBlood, isNot(0));
+
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+
+      expect(
+        game.mobjs.where((MobjView actor) => actor.sprite == 'BLUD'),
+        isEmpty,
+      );
+      final MobjView puff = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'PUFF',
+      );
+      // Circle entry is x = 96 - 10 = 86. Thing impacts are placed another
+      // 10 map units toward the shooter, independently of PUFF versus BLUD.
+      expect(fixedToDouble(puff.x), closeTo(76, 0.01));
+      expect(fixedToDouble(puff.y), closeTo(64, 0.01));
+    });
+
+    test('player hitscan misses actors outside their radius', () {
+      final GameState game = GameState.start(
+        testMap(
+          vertices: const <MapVertex>[
+            MapVertex(0, 0),
+            MapVertex(512, 0),
+            MapVertex(512, 256),
+            MapVertex(0, 256),
+          ],
+          things: const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 320, y: 94, angle: 180, type: 3004, flags: _skills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+        seed: 3,
+      );
+      final int healthBefore = game.mobjs
+          .singleWhere((MobjView m) => m.sprite == 'POSS')
+          .health;
+
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+
+      expect(
+        game.mobjs.singleWhere((MobjView m) => m.sprite == 'POSS').health,
+        healthBefore,
+      );
+      final MobjView puff = game.mobjs.singleWhere(
+        (MobjView m) => m.sprite == 'PUFF',
+      );
+      expect(fixedToDouble(puff.x), closeTo(508, 0.01));
+      expect(fixedToDouble(puff.y), closeTo(64, 0.01));
+    });
+
+    test('player hitscan blood stays on the ray for an off-axis hit', () {
+      final GameState game = GameState.start(
+        testMap(
+          vertices: const <MapVertex>[
+            MapVertex(0, 0),
+            MapVertex(512, 0),
+            MapVertex(512, 256),
+            MapVertex(0, 256),
+          ],
+          things: const <Thing>[
+            Thing(x: 64, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 320, y: 74, angle: 180, type: 3004, flags: _skills),
+          ],
+        ),
+        const GameConfig(monsters: false),
+        seed: 3,
+      );
+      final int healthBefore = game.mobjs
+          .singleWhere((MobjView m) => m.sprite == 'POSS')
+          .health;
+
+      for (var tic = 0; tic < 5; tic++) {
+        game.runTic(const TicCmd(buttons: Buttons.attack));
+      }
+
+      expect(
+        game.mobjs.singleWhere((MobjView m) => m.sprite == 'POSS').health,
+        lessThan(healthBefore),
+      );
+      final MobjView blood = game.mobjs.singleWhere(
+        (MobjView m) => m.sprite == 'BLUD',
+      );
+      // Circle entry is x = 320 - sqrt(20^2 - 10^2), then BLUD is placed
+      // another 10 map units toward the shooter.
+      expect(fixedToDouble(blood.x), closeTo(292.68, 0.01));
+      expect(fixedToDouble(blood.y), closeTo(64, 0.01));
+    });
+
+    test(
+      'monster hitscan uses circle entry for an intervening off-axis monster',
+      () {
+        final GameState game = GameState.start(
+          arena(const <Thing>[
+            Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+            Thing(x: 72, y: 74, angle: 180, type: 3001, flags: _skills),
+            Thing(x: 112, y: 64, angle: 180, type: 3004, flags: _skills),
+          ]),
+          const GameConfig(),
+          seed: 3,
+        );
+        final int impHealth = game.mobjs
+            .singleWhere((MobjView actor) => actor.sprite == 'TROO')
+            .health;
+
+        for (
+          var tic = 0;
+          tic < 16 &&
+              game.mobjs.every((MobjView actor) => actor.sprite != 'BLUD');
+          tic++
+        ) {
+          game.runTic(TicCmd.empty);
+        }
+
+        expect(
+          game.mobjs
+              .singleWhere((MobjView actor) => actor.sprite == 'TROO')
+              .health,
+          lessThan(impHealth),
+          reason: 'the off-axis imp must intercept the shot at its circle',
+        );
+        final MobjView blood = game.mobjs.singleWhere(
+          (MobjView actor) => actor.sprite == 'BLUD',
+        );
+        // Shooter (112,64) fires west. Circle entry is 22.6795 units away;
+        // BLUD is placed another 10 units toward the shooter, on y = 64.
+        expect(fixedToDouble(blood.x), closeTo(99.32, 0.01));
+        expect(fixedToDouble(blood.y), closeTo(64, 0.01));
+      },
+    );
+
+    test('monster hitscan uses PUFF for an intervening no-blood barrel', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 72, y: 64, angle: 0, type: 2035, flags: _skills),
+          Thing(x: 112, y: 64, angle: 180, type: 3004, flags: _skills),
+        ]),
+        const GameConfig(),
+        seed: 3,
+      );
+      final int barrelHealth = game.mobjs
+          .singleWhere((MobjView actor) => actor.sprite == 'BAR1')
+          .health;
+
+      for (
+        var tic = 0;
+        tic < 16 &&
+            game.mobjs.every(
+              (MobjView actor) =>
+                  actor.sprite != 'PUFF' && actor.sprite != 'BLUD',
+            );
+        tic++
+      ) {
+        game.runTic(TicCmd.empty);
+      }
+
+      expect(
+        game.mobjs
+            .singleWhere((MobjView actor) => actor.sprite == 'BAR1')
+            .health,
+        lessThan(barrelHealth),
+      );
+      expect(
+        game.mobjs.where((MobjView actor) => actor.sprite == 'BLUD'),
+        isEmpty,
+      );
+      final MobjView puff = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'PUFF',
+      );
+      // Shooter (112,64) fires west. Barrel circle entry is x=82, then the
+      // actor impact is placed another 10 units toward the shooter.
+      expect(fixedToDouble(puff.x), closeTo(92, 0.01));
+      expect(fixedToDouble(puff.y), closeTo(64, 0.01));
+    });
+
+    test('monster hitscan spawns BLUD when it strikes the player', () {
+      final GameState game = GameState.start(
+        arena(const <Thing>[
+          Thing(x: 32, y: 64, angle: 0, type: 1, flags: _skills),
+          Thing(x: 112, y: 64, angle: 180, type: 3004, flags: _skills),
+        ]),
+        const GameConfig(),
+        seed: 3,
+      );
+
+      for (
+        var tic = 0;
+        tic < 16 &&
+            game.mobjs.every((MobjView actor) => actor.sprite != 'BLUD');
+        tic++
+      ) {
+        game.runTic(TicCmd.empty);
+      }
+
+      expect(game.player.health, lessThan(100));
+      final MobjView blood = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'BLUD',
+      );
+      // Player circle entry is x=48 for the westbound ray, then BLUD is
+      // placed another 10 units toward the shooter.
+      expect(fixedToDouble(blood.x), closeTo(58, 0.01));
+      expect(fixedToDouble(blood.y), closeTo(64, 0.01));
+    });
 
     test('pistol hitscan damages and kills former human', () {
       final GameState game = GameState.start(
@@ -468,7 +778,7 @@ void main() {
       expect(corpse.frame, greaterThanOrEqualTo(7));
       // Actor and exact frame-state identities are semantic, so unrelated enum
       // or table insertions cannot move this pin.
-      expect(game.hashState(), 0xfb2f66ba);
+      expect(game.hashState(), 0x2a47da36);
       for (var tic = 0; tic < 30; tic++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }

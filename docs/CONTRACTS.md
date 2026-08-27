@@ -296,22 +296,22 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0x5f346a1d` for seed 7 and its documented twenty-command stream. It changed
-when long-linedef collision stopped overflowing its fixed-point projection.
-The isolated combat oracle remains pinned at
-`0xfb2f66ba`: its hash is sampled before that test's movement assertion, so the
-movement-scale change does not affect it. Both pins use semantic actor/state
-identities; inserting an unused actor state or actor type does not change them.
+`0xe553be3f` for seed 7 and its documented twenty-command stream. It reflects
+long-linedef collision, barrel no-blood flags, exact ray-circle targeting, and
+unified actor hit effects. The isolated combat oracle is pinned at
+`0x2a47da36`: its hash is sampled before that test's movement assertion. Both
+pins use semantic actor/state identities; inserting an unused actor state or
+actor type does not change them.
 The generated PWAD itself is pinned at
 `0x9b9fd35265121407` and 494332 bytes. Spawn order is intentionally part of
 deterministic identity and therefore part of the hash; actor hashing itself
 sorts by stable actor id.
 
-The synthetic MAP97 completion stream is separately pinned at `0x610c6f12`
-after long-linedef collision stopped overflowing its projection. The
-developer-local shareware E1M1 traversal observed `0x24aa99aa` for its generated
-1629-command stream; its test replays and compares that generated stream rather
-than hard-coding the hash for every possible legal IWAD supplied by path.
+The synthetic MAP97 completion stream is separately pinned at `0x9113cff2`
+after deterministic pickup state and unified actor hit effects. The
+developer-local shareware E1M1 production traversal is pinned at `0x36d1d056`
+for its generated 2151-command stream. The separate keyboard-sampling
+acceptance path is pinned at `0x82b6aada` for 2154 commands.
 
 ### WebGPU boundary
 

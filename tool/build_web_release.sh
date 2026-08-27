@@ -5,8 +5,8 @@ set -euo pipefail
 DOOMPELLER_FLUTTER="${DOOMPELLER_FLUTTER:-/Users/savva/fvm/versions/stable/bin/flutter}"
 DOOMPELLER_DART="${DOOMPELLER_DART:-$(dirname "$DOOMPELLER_FLUTTER")/dart}"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IWAD_SOURCE="${DOOM_WAD_PATH:-$PROJECT_ROOT/.local/doom/DOOM1.WAD}"
-IWAD_DESTINATION="$PROJECT_ROOT/build/web/doom1.wad"
+IWAD_SOURCE="$PROJECT_ROOT/.local/doom/DOOM1.WAD"
+IWAD_DESTINATION="$PROJECT_ROOT/build/web/assets/.local/doom/DOOM1.WAD"
 EXPECTED_IWAD_BYTES=4196020
 EXPECTED_IWAD_SHA256="1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771"
 cd "$PROJECT_ROOT"
@@ -52,10 +52,10 @@ done
 "$DOOMPELLER_DART" run tool/verify_web_shader_bundle.dart "$web_bundle"
 
 "$DOOMPELLER_FLUTTER" build web --wasm --release --no-web-resources-cdn
+"$DOOMPELLER_DART" run tool/finalize_wasm_web_build.dart build/web
 
 # Flutter does not guarantee that web dotfiles are copied into build/web.
 cp web/_headers build/web/_headers
-cp "$IWAD_SOURCE" "$IWAD_DESTINATION"
 
 required=(
   build/web/index.html
@@ -64,7 +64,7 @@ required=(
   build/web/main.dart.mjs
   build/web/assets/assets/shaders/doom_palette.wgslbundle
   build/web/_headers
-  build/web/doom1.wad
+  build/web/assets/.local/doom/DOOM1.WAD
 )
 for file in "${required[@]}"; do
   if [[ ! -s "$file" ]]; then
@@ -75,6 +75,11 @@ done
 
 if ! grep -Fq '"compileTarget":"dart2wasm"' build/web/flutter_bootstrap.js; then
   echo "error: Flutter bootstrap does not contain the Wasm build" >&2
+  exit 1
+fi
+if grep -Fq '"compileTarget":"dart2js"' build/web/flutter_bootstrap.js ||
+  [[ -e build/web/main.dart.js ]]; then
+  echo "error: dart2js fallback remains in the Wasm-only release" >&2
   exit 1
 fi
 if ! grep -Fq '"useLocalCanvasKit":true' build/web/flutter_bootstrap.js; then
@@ -95,4 +100,4 @@ if [[ -n "$unexpected_wads" ]]; then
   exit 1
 fi
 
-echo "Wasm/WebGPU release verified: $(wc -c < build/web/main.dart.wasm | tr -d ' ') bytes main.dart.wasm; $destination_iwad_bytes bytes doom1.wad"
+echo "Wasm/WebGPU release verified: $(wc -c < build/web/main.dart.wasm | tr -d ' ') bytes main.dart.wasm; $destination_iwad_bytes bytes bundled DOOM1.WAD"

@@ -152,6 +152,10 @@ final class DoomRuntimeGame extends FlameGame3D
   bool get weaponFlashVisible => _weaponFlashSprite?.visible ?? false;
 
   @visibleForTesting
+  ViewLockedWeaponSpriteComponent? get weaponFlashComponentForTest =>
+      _weaponFlashSprite;
+
+  @visibleForTesting
   int get hudListenerCountForTest => _hud.listenerCount;
 
   @visibleForTesting

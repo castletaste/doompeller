@@ -58,6 +58,7 @@ need_line "^  flame: 1\.38\.0$" pubspec.yaml
 need_line "^  flame_3d: 0\.3\.0$" pubspec.yaml
 need_line "^  vector_math: 2\.2\.0$" pubspec.yaml
 need_line "^  web: 1\.1\.1$" pubspec.yaml
+need_line "^    - \.local/doom/DOOM1\.WAD$" pubspec.yaml
 need_line "<key>FLTEnableImpeller</key>" macos/Runner/Info.plist
 need_line "<key>FLTEnableFlutterGPU</key>" macos/Runner/Info.plist
 
@@ -93,6 +94,17 @@ git check-ignore -q assets/shaders/doom_palette.wgslbundle ||
   fail "compiled WebGPU shader bundle is not ignored"
 need_line "Cross-Origin-Opener-Policy: same-origin" web/_headers
 need_line "Cross-Origin-Embedder-Policy: credentialless" web/_headers
+need_line "^/assets/\.local/doom/DOOM1\.WAD$" web/_headers
+need_line "finalize_wasm_web_build\.dart build/web" tool/build_web_release.sh
+
+if [ -f build/web/flutter_bootstrap.js ]; then
+  need_line '"compileTarget":"dart2wasm"' build/web/flutter_bootstrap.js
+  if rg -q '"compileTarget":"dart2js"' build/web/flutter_bootstrap.js ||
+    [ -e build/web/main.dart.js ]
+  then
+    fail "generated web release still contains a dart2js fallback"
+  fi
+fi
 
 # When a release executable exists, reject characteristic symbols of a linked
 # Doom engine. Absence of symbols is only a smoke check; source rules above are

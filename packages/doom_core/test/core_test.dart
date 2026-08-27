@@ -293,10 +293,10 @@ void main() {
     expect(ah, bh);
     expect(a.hashState(), b.hashState());
     // Golden input: synthetic MAP01, seed 7, twenty commands above.
-    // Classic-scale player thrust changes the recorded position and momentum;
-    // ordered actor ids, state records, and shared chase RNG remain part of the
-    // same future-affecting replay identity.
-    expect(a.hashState(), 0xf2b9c9a9);
+    // The long-linedef collision predicate changes the recorded position and
+    // momentum; ordered actor ids, state records, and shared chase RNG remain
+    // part of the same future-affecting replay identity.
+    expect(a.hashState(), 0x5f346a1d);
   });
 
   test('replay hash ignores an unused actor-state table insertion', () {

@@ -26,5 +26,5 @@
 /main.dart.mjs
   Cache-Control: public, max-age=0, must-revalidate
 
-/doom1.wad
+/assets/.local/doom/DOOM1.WAD
   Cache-Control: public, max-age=31536000, immutable

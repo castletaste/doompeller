@@ -10,15 +10,15 @@ import 'content_source_platform_stub.dart'
 /// Environment variable used to override the default desktop IWAD.
 const String kDoomWadPathEnvironment = 'DOOM_WAD_PATH';
 
-/// Exact developer-local default selected by the user. Only this ignored path
-/// is checked; no directory scan is performed and no content is packaged.
+/// Exact developer-local source packaged by Flutter for the default release.
+/// Only this path is checked; no directory scan is performed.
 const String kDocumentedLocalWadPath = '.local/doom/DOOM1.WAD';
 
 enum DoomContentOrigin {
   /// A generated PWAD used by unit tests and renderer diagnostics.
   syntheticFixture,
 
-  /// The developer's own IWAD, explicitly selected through DOOM_WAD_PATH.
+  /// The developer's IWAD, loaded from the default bundle or an explicit path.
   developerIwad,
 }
 
@@ -75,9 +75,10 @@ typedef ReadWadLength = Future<int> Function(String path);
 /// Resolves the default IWAD without scanning directories.
 ///
 /// Desktop accepts [kDoomWadPathEnvironment] and the one exact ignored local
-/// default. Web loads the release-bundled `doom1.wad`; an explicitly selected
-/// replacement can still enter through [loadIwadBytes]. Tests and the
-/// diagnostic scene use [loadFixture].
+/// default. Web loads the release-bundled
+/// `assets/.local/doom/DOOM1.WAD`; an explicitly selected replacement can
+/// still enter through [loadIwadBytes]. Tests and the diagnostic scene use
+/// [loadFixture].
 final class DoomContentSource {
   DoomContentSource({
     Map<String, String>? environment,

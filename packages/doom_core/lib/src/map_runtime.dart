@@ -75,7 +75,7 @@ class MapRuntime {
     for (final Linedef line in map.linedefs) {
       final MapVertex a = map.vertices[line.v1];
       final MapVertex b = map.vertices[line.v2];
-      final int d = _distanceSquaredToSegment(
+      final int d = _distanceToSegmentQuantized(
         x,
         y,
         toFixed(a.x),
@@ -157,15 +157,17 @@ class MapRuntime {
     final Linedef line = map.linedefs[lineIndex];
     final MapVertex a = map.vertices[line.v1];
     final MapVertex b = map.vertices[line.v2];
-    final int distance = _distanceSquaredToSegment(
+    if (!_circleTouchesSegment(
       x,
       y,
       toFixed(a.x),
       toFixed(a.y),
       toFixed(b.x),
       toFixed(b.y),
-    );
-    if (distance > radius * radius) return false;
+      radius,
+    )) {
+      return false;
+    }
     if (line.blocksMovement || !line.isTwoSided) return true;
     final int front = frontSector(line);
     final int? back = backSector(line);
@@ -204,7 +206,10 @@ class MapRuntime {
     return value < 0 && value % divisor != 0 ? quotient - 1 : quotient;
   }
 
-  static int _distanceSquaredToSegment(
+  /// Approximate point/segment distance in 8.8 quanta for nearest-line
+  /// ordering. Unlike the previous 16.16 projection, no numerator is shifted
+  /// back into fixed point, so long fallback-map linedefs cannot overflow.
+  static int _distanceToSegmentQuantized(
     int px,
     int py,
     int ax,
@@ -212,23 +217,89 @@ class MapRuntime {
     int bx,
     int by,
   ) {
-    final int dx = bx - ax, dy = by - ay;
-    final int len = dx * dx + dy * dy;
-    if (len == 0) {
-      final int ox = px - ax, oy = py - ay;
-      return ox * ox + oy * oy;
+    const int quantum = 1 << 8;
+    final int abx = (bx - ax) ~/ quantum;
+    final int aby = (by - ay) ~/ quantum;
+    final int apx = (px - ax) ~/ quantum;
+    final int apy = (py - ay) ~/ quantum;
+    final int bpx = (px - bx) ~/ quantum;
+    final int bpy = (py - by) ~/ quantum;
+    final int lengthSquared = abx * abx + aby * aby;
+    if (lengthSquared == 0) {
+      return _integerSqrtCeil(apx * apx + apy * apy);
     }
-    int t = ((px - ax) * dx + (py - ay) * dy) ~/ len;
-    if (t < 0) t = 0;
-    if (t > 1) t = 1;
-    // Integer quotient above has no useful fractional part, so calculate a
-    // fixed projection instead.
-    int fixedT = (((px - ax) * dx + (py - ay) * dy) << kFracBits) ~/ len;
-    if (fixedT < 0) fixedT = 0;
-    if (fixedT > kFracUnit) fixedT = kFracUnit;
-    final int qx = ax + ((dx * fixedT) >> kFracBits);
-    final int qy = ay + ((dy * fixedT) >> kFracBits);
-    final int ox = px - qx, oy = py - qy;
-    return ox * ox + oy * oy;
+    final int projection = apx * abx + apy * aby;
+    if (projection <= 0) {
+      return _integerSqrtCeil(apx * apx + apy * apy);
+    }
+    if (projection >= lengthSquared) {
+      return _integerSqrtCeil(bpx * bpx + bpy * bpy);
+    }
+    final int cross = (abx * apy - aby * apx).abs();
+    final int length = _integerSqrtCeil(lengthSquared);
+    return (cross + length - 1) ~/ length;
+  }
+
+  /// Conservative circle/segment overlap without overflowing 16.16 products.
+  ///
+  /// A direct fixed-point projection needs `(dot << 16)` and overflows on
+  /// ordinary long Doom linedefs. Collision only needs an overlap predicate,
+  /// so coordinates are reduced to 8.8 precision and the perpendicular test
+  /// compares `abs(cross)` with `radius * length`. Every intermediate stays
+  /// below 2^53 even at the signed 16-bit map-coordinate limits, keeping the
+  /// result identical on the Dart VM and Wasm.
+  static bool _circleTouchesSegment(
+    int px,
+    int py,
+    int ax,
+    int ay,
+    int bx,
+    int by,
+    int radius,
+  ) {
+    if (px + radius < (ax < bx ? ax : bx) ||
+        px - radius > (ax > bx ? ax : bx) ||
+        py + radius < (ay < by ? ay : by) ||
+        py - radius > (ay > by ? ay : by)) {
+      return false;
+    }
+
+    const int shift = 8;
+    const int quantum = 1 << shift;
+    final int abx = (bx - ax) ~/ quantum;
+    final int aby = (by - ay) ~/ quantum;
+    final int apx = (px - ax) ~/ quantum;
+    final int apy = (py - ay) ~/ quantum;
+    final int bpx = (px - bx) ~/ quantum;
+    final int bpy = (py - by) ~/ quantum;
+    // Two 8.8 quanta add an explicit ~0.008 map-unit safety margin. The
+    // coordinate and radius reductions are conservative independently.
+    final int scaledRadius = ((radius + quantum - 1) ~/ quantum) + 2;
+    final int radiusSquared = scaledRadius * scaledRadius;
+    final int lengthSquared = abx * abx + aby * aby;
+    if (lengthSquared == 0) {
+      return apx * apx + apy * apy <= radiusSquared;
+    }
+    final int projection = apx * abx + apy * aby;
+    if (projection <= 0) {
+      return apx * apx + apy * apy <= radiusSquared;
+    }
+    if (projection >= lengthSquared) {
+      return bpx * bpx + bpy * bpy <= radiusSquared;
+    }
+    final int cross = abx * apy - aby * apx;
+    return cross.abs() <= scaledRadius * _integerSqrtCeil(lengthSquared);
+  }
+
+  static int _integerSqrtCeil(int value) {
+    if (value <= 1) return value;
+    int root = 1 << ((value.bitLength + 1) >> 1);
+    while (true) {
+      final int next = (root + value ~/ root) >> 1;
+      if (next >= root) {
+        return root * root == value ? root : root + 1;
+      }
+      root = next;
+    }
   }
 }

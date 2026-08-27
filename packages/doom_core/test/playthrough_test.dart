@@ -40,7 +40,8 @@ void main() {
     expect(first.totalSecrets, 1);
     expect(first.player.keys, contains(Key.blue));
     expect(first.mobjs.length, lessThanOrEqualTo(initialActors));
-    expect(hashes.last, 0xe0202f8e);
+    // Updated when long-linedef collision stopped overflowing its projection.
+    expect(hashes.last, 0x610c6f12);
 
     final GameState second = GameState.start(
       map,

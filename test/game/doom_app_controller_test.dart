@@ -8,18 +8,21 @@ import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('absent environment automatically prepares the safe fixture', () async {
-    final controller = DoomAppController(
-      contentSource: DoomContentSource(environment: const <String, String>{}),
-    );
-    addTearDown(controller.dispose);
+  test(
+    'absent bundled default fails instead of silently using fixture',
+    () async {
+      final controller = DoomAppController(
+        contentSource: DoomContentSource(environment: const <String, String>{}),
+      );
+      addTearDown(controller.dispose);
 
-    await controller.start();
+      await controller.start();
 
-    expect(controller.state.phase, DoomAppPhase.fixtureReady);
-    expect(controller.state.level?.map.name, 'MAP01');
-    expect(controller.state.setupMessage, contains('DOOM_WAD_PATH'));
-  });
+      expect(controller.state.phase, DoomAppPhase.failure);
+      expect(controller.state.level, isNull);
+      expect(controller.state.errorMessage, contains('bundled DOOM1.WAD'));
+    },
+  );
 
   test('missing default content is an explicit startup failure', () async {
     final controller = DoomAppController(
@@ -75,7 +78,11 @@ void main() {
 
   test('explicit in-memory IWAD replaces the running fixture', () async {
     final source = DoomContentSource(environment: const <String, String>{});
-    final controller = DoomAppController(contentSource: source);
+    final controller = DoomAppController(
+      loadDeveloper: () async => const DoomContentPathMissing(),
+      loadFixture: source.loadFixture,
+      loadSelected: source.loadIwadBytes,
+    );
     addTearDown(controller.dispose);
     await controller.start();
     expect(controller.state.phase, DoomAppPhase.fixtureReady);
@@ -91,7 +98,11 @@ void main() {
 
   test('invalid selected IWAD retains the running level', () async {
     final source = DoomContentSource(environment: const <String, String>{});
-    final controller = DoomAppController(contentSource: source);
+    final controller = DoomAppController(
+      loadDeveloper: () async => const DoomContentPathMissing(),
+      loadFixture: source.loadFixture,
+      loadSelected: source.loadIwadBytes,
+    );
     addTearDown(controller.dispose);
     await controller.start();
     final activeLevel = controller.state.level;

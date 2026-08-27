@@ -296,10 +296,9 @@ death and exit cues are treated as critical and are preserved in preference to
 ordinary cues. Dropped events are counted, and that counter is output-only too.
 
 The synthetic replay oracle is pinned by `doom_core/test/core_test.dart` at
-`0xf2b9c9a9` for seed 7 and its documented twenty-command stream. It changed
-when player thrust was corrected from one fixed-point unit to 2048 fixed-point
-steps per command unit, so the same input stream now records classic-scale
-positions and momentum. The isolated combat oracle remains pinned at
+`0x5f346a1d` for seed 7 and its documented twenty-command stream. It changed
+when long-linedef collision stopped overflowing its fixed-point projection.
+The isolated combat oracle remains pinned at
 `0xfb2f66ba`: its hash is sampled before that test's movement assertion, so the
 movement-scale change does not affect it. Both pins use semantic actor/state
 identities; inserting an unused actor state or actor type does not change them.
@@ -308,9 +307,9 @@ The generated PWAD itself is pinned at
 deterministic identity and therefore part of the hash; actor hashing itself
 sorts by stable actor id.
 
-The synthetic MAP97 completion stream is separately pinned at `0xe0202f8e`
-after its movement holds were lengthened for classic-scale thrust. The
-developer-local shareware E1M1 traversal observed `0x85cbc43b` for its generated
+The synthetic MAP97 completion stream is separately pinned at `0x610c6f12`
+after long-linedef collision stopped overflowing its projection. The
+developer-local shareware E1M1 traversal observed `0x24aa99aa` for its generated
 1629-command stream; its test replays and compares that generated stream rather
 than hard-coding the hash for every possible legal IWAD supplied by path.
 
@@ -323,9 +322,11 @@ artifact alongside the native shader bundle. The same 20-float vertex record,
 uint16 mesh split, atlas pages, palette/COLORMAP lookup and dirty buffer writes
 are used on both backends.
 
-The web release validates `.local/doom/DOOM1.WAD`, copies it to
-`build/web/doom1.wad`, and fetches it automatically at startup. The same
-bounded in-memory parser handles both that response and a local file selected
+The web release validates `.local/doom/DOOM1.WAD`, packages it at
+`build/web/assets/.local/doom/DOOM1.WAD`, and fetches it automatically at
+startup. The finalizer removes Flutter's generated dart2js build target and
+`main.dart.js`; `dart2wasm` is the only app compile target. The same bounded
+in-memory parser handles both the bundled response and a local file selected
 only from the pause menu. Platform environment and file APIs live behind
 conditional imports so Wasm startup never evaluates `dart:io`.
 

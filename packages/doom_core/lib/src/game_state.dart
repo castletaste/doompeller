@@ -620,15 +620,27 @@ class GameState {
     if (impact != null) _spawnPuff(impact.x, impact.y);
   }
 
-  /// Finds the nearest blocking line hit by a 16.16 ray without floating point
-  /// arithmetic. It is intentionally separate from actor targeting: the actor
-  /// path uses the existing sight policy, while this only supplies an honest
-  /// visual impact when no shootable actor was acquired.
+  /// Finds the nearest blocking line hit by a 16.16 ray, quantizing only the
+  /// intersection cross-products to quarter map units. It is intentionally
+  /// separate from actor targeting: the actor path uses the existing sight
+  /// policy, while this only supplies an honest visual impact when no
+  /// shootable actor was acquired.
   ({int x, int y})? _nearestWallImpact(int angle, int range) {
     final int startX = _playerMobj.x;
     final int startY = _playerMobj.y;
     final int rayX = fixedMul(range, Trig.cos(angle));
     final int rayY = fixedMul(range, Trig.sin(angle));
+    // Cross products in full 16.16 space can exceed the integer range, and
+    // multiplying their ratio numerator by another 16.16 unit used to wrap.
+    // Quarter-map-unit coordinates retain ample visual precision while
+    // keeping even signed 16-bit WAD extents and `(numerator << 16)` below
+    // 2^53 for identical VM/Wasm arithmetic.
+    const int impactFractionBits = 2;
+    const int impactShift = kFracBits - impactFractionBits;
+    final int impactStartX = startX >> impactShift;
+    final int impactStartY = startY >> impactShift;
+    final int impactRayX = rayX >> impactShift;
+    final int impactRayY = rayY >> impactShift;
     int bestT = kFracUnit + 1;
     ({int x, int y})? result;
     for (int i = 0; i < _runtime.map.linedefs.length; i++) {
@@ -636,16 +648,16 @@ class GameState {
       if (!_hitscanLineBlocks(i, line)) continue;
       final MapVertex a = _runtime.map.vertices[line.v1];
       final MapVertex b = _runtime.map.vertices[line.v2];
-      final int ax = toFixed(a.x);
-      final int ay = toFixed(a.y);
-      final int sx = toFixed(b.x - a.x);
-      final int sy = toFixed(b.y - a.y);
-      final int denom = rayX * sy - rayY * sx;
+      final int ax = a.x << impactFractionBits;
+      final int ay = a.y << impactFractionBits;
+      final int sx = (b.x - a.x) << impactFractionBits;
+      final int sy = (b.y - a.y) << impactFractionBits;
+      final int denom = impactRayX * sy - impactRayY * sx;
       if (denom == 0) continue;
-      final int offsetX = ax - startX;
-      final int offsetY = ay - startY;
+      final int offsetX = ax - impactStartX;
+      final int offsetY = ay - impactStartY;
       final int rayNumerator = offsetX * sy - offsetY * sx;
-      final int segmentNumerator = offsetX * rayY - offsetY * rayX;
+      final int segmentNumerator = offsetX * impactRayY - offsetY * impactRayX;
       final bool positive = denom > 0;
       if ((positive &&
               (rayNumerator < 0 ||

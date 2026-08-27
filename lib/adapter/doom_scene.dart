@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' show Canvas;
 
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
@@ -1898,6 +1899,17 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
   }
 
   @override
+  void renderTree(Canvas canvas) {
+    // flame_3d 0.3.0 bypasses isVisible() when an AABB is fully inside the
+    // frustum. Retained pooled actors therefore need a gate before Object3D's
+    // culling fast path or their last PUFF/BEXP frame remains in the draw list.
+    if (!_active) {
+      return;
+    }
+    super.renderTree(canvas);
+  }
+
+  @override
   bool isVisible(CameraComponent3D camera) =>
       _active && super.isVisible(camera);
 
@@ -1955,6 +1967,16 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
   bool get visible => _visible;
 
   void setVisible(bool value) => _visible = value;
+
+  @override
+  void renderTree(Canvas canvas) {
+    // See ActorSpriteComponent.renderTree: isVisible() is not a reliable
+    // dynamic visibility gate in the pinned flame_3d release.
+    if (!_visible) {
+      return;
+    }
+    super.renderTree(canvas);
+  }
 
   @override
   bool isVisible(CameraComponent3D camera) =>

@@ -43,8 +43,10 @@ Mitigation, built into M2 rather than bolted on later:
 
 - The default local source is `.local/doom/DOOM1.WAD`; desktop may override it
   with `DOOM_WAD_PATH`.
-- The Wasm release build validates and copies that file to
-  `build/web/doom1.wad`; browser startup fetches it automatically.
+- Native and Wasm release builds validate and package that file as a Flutter
+  asset. Web startup fetches `assets/.local/doom/DOOM1.WAD` automatically.
+- Web release acceptance requires a dart2wasm-only bootstrap with no generated
+  `main.dart.js` fallback.
 - The browser local-file picker is available only from the pause menu.
 - Unit tests keep generated regression fixtures; local acceptance also runs the
   original E1M1 report and deterministic traversal.

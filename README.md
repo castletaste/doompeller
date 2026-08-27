@@ -26,9 +26,10 @@ requires an explicit button press.
 ## Run in a WebGPU browser
 
 The browser target is Flutter Wasm plus flame_3d's WebGPU backend. The release
-build copies `.local/doom/DOOM1.WAD` to `build/web/doom1.wad`, and startup loads
-E1M1 automatically. **SELECT LOCAL IWAD** remains available only from the pause
-menu for switching content at runtime.
+build packages `.local/doom/DOOM1.WAD` at
+`build/web/assets/.local/doom/DOOM1.WAD`, and startup loads E1M1 automatically.
+**SELECT LOCAL IWAD** remains available only from the pause menu for switching
+content at runtime.
 
 Build the reproducible release with the pinned Flutter SDK and naga:
 
@@ -36,9 +37,9 @@ Build the reproducible release with the pinned Flutter SDK and naga:
 tool/build_web_release.sh
 ```
 
-The build verifies the Wasm entrypoint, local CanvasKit assets, generated WGSL
-shader bundle, deployment headers, and the exact bundled `doom1.wad` size and
-checksum.
+The build removes Flutter's generated dart2js fallback and verifies the
+dart2wasm entrypoint, local CanvasKit assets, generated WGSL shader bundle,
+deployment headers, and the exact bundled `DOOM1.WAD` size and checksum.
 Deployment must preserve `web/_headers` so Wasm/worker resources run under
 COOP/COEP. The supported and tested runtime target is Wasm/WebGPU.
 
@@ -89,6 +90,7 @@ Use the pinned Flutter 3.44.4 toolchain:
 /Users/savva/fvm/versions/stable/bin/flutter build macos --release
 ```
 
-Unit tests retain generated regression fixtures. Root acceptance runs set
-`DOOM_WAD_PATH=.local/doom/DOOM1.WAD` and include the original E1M1 report and
-deterministic traversal.
+Root acceptance loads the bundled original E1M1 by default and includes its
+report, collision challenges, effect lifetimes, and deterministic traversal.
+Focused package tests retain generated fixtures where a minimal oracle is
+useful.

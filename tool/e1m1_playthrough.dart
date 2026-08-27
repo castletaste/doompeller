@@ -1086,7 +1086,6 @@ final class _Driver {
   }
 
   bool _insideBlockingWall(PlayerView player, List<SectorRuntime> sectors) {
-    final int radius = toFixed(16);
     for (final Linedef line in map.linedefs) {
       final MapVertex a = map.vertices[line.v1];
       final MapVertex b = map.vertices[line.v2];
@@ -1098,7 +1097,7 @@ final class _Driver {
             toFixed(b.x),
             toFixed(b.y),
           ) >=
-          radius * radius) {
+          16 * 16) {
         continue;
       }
       if (line.blocksMovement || !line.isTwoSided) return true;
@@ -1119,7 +1118,7 @@ final class _Driver {
     return false;
   }
 
-  static int _fixedDistanceSquaredToSegment(
+  static double _fixedDistanceSquaredToSegment(
     int px,
     int py,
     int ax,
@@ -1127,21 +1126,25 @@ final class _Driver {
     int bx,
     int by,
   ) {
-    final int dx = bx - ax;
-    final int dy = by - ay;
-    final int lengthSquared = dx * dx + dy * dy;
+    final double pointX = fixedToDouble(px);
+    final double pointY = fixedToDouble(py);
+    final double startX = fixedToDouble(ax);
+    final double startY = fixedToDouble(ay);
+    final double dx = fixedToDouble(bx - ax);
+    final double dy = fixedToDouble(by - ay);
+    final double lengthSquared = dx * dx + dy * dy;
     if (lengthSquared == 0) {
-      final int ox = px - ax;
-      final int oy = py - ay;
+      final double ox = pointX - startX;
+      final double oy = pointY - startY;
       return ox * ox + oy * oy;
     }
-    int projection =
-        (((px - ax) * dx + (py - ay) * dy) << kFracBits) ~/ lengthSquared;
-    projection = projection.clamp(0, kFracUnit);
-    final int qx = ax + ((dx * projection) >> kFracBits);
-    final int qy = ay + ((dy * projection) >> kFracBits);
-    final int ox = px - qx;
-    final int oy = py - qy;
+    final double projection =
+        (((pointX - startX) * dx + (pointY - startY) * dy) / lengthSquared)
+            .clamp(0, 1);
+    final double qx = startX + dx * projection;
+    final double qy = startY + dy * projection;
+    final double ox = pointX - qx;
+    final double oy = pointY - qy;
     return ox * ox + oy * oy;
   }
 }

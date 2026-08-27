@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:web/web.dart' as web;
 
-const String _bundledIwadPath = 'doom1.wad';
+const String _bundledIwadPath = 'assets/.local/doom/DOOM1.WAD';
 const int _expectedIwadBytes = 4196020;
 
 final Map<String, Future<Uint8List>> _downloads = <String, Future<Uint8List>>{};

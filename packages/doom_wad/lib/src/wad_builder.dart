@@ -176,12 +176,18 @@ void _writeEmptyPost(List<int> bytes) {
 /// Used to pin fixture output in tests. It is not a cryptographic hash; it is
 /// stable, dependency-free and sensitive enough that any byte change shows up.
 int fnv1a64(Uint8List bytes) {
-  // Offset basis and prime, masked to 64 bits by Dart's int arithmetic.
-  var hash = 0xCBF29CE484222325;
-  const int prime = 0x100000001B3;
+  // BigInt keeps this exact on Flutter's Wasm build without relying on
+  // web-number literals that cannot represent every 64-bit integer.
+  // Convert the unsigned accumulator explicitly to the signed low-64 result
+  // that the original VM bitwise implementation returned.
+  var hash = BigInt.parse('CBF29CE484222325', radix: 16);
+  final prime = BigInt.parse('100000001B3', radix: 16);
+  final mask = BigInt.parse('FFFFFFFFFFFFFFFF', radix: 16);
   for (var i = 0; i < bytes.length; i++) {
-    hash ^= bytes[i];
-    hash = (hash * prime) & 0xFFFFFFFFFFFFFFFF;
+    hash ^= BigInt.from(bytes[i]);
+    hash = (hash * prime) & mask;
   }
-  return hash;
+  final signBit = BigInt.one << 63;
+  final signed = hash >= signBit ? hash - (BigInt.one << 64) : hash;
+  return signed.toInt();
 }

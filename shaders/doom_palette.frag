@@ -54,7 +54,12 @@ void main() {
   // Keep vertexNormal live through shader optimization so flame_3d's reflected
   // vertex descriptor retains the pinned floats 9..11. Geometry never emits a
   // NaN normal, so this guard has no visual effect on valid content.
-  if (any(isnan(fragNormal))) {
+  // Naga's GLSL frontend does not lower isnan(), while IEEE NaN remains the
+  // only floating value unequal to itself. Spell the same no-op guard with
+  // comparisons so both Impeller and WebGPU retain the normal attribute.
+  if (fragNormal.x != fragNormal.x ||
+      fragNormal.y != fragNormal.y ||
+      fragNormal.z != fragNormal.z) {
     discard;
   }
 

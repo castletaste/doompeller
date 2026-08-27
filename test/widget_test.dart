@@ -1,6 +1,7 @@
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doompeller/game/content_source.dart';
+import 'package:doompeller/game/browser_wad_selection.dart';
 import 'package:doompeller/game/doom_app_controller.dart';
 import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_hud.dart';
@@ -132,6 +133,7 @@ void main() {
     );
     expect(find.text('IWAD LOAD FAILED'), findsOneWidget);
     expect(find.byKey(const Key('fixture-fallback')), findsOneWidget);
+    expect(find.text('SELECT LOCAL IWAD'), findsNothing);
   });
 
   testWidgets('fallback button explicitly loads the fixture', (tester) async {
@@ -201,9 +203,12 @@ void main() {
         autoStart: false,
         runtimeFactory: (_) => runtime,
         gameSurfaceBuilder: testSurface,
+        wadPicker: () async =>
+            BrowserWadSelection(name: 'broken.wad', bytes: Uint8List(12)),
       ),
     );
 
+    expect(find.text('SELECT LOCAL IWAD'), findsNothing);
     expect(find.textContaining('Shift run'), findsOneWidget);
     await tester.tap(find.byKey(const Key('hide-controls')));
     await tester.pump();
@@ -213,6 +218,13 @@ void main() {
     await tester.tap(find.byKey(const Key('game-pause-button')));
     await tester.pump();
     expect(find.byKey(const Key('pause-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('pause-load-iwad')), findsOneWidget);
+    expect(find.text('SELECT LOCAL IWAD'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('pause-load-iwad')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pause-overlay')), findsOneWidget);
+    expect(find.byKey(const Key('pause-iwad-error')), findsOneWidget);
+    expect(find.byKey(const Key('failure-view')), findsNothing);
     await tester.tap(find.byKey(const Key('overlay-action')));
     await tester.pump();
     expect(find.byKey(const Key('pause-overlay')), findsNothing);

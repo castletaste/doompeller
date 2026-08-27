@@ -33,10 +33,23 @@ fi
 # These are the prohibited ways to smuggle another engine or renderer into the
 # app. Documentation may mention the words; executable imports/APIs may not.
 if rg -n -g '*.dart' \
-  "^(import|export) ['\"](dart:(ffi|js(_interop)?)|package:(ffi|webview_flutter)/)|DynamicLibrary\.|WebViewController\(|WebAssembly\." \
+  "^(import|export) ['\"](dart:ffi|package:(ffi|webview_flutter)/)|DynamicLibrary\.|WebViewController\(" \
   lib packages tool
 then
-  fail "FFI, WebView, JS/WASM bridge, or native dynamic loading found"
+  fail "FFI, WebView, or native dynamic loading found"
+fi
+
+# WebGPU needs two small browser bridges: default IWAD fetch and the pause-menu
+# file picker. Keep modern JS interop confined to those named boundaries.
+js_hits=$(rg -l -g '*.dart' "^(import|export) ['\"]dart:js(_interop)?['\"]" lib packages tool 2>/dev/null || true)
+outside_web_bridges=$(printf '%s\n' "$js_hits" |
+  rg -v "^lib/game/(browser_wad_picker_web|content_source_platform_web)\.dart$" || true)
+if [ -n "$outside_web_bridges" ]; then
+  printf '%s\n' "$outside_web_bridges" >&2
+  fail "JS interop exists outside the approved browser boundaries"
+fi
+if rg -n -g '*.dart' "WebAssembly\." lib packages tool; then
+  fail "direct WebAssembly API usage found"
 fi
 
 # The experimental rendering stack is exact-pinned.
@@ -44,6 +57,7 @@ need_line "^  flutter: 3\.44\.4$" pubspec.yaml
 need_line "^  flame: 1\.38\.0$" pubspec.yaml
 need_line "^  flame_3d: 0\.3\.0$" pubspec.yaml
 need_line "^  vector_math: 2\.2\.0$" pubspec.yaml
+need_line "^  web: 1\.1\.1$" pubspec.yaml
 need_line "<key>FLTEnableImpeller</key>" macos/Runner/Info.plist
 need_line "<key>FLTEnableFlutterGPU</key>" macos/Runner/Info.plist
 
@@ -71,6 +85,14 @@ then
 fi
 git check-ignore -q assets/shaders/doom_palette.shaderbundle ||
   fail "compiled shader bundle is not ignored"
+if git ls-files --error-unmatch assets/shaders/doom_palette.wgslbundle >/dev/null 2>&1
+then
+  fail "compiled WebGPU shader bundle is tracked instead of reproducibly built"
+fi
+git check-ignore -q assets/shaders/doom_palette.wgslbundle ||
+  fail "compiled WebGPU shader bundle is not ignored"
+need_line "Cross-Origin-Opener-Policy: same-origin" web/_headers
+need_line "Cross-Origin-Embedder-Policy: credentialless" web/_headers
 
 # When a release executable exists, reject characteristic symbols of a linked
 # Doom engine. Absence of symbols is only a smoke check; source rules above are

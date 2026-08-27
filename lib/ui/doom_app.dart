@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:flame/game.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../adapter/adapter.dart';
 import '../game/doom_app_controller.dart';
 import '../game/audio_backend_factory.dart';
+import '../game/browser_wad_picker.dart';
 import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
 import '../game/level_preparer.dart';
@@ -15,6 +19,9 @@ import 'doom_automap.dart';
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
     Widget Function(BuildContext context, DoomRuntimeView runtime);
+typedef DoomWadPicker = Future<BrowserWadSelection?> Function();
+
+const bool _frameProbeEnabled = bool.fromEnvironment('DOOMPELLER_FRAME_PROBE');
 
 /// Production runtime boundary. Direct [DoomRuntimeGame] construction remains
 /// silent by default for tests and non-UI tools.
@@ -28,12 +35,14 @@ final class DoomApp extends StatefulWidget {
     this.autoStart = true,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
+    this.wadPicker,
   });
 
   final DoomAppController? controller;
   final bool autoStart;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final DoomWadPicker? wadPicker;
 
   @override
   State<DoomApp> createState() => _DoomAppState();
@@ -75,6 +84,9 @@ final class _DoomAppState extends State<DoomApp> {
         controller: _controller,
         runtimeFactory: widget.runtimeFactory,
         gameSurfaceBuilder: widget.gameSurfaceBuilder,
+        wadPicker:
+            widget.wadPicker ??
+            (browserWadPickerAvailable ? pickBrowserWad : null),
       ),
     ),
   );
@@ -85,11 +97,30 @@ final class _DoomAppBody extends StatelessWidget {
     required this.controller,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
+    this.wadPicker,
   });
 
   final DoomAppController controller;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final DoomWadPicker? wadPicker;
+
+  Future<void> _pickBrowserIwad() async {
+    try {
+      final selection = await wadPicker?.call();
+      if (selection == null) return;
+      await controller.useSelectedIwad(
+        selection.bytes,
+        sourceLabel: selection.name,
+      );
+    } on BrowserWadPickerFailure catch (error) {
+      controller.reportSelectedIwadFailure(error.message);
+    } on Object {
+      controller.reportSelectedIwadFailure(
+        'The browser could not open the selected IWAD.',
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,6 +139,8 @@ final class _DoomAppBody extends StatelessWidget {
           level: state.level!,
           synthetic: state.isFixture,
           setupMessage: state.setupMessage,
+          selectionErrorMessage: state.errorMessage,
+          onLoadIwad: wadPicker == null ? null : _pickBrowserIwad,
           runtimeFactory: runtimeFactory,
           gameSurfaceBuilder: gameSurfaceBuilder,
         ),
@@ -186,6 +219,8 @@ final class _DoomReadyView extends StatefulWidget {
     required this.level,
     required this.synthetic,
     required this.setupMessage,
+    required this.selectionErrorMessage,
+    required this.onLoadIwad,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
   });
@@ -193,6 +228,8 @@ final class _DoomReadyView extends StatefulWidget {
   final PreparedDoomLevel level;
   final bool synthetic;
   final String? setupMessage;
+  final String? selectionErrorMessage;
+  final VoidCallback? onLoadIwad;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
 
@@ -206,6 +243,9 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
   late final FocusNode _gameFocusNode;
   String? _configurationError;
   bool _showControls = true;
+  FrameHistogram? _frameProbe;
+  Timer? _frameProbeWarmup;
+  Timer? _frameProbeReporter;
 
   @override
   void initState() {
@@ -216,6 +256,27 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     _gameFocusNode = FocusNode(debugLabel: 'Doom game input')
       ..addListener(_handleFocusChange);
     WidgetsBinding.instance.addObserver(this);
+    if (_frameProbeEnabled) {
+      _frameProbe = FrameHistogram();
+      SchedulerBinding.instance.addTimingsCallback(_recordFrameTimings);
+      _frameProbeWarmup = Timer(const Duration(seconds: 5), () {
+        _frameProbe?.clear();
+        debugPrint('doompeller-web-frame: warmup complete');
+      });
+      _frameProbeReporter = Timer.periodic(const Duration(seconds: 2), (_) {
+        final summary = _frameProbe?.summarize();
+        if (summary == null || summary.count == 0) return;
+        debugPrint(
+          'doompeller-web-frame: n=${summary.count} '
+          'p50=${summary.p50Millis.toStringAsFixed(3)}ms '
+          'p95=${summary.p95Millis.toStringAsFixed(3)}ms '
+          'p99=${summary.p99Millis.toStringAsFixed(3)}ms '
+          'build95=${(summary.p95BuildMicros / 1000).toStringAsFixed(3)}ms '
+          'raster95=${(summary.p95RasterMicros / 1000).toStringAsFixed(3)}ms '
+          'misses=${summary.deadlineMisses}',
+        );
+      });
+    }
     if (widget.runtimeFactory != null && widget.gameSurfaceBuilder == null) {
       _configurationError =
           'A custom Doom runtime requires a custom game surface builder.';
@@ -224,11 +285,20 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
 
   @override
   void dispose() {
+    if (_frameProbeEnabled) {
+      SchedulerBinding.instance.removeTimingsCallback(_recordFrameTimings);
+      _frameProbeWarmup?.cancel();
+      _frameProbeReporter?.cancel();
+    }
     WidgetsBinding.instance.removeObserver(this);
     _gameFocusNode
       ..removeListener(_handleFocusChange)
       ..dispose();
     super.dispose();
+  }
+
+  void _recordFrameTimings(List<FrameTiming> timings) {
+    _frameProbe?.addTimings(timings);
   }
 
   @override
@@ -367,12 +437,11 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                     child: DoomStatusBar(hud: hud, synthetic: widget.synthetic),
                   ),
                   if (hud.paused && hud.health > 0)
-                    _ModalOverlay(
+                    _PauseOverlay(
                       key: const Key('pause-overlay'),
-                      title: 'PAUSED',
-                      subtitle: 'Press Esc to resume',
-                      onPressed: _runtime.togglePause,
-                      buttonLabel: 'RESUME',
+                      onResume: _runtime.togglePause,
+                      onLoadIwad: widget.onLoadIwad,
+                      errorMessage: widget.selectionErrorMessage,
                     ),
                   if (hud.levelComplete)
                     _IntermissionOverlay(
@@ -468,6 +537,70 @@ final class _ContentBadge extends StatelessWidget {
             style: const TextStyle(color: Colors.white70, fontSize: 10),
           ),
       ],
+    ),
+  );
+}
+
+final class _PauseOverlay extends StatelessWidget {
+  const _PauseOverlay({
+    super.key,
+    required this.onResume,
+    this.onLoadIwad,
+    this.errorMessage,
+  });
+
+  final VoidCallback onResume;
+  final VoidCallback? onLoadIwad;
+  final String? errorMessage;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: Colors.black.withValues(alpha: 0.78),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const Text(
+            'PAUSED',
+            style: TextStyle(
+              color: Color(0xFFC8B45A),
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Press Esc to resume',
+            style: TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.tonal(
+            key: const Key('overlay-action'),
+            onPressed: onResume,
+            child: const Text('RESUME'),
+          ),
+          if (onLoadIwad != null) ...<Widget>[
+            const SizedBox(height: 10),
+            OutlinedButton(
+              key: const Key('pause-load-iwad'),
+              onPressed: onLoadIwad,
+              child: const Text('SELECT LOCAL IWAD'),
+            ),
+          ],
+          if (errorMessage != null) ...<Widget>[
+            const SizedBox(height: 12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Text(
+                errorMessage!,
+                key: const Key('pause-iwad-error'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFFF6B5F)),
+              ),
+            ),
+          ],
+        ],
+      ),
     ),
   );
 }

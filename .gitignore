@@ -61,4 +61,5 @@ app.*.map.json
 *.deh
 *.DEH
 /assets/shaders/*.shaderbundle
+/assets/shaders/*.wgslbundle
 /artifacts/

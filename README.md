@@ -4,29 +4,43 @@ Doompeller is a native Dart + Flutter + Flame 3D reimplementation with a pure
 Dart WAD parser, geometry compiler, and deterministic 35 Hz gameplay core. It
 does not embed, wrap, download, or extract another Doom engine.
 
-## Run the safe synthetic map
+## Run original E1M1
 
-The app starts the generated `MAP01` fixture automatically when no IWAD path is
-configured. The fixture is generated in Dart, contains no commercial content,
-and is visibly marked `SYNTHETIC TEST MAP`.
+Place `DOOM1.WAD` at `.local/doom/DOOM1.WAD`. It is the default local content
+source, so the app starts E1M1 without a chooser. `DOOM_WAD_PATH` can override
+that path on desktop.
 
 ```sh
 /Users/savva/fvm/versions/stable/bin/flutter run -d macos --release
 ```
 
-## Run original E1M1 with your own IWAD
-
-Point `DOOM_WAD_PATH` at your legally obtained Doom IWAD. The app reads it only
-from that explicit path and never copies or extracts its contents.
-
 ```sh
-DOOM_WAD_PATH=.local/doom/DOOM.WAD \
+DOOM_WAD_PATH=.local/doom/DOOM1.WAD \
   /Users/savva/fvm/versions/stable/bin/flutter run -d macos --release
 ```
 
 If a configured path is unreadable, invalid, not an IWAD, or lacks E1M1, the
 app shows an error. It will not silently switch content; the synthetic fallback
 requires an explicit button press.
+
+## Run in a WebGPU browser
+
+The browser target is Flutter Wasm plus flame_3d's WebGPU backend. The release
+build copies `.local/doom/DOOM1.WAD` to `build/web/doom1.wad`, and startup loads
+E1M1 automatically. **SELECT LOCAL IWAD** remains available only from the pause
+menu for switching content at runtime.
+
+Build the reproducible release with the pinned Flutter SDK and naga:
+
+```sh
+tool/build_web_release.sh
+```
+
+The build verifies the Wasm entrypoint, local CanvasKit assets, generated WGSL
+shader bundle, deployment headers, and the exact bundled `doom1.wad` size and
+checksum.
+Deployment must preserve `web/_headers` so Wasm/worker resources run under
+COOP/COEP. The supported and tested runtime target is Wasm/WebGPU.
 
 ## Headless WAD report
 
@@ -37,10 +51,10 @@ synthetic fixture, so it is safe to use in CI.
 
 ```sh
 /Users/savva/fvm/versions/stable/bin/dart run tool/wad_report.dart \
-  --map E1M1 .local/doom/DOOM.WAD
+  --map E1M1 .local/doom/DOOM1.WAD
 
 # Or use DOOM_WAD_PATH; --json is suitable for CI artifact parsing.
-DOOM_WAD_PATH=.local/doom/DOOM.WAD \
+DOOM_WAD_PATH=.local/doom/DOOM1.WAD \
   /Users/savva/fvm/versions/stable/bin/dart run tool/wad_report.dart \
   --json
 ```
@@ -75,6 +89,6 @@ Use the pinned Flutter 3.44.4 toolchain:
 /Users/savva/fvm/versions/stable/bin/flutter build macos --release
 ```
 
-Automated tests use only the generated fixture. A successful fixture run does
-not claim that original E1M1 was exercised; that requires a developer-provided
-`DOOM_WAD_PATH` and a separately reported live run.
+Unit tests retain generated regression fixtures. Root acceptance runs set
+`DOOM_WAD_PATH=.local/doom/DOOM1.WAD` and include the original E1M1 report and
+deterministic traversal.

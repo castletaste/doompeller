@@ -56,6 +56,20 @@ void main() {
       expect((result as DoomContentLoadFailure).message, contains('PWAD'));
     });
 
+    test('loads an explicitly selected in-memory IWAD without a file path', () {
+      final Uint8List bytes = DoomFixtures.pwadBytes()
+        ..setRange(0, 4, 'IWAD'.codeUnits);
+      final result = DoomContentSource(
+        environment: const <String, String>{},
+      ).loadIwadBytes(bytes, mapName: DoomFixtures.mapName);
+
+      expect(result, isA<DoomContentLoaded>());
+      final content = (result as DoomContentLoaded).content;
+      expect(content.origin, DoomContentOrigin.developerIwad);
+      expect(content.sourcePath, isNull);
+      expect(content.mapName, DoomFixtures.mapName);
+    });
+
     test('checks maxWadBytes before reading file contents', () async {
       var readBytes = false;
       final source = DoomContentSource(

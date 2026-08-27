@@ -71,7 +71,7 @@ class MapRuntime {
     }
     // Closest sidedef is a deterministic and useful fallback for small test maps.
     int best = fallback;
-    int bestDistance = 0x7fffffffffffffff;
+    int? bestDistance;
     for (final Linedef line in map.linedefs) {
       final MapVertex a = map.vertices[line.v1];
       final MapVertex b = map.vertices[line.v2];
@@ -83,7 +83,7 @@ class MapRuntime {
         toFixed(b.x),
         toFixed(b.y),
       );
-      if (d < bestDistance) {
+      if (bestDistance == null || d < bestDistance) {
         bestDistance = d;
         final int cross =
             (toFixed(b.x - a.x) * (y - toFixed(a.y))) -

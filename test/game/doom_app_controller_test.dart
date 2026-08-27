@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_app_controller.dart';
+import 'package:doompeller/game/level_preparer.dart';
+import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -16,6 +19,22 @@ void main() {
     expect(controller.state.phase, DoomAppPhase.fixtureReady);
     expect(controller.state.level?.map.name, 'MAP01');
     expect(controller.state.setupMessage, contains('DOOM_WAD_PATH'));
+  });
+
+  test('missing default content is an explicit startup failure', () async {
+    final controller = DoomAppController(
+      loadDeveloper: () async => const DoomContentPathMissing(
+        autoLoadFixture: false,
+        setupMessage: 'Bundled IWAD is unavailable.',
+      ),
+    );
+    addTearDown(controller.dispose);
+
+    await controller.start();
+
+    expect(controller.state.phase, DoomAppPhase.failure);
+    expect(controller.state.level, isNull);
+    expect(controller.state.errorMessage, 'Bundled IWAD is unavailable.');
   });
 
   test('configured invalid path is an error with no silent fallback', () async {
@@ -52,6 +71,61 @@ void main() {
 
     expect(controller.state.phase, DoomAppPhase.fixtureReady);
     expect(controller.state.setupMessage, contains('was not loaded'));
+  });
+
+  test('explicit in-memory IWAD replaces the running fixture', () async {
+    final source = DoomContentSource(environment: const <String, String>{});
+    final controller = DoomAppController(contentSource: source);
+    addTearDown(controller.dispose);
+    await controller.start();
+    expect(controller.state.phase, DoomAppPhase.fixtureReady);
+
+    final Uint8List bytes = DoomFixtures.pwadBytes()
+      ..setRange(0, 4, 'IWAD'.codeUnits);
+    await controller.useSelectedIwad(bytes, mapName: DoomFixtures.mapName);
+
+    expect(controller.state.phase, DoomAppPhase.developerIwadReady);
+    expect(controller.state.level?.map.name, DoomFixtures.mapName);
+    expect(controller.state.level?.content.sourcePath, isNull);
+  });
+
+  test('invalid selected IWAD retains the running level', () async {
+    final source = DoomContentSource(environment: const <String, String>{});
+    final controller = DoomAppController(contentSource: source);
+    addTearDown(controller.dispose);
+    await controller.start();
+    final activeLevel = controller.state.level;
+
+    await controller.useSelectedIwad(Uint8List(12));
+
+    expect(controller.state.phase, DoomAppPhase.fixtureReady);
+    expect(controller.state.level, same(activeLevel));
+    expect(controller.state.errorMessage, isNotEmpty);
+  });
+
+  test('selected IWAD prepare failure retains the running level', () async {
+    final source = DoomContentSource(environment: const <String, String>{});
+    final content = source.loadFixture();
+    final preparer = DoomLevelPreparer();
+    var prepareCalls = 0;
+    final controller = DoomAppController(
+      loadDeveloper: () async => DoomContentLoaded(content),
+      loadSelected: (bytes, {mapName = 'E1M1', sourcePath}) =>
+          DoomContentLoaded(content),
+      prepare: (selected, token) {
+        if (prepareCalls++ == 0) return preparer.prepare(selected, token);
+        return Future<PreparedDoomLevel>.error(StateError('prepare failed'));
+      },
+    );
+    addTearDown(controller.dispose);
+    await controller.start();
+    final activeLevel = controller.state.level;
+
+    await controller.useSelectedIwad(Uint8List(0));
+
+    expect(controller.state.phase, DoomAppPhase.fixtureReady);
+    expect(controller.state.level, same(activeLevel));
+    expect(controller.state.errorMessage, contains('prepare failed'));
   });
 
   test('late result from an older request is rejected', () async {

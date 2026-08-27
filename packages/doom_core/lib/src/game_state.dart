@@ -1163,7 +1163,7 @@ class GameState {
         _playerMobj.y + fixedMul(range, Trig.sin(_playerMobj.angle));
     Linedef? selected;
     int selectedIndex = -1;
-    int selectedDistance = 0x7fffffffffffffff;
+    int? selectedDistance;
     for (var i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef line = _runtime.map.linedefs[i];
       final MapVertex a = _runtime.map.vertices[line.v1];
@@ -1181,7 +1181,7 @@ class GameState {
         continue;
       }
       final int distance = _distanceSquaredToLineMidpoint(line);
-      if (distance < selectedDistance) {
+      if (selectedDistance == null || distance < selectedDistance) {
         selectedDistance = distance;
         selected = line;
         selectedIndex = i;

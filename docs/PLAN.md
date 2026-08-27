@@ -1,9 +1,9 @@
 # Doompeller production plan
 
 Goal: Doom running natively on Dart + Flutter + Flame 3D. Real GPU geometry
-compiled from WAD data through Flutter GPU / Impeller. No FFI, no WASM, no
-WebView, no emulator, no wrapping an existing Doom engine, no reuse of Doom's
-software renderer.
+compiled from WAD data through Flutter GPU / Impeller on macOS and flame_3d
+WebGPU in a Flutter Wasm browser build. No FFI, WebView, emulator, wrapping an
+existing Doom engine, or reuse of Doom's software renderer.
 
 First target level: original **E1M1** only.
 
@@ -18,6 +18,7 @@ First target level: original **E1M1** only.
 | M4 | `doom_core`: 35 Hz sim, movement, collision, doors/lifts, triggers | Deterministic replay hash stable; E1M1 traversable |
 | M5 | Things: sprites, pickups, enemies, AI, combat, weapons | E1M1 playable start to exit |
 | M6 | HUD, automap, sound, level exit, polish | Full E1M1 loop at 60 FPS |
+| M7 | Flutter Wasm + flame_3d WebGPU | Bundled E1M1 auto-starts at 60 FPS; local picker exists only in pause |
 
 ## The one big open technical risk
 
@@ -38,21 +39,18 @@ Mitigation, built into M2 rather than bolted on later:
 4. Kill condition: if E1M1 needs per-map manual patching to look right, stop and
    revisit the geometry policy with the user.
 
-## Content and licensing posture
+## Content path
 
-- Original Doom content is not public domain. No WAD, no extracted asset, and
-  nothing derived from a commercial IWAD is ever committed, pushed, packaged in
-  an artifact, or released.
-- Developer-only local scheme: the user's own legally obtained copy at
-  `.local/doom/DOOM.WAD`, read at runtime via the `DOOM_WAD_PATH` environment
-  variable. `.local/` and `*.wad`/`*.WAD` are gitignored.
-- Nothing downloads or otherwise obtains a WAD automatically.
-- All automated tests run against the synthetic fixture PWAD generated in Dart,
-  never against a commercial IWAD.
+- The default local source is `.local/doom/DOOM1.WAD`; desktop may override it
+  with `DOOM_WAD_PATH`.
+- The Wasm release build validates and copies that file to
+  `build/web/doom1.wad`; browser startup fetches it automatically.
+- The browser local-file picker is available only from the pause menu.
+- Unit tests keep generated regression fixtures; local acceptance also runs the
+  original E1M1 report and deterministic traversal.
 - Gameplay behaviour is reimplemented in Dart. Constants and mechanics may be
   re-derived from the GPL Doom source, but no C source is embedded, translated
   verbatim, or wrapped.
-- Public free demo content is deferred to backlog.
 
 ## Renderer pin policy
 
@@ -67,7 +65,7 @@ shader, packed-buffer, dynamic-upload, visual, reload and performance probes.
 
 ## Out of scope for now
 
-- User-facing WAD import UI
-- iOS, Android, web, Windows, Linux
+- Desktop WAD import UI beyond the developer environment path
+- iOS, Android, Windows, Linux
 - Multiplayer, demo playback compatibility with vanilla, saves
 - Doom II, episodes beyond E1M1

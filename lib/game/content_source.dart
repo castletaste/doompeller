@@ -1,17 +1,21 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:doom_wad/doom_wad.dart';
 
-/// Environment variable used for the developer's legally obtained Doom IWAD.
+import 'content_source_platform_stub.dart'
+    if (dart.library.io) 'content_source_platform_io.dart'
+    if (dart.library.js_interop) 'content_source_platform_web.dart'
+    as platform;
+
+/// Environment variable used to override the default desktop IWAD.
 const String kDoomWadPathEnvironment = 'DOOM_WAD_PATH';
 
-/// The documented local location. It is guidance only: the runtime never scans
-/// or reads it implicitly, so a build cannot accidentally package local data.
-const String kDocumentedLocalWadPath = '.local/doom/DOOM.WAD';
+/// Exact developer-local default selected by the user. Only this ignored path
+/// is checked; no directory scan is performed and no content is packaged.
+const String kDocumentedLocalWadPath = '.local/doom/DOOM1.WAD';
 
 enum DoomContentOrigin {
-  /// A generated, legally clean PWAD used by tests and renderer diagnostics.
+  /// A generated PWAD used by unit tests and renderer diagnostics.
   syntheticFixture,
 
   /// The developer's own IWAD, explicitly selected through DOOM_WAD_PATH.
@@ -45,13 +49,17 @@ final class DoomContentLoaded extends DoomContentLoadResult {
   final DoomContent content;
 }
 
-/// The app has no content until the developer explicitly supplies a path.
+/// No default content path was available for this platform.
 final class DoomContentPathMissing extends DoomContentLoadResult {
-  const DoomContentPathMissing();
+  const DoomContentPathMissing({
+    this.autoLoadFixture = true,
+    this.setupMessage =
+        'Set DOOM_WAD_PATH or place DOOM1.WAD at '
+        '.local/doom/DOOM1.WAD.',
+  });
 
-  String get setupMessage =>
-      'Set $kDoomWadPathEnvironment to your legally obtained DOOM.WAD. '
-      'Recommended local path: $kDocumentedLocalWadPath';
+  final bool autoLoadFixture;
+  final String setupMessage;
 }
 
 final class DoomContentLoadFailure extends DoomContentLoadResult {
@@ -64,21 +72,26 @@ final class DoomContentLoadFailure extends DoomContentLoadResult {
 typedef ReadWadBytes = Future<Uint8List> Function(String path);
 typedef ReadWadLength = Future<int> Function(String path);
 
-/// Resolves developer content without scanning the filesystem or downloading
-/// anything.
+/// Resolves the default IWAD without scanning directories.
 ///
-/// The only real-IWAD entry point is [kDoomWadPathEnvironment]. Tests and the
-/// built-in diagnostic scene call [loadFixture], which is generated in Dart
-/// and contains no commercial bytes.
+/// Desktop accepts [kDoomWadPathEnvironment] and the one exact ignored local
+/// default. Web loads the release-bundled `doom1.wad`; an explicitly selected
+/// replacement can still enter through [loadIwadBytes]. Tests and the
+/// diagnostic scene use [loadFixture].
 final class DoomContentSource {
   DoomContentSource({
     Map<String, String>? environment,
     ReadWadBytes? readBytes,
     ReadWadLength? readLength,
     this.limits = DoomLimits.defaults,
-  }) : _environment = environment ?? Platform.environment,
-       _readBytes = readBytes ?? _fileBytes,
-       _readLength = readLength ?? _fileLength;
+  }) : _environment =
+           environment ??
+           platform.environment(
+             kDoomWadPathEnvironment,
+             kDocumentedLocalWadPath,
+           ),
+       _readBytes = readBytes ?? platform.readBytes,
+       _readLength = readLength ?? platform.readLength;
 
   final Map<String, String> _environment;
   final ReadWadBytes _readBytes;
@@ -90,27 +103,54 @@ final class DoomContentSource {
   }) async {
     final String? configured = _environment[kDoomWadPathEnvironment]?.trim();
     if (configured == null || configured.isEmpty) {
-      return const DoomContentPathMissing();
+      return DoomContentPathMissing(
+        autoLoadFixture: platform.autoLoadFixtureWhenPathMissing,
+        setupMessage: platform.missingContentMessage(
+          kDoomWadPathEnvironment,
+          kDocumentedLocalWadPath,
+        ),
+      );
     }
-    final String selectedMap = mapName.trim().toUpperCase();
-    if (!RegExp(r'^(E[1-9]M[1-9]|MAP[0-9]{2})$').hasMatch(selectedMap)) {
-      return DoomContentLoadFailure('Invalid Doom map name "$selectedMap".');
-    }
-
     try {
       final int byteLength = await _readLength(configured);
       DoomLimits.check(byteLength, limits.maxWadBytes, 'maxWadBytes');
       final Uint8List bytes = await _readBytes(configured);
       // Recheck because the file may have changed between stat and read.
+      return loadIwadBytes(bytes, mapName: mapName, sourcePath: configured);
+    } on DoomFailure catch (error) {
+      return DoomContentLoadFailure(error.message, cause: error);
+    } on Object catch (error) {
+      if (platform.isFileReadFailure(error)) {
+        return DoomContentLoadFailure(
+          'Could not read the file selected by $kDoomWadPathEnvironment.',
+          cause: error,
+        );
+      }
+      rethrow;
+    }
+  }
+
+  /// Parses an explicitly user-selected IWAD already held in memory.
+  ///
+  /// This is the browser entry point: the DOM file picker supplies [bytes]
+  /// directly, so no path, upload, cache or extracted resource is involved.
+  DoomContentLoadResult loadIwadBytes(
+    Uint8List bytes, {
+    String mapName = 'E1M1',
+    String? sourcePath,
+  }) {
+    final String selectedMap = mapName.trim().toUpperCase();
+    if (!RegExp(r'^(E[1-9]M[1-9]|MAP[0-9]{2})$').hasMatch(selectedMap)) {
+      return DoomContentLoadFailure('Invalid Doom map name "$selectedMap".');
+    }
+    try {
       DoomLimits.check(bytes.lengthInBytes, limits.maxWadBytes, 'maxWadBytes');
       final WadFile wad = WadFile.parse(bytes, limits: limits);
       if (wad.kind != WadKind.iwad) {
-        return DoomContentLoadFailure(
-          'The file selected by $kDoomWadPathEnvironment is a PWAD, not a '
-          'standalone IWAD.',
+        return const DoomContentLoadFailure(
+          'The selected file is a PWAD, not a standalone IWAD.',
         );
       }
-
       final WadSet set = WadSet(<WadFile>[wad]);
       if (!set.mapNames().contains(selectedMap)) {
         return DoomContentLoadFailure(
@@ -122,16 +162,11 @@ final class DoomContentSource {
           wads: set,
           mapName: selectedMap,
           origin: DoomContentOrigin.developerIwad,
-          sourcePath: configured,
+          sourcePath: sourcePath,
         ),
       );
     } on DoomFailure catch (error) {
       return DoomContentLoadFailure(error.message, cause: error);
-    } on FileSystemException catch (error) {
-      return DoomContentLoadFailure(
-        'Could not read the file selected by $kDoomWadPathEnvironment.',
-        cause: error,
-      );
     }
   }
 
@@ -140,8 +175,4 @@ final class DoomContentSource {
     mapName: DoomFixtures.mapName,
     origin: DoomContentOrigin.syntheticFixture,
   );
-
-  static Future<Uint8List> _fileBytes(String path) => File(path).readAsBytes();
-
-  static Future<int> _fileLength(String path) => File(path).length();
 }

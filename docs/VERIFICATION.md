@@ -1,6 +1,6 @@
 # Episode verification — 2026-09-06
 
-Production continuation from `7bc0245`, `85fe080`, `3106b9c`, then `89063ed`. Original local DOOM1.WAD, 4,196,020
+Production continuation from `7bc0245`, `85fe080`, `3106b9c`, `89063ed`, then `f3bd4d1`. Original local DOOM1.WAD, 4,196,020
 bytes, MD5 `f0cefca49926d00903cf57551d901abe`. This report is not a claim that
 every level has been completed.
 
@@ -9,7 +9,7 @@ every level has been completed.
 - The pinned original E1M1 route uses normal medium-skill gameplay with enemies:
   2,175 commands, current hash `0xaac341ce`, health 84, 6/6 kills. Its original-WAD
   regression also verifies transfer of the final inventory into original E1M2.
-- Original E1M2 and E1M4 also have input-only, default-loadout medium-skill
+- Original E1M2, E1M4 and E1M8 also have input-only, default-loadout medium-skill
   terminal recordings, independently replayed from fresh state. Their exact
   source revision and live-render evidence are recorded below.
 - The controller test prepares all nine actual maps in episode/secret order,
@@ -335,23 +335,92 @@ screen shows the exit switch, both keys, 100% armor, 56% health and an idle shot
 Log: `.local/qa/episode-2026-09-06/native-e1m4-switch103.log`. The test window was
 closed afterward; the ordinary `lib/main.dart` release target is restored.
 
+## Original E1M8 boss route and foreground-start native replay
+
+Production source remains `f3bd4d1`; no gameplay or renderer change was needed
+for this route. The disposable driver records 8,416 commands from the original
+spawn with medium skill, monsters enabled, seed 0 and the default loadout.
+Both Barons are dead at tic 7,097 (92 HP, ten kills, hash `0x27681527`). The
+tag-666 floor lowers, switch 233 builds the tag-9 stairs, and the teleporter
+leads to the damaging exit sector. The first and only normal exit occurs on
+the final command: tic 8,416, 8 HP, 60 armor, ten of 27 kills, hash `0xaf3e0376`.
+Two fresh recorded-command replays agree; a separate root-agent invocation of
+the strict replay verifier repeats both runs and obtains the same result.
+
+The initial suspicion of a broken stair special was disproved. An isolated
+original-map component probe and temporary instrumentation showed that the
+spike approach helper could exhaust its loop without sending `Buttons.use`.
+Correcting that driver made the existing production stair implementation work.
+This is a planner fix, not a production engine fix. Instrumented and no-monster
+diagnostic runs are not the accepted command stream.
+
+Accepted local recording: `.local/replays/E1M8-f3bd4d1.json`, SHA-256
+`e6c71e777519274b3cd1d257f40baef810e3428c651cfdd3c675d51bf8e669b3`.
+The native harness validates command bounds, the default starting inventory,
+the first-exit-last invariant, health, kills and final hash before rendering.
+The first packaging attempt passed raw telemetry as compile-time definitions
+and exceeded macOS argument limits. The accepted build instead transports
+exactly the same JSON through a round-trip-checked gzip/base64 definition:
+391,484 JSON bytes become 24,284 encoded characters. This changes neither the
+recording nor gameplay, and exists only in the disposable native harness.
+The accepted build definitions are `.local/replays/E1M8-f3bd4d1-defines.json`
+(also retained as `E1M8-f3bd4d1-defines-gzip.json`); the failed raw-definition
+file is kept separately with the failed-build evidence.
+
+Release macOS run through the ordinary `DoomRuntimeGame`, Flame renderer and
+fixed-tick driver: **PASS**, with Impeller Metal explicitly confirmed in the
+log. A harness-only `START REPLAY` button allows foregrounding before mounting
+the game; the waiting screen is outside the frame-recording window. Foreground
+and progress were visually checked at startup, commands 3,028 and 6,175, and at
+completion. The displayed final state is `E1M8 REPLAY COMPLETE`, 8% health,
+60% armor and an idle chaingun under the final exit-sector damage tint.
+
+- Commands/tics: 8,416/8,416; hash `0xaf3e0376`; dropped tics: 0.
+- Renderer: 75 surfaces, 128 created GPU buffers, six textures,
+  255,766 initial upload bytes; 141,880 dynamic uploads / 76,552,080 bytes.
+- Frame window: 120 warmup samples excluded, then 28,724 samples.
+  Flutter `FrameTiming.totalSpan`: p95 1.612 ms, p99 2.037 ms, maximum 36.149 ms;
+  four samples exceed 16.667 ms. Worst excluded warmup: 51.256 ms.
+- These are Flutter frame-span measurements on this observed route, not GPU
+  timestamps, presented-frame measurements or a guarantee for every level.
+
+Log: `.local/qa/episode-2026-09-06/native-e1m8-f3bd4d1.log`.
+The test window was closed after verification. No test browser tab was opened.
+The ordinary `lib/main.dart` release target was rebuilt and launched afterward:
+it immediately rendered original E1M1 with 50 bullets, 100% health and the pistol,
+without an initial picker or the replay harness screen. Its pause/resume overlay
+also opened. That control-run window was closed as well. Logs:
+`.local/qa/episode-2026-09-06/native-after-e1m8-default-build.log` and
+`.local/qa/episode-2026-09-06/native-after-e1m8-default.log`.
+
 ## Still required
 
 Normal-gameplay start-to-exit command streams and independent replay verification
-for E1M3 and E1M5–E1M9, including secret-exit traversal and the complete E1M8 boss route.
+for E1M3, E1M5, E1M6, E1M7 and E1M9, including secret-exit traversal.
 The Codex goal must remain active until that evidence exists.
 
 With switch 103 corrected, E1M3 reaches its yellow key alive at tic 1,408,
 31 HP, hash `0x639a728b`, with an exact fresh replay. It returns through the
-previously blocked door and crosses line 568 at tic 1,745 with 41 HP, but the
-current blue-key approach dies in combat at tic 1,890. It has not reached the
-normal or secret exit. E1M8 reaches its first Baron encounter at tic 2,601,
-92 HP, 104 chaingun bullets and eight kills, hash `0x0efc5896`, after the
-barrel trap, armor/weapon collection, pursuit combat and the tag-6 lift.
-Neither that checkpoint nor E1M5/E1M6/E1M7/E1M9 failed runs prove completion.
+previously blocked door and crosses line 568 at tic 1,745 with 41 HP. The newer
+route activates line 1020 before approaching the blue key, raises the bridge,
+and reaches tic 2,338 at (-669, -752), 27 HP, hash `0x1bc86fd0`, with an exact
+fresh replay. The next attempted passage dies in hitscanner crossfire. Neither
+the normal nor secret exit has been reached.
+
+E1M5's yellow-room route now crosses sectors 92, 91, 79, 78 and 63 without
+crossing the one-sided wall that invalidated the earlier planner. Its exact
+fresh-replayed checkpoint is tic 8,374, 95 HP, yellow key, hash `0x20293768`.
+Later attempts are not yet accepted terminal recordings.
+
 E1M6's authored medikit-and-retreat tactic survives its red-key/tag-10 ambush at
 tic 1,167, 48 HP, eight kills, hash `0x1e671cdc`; fresh replay and a repeated
-run agree. It has not been continued to an exit.
+run agree. Continuation now reaches tic 5,231 with red and blue keys, 100 HP,
+71 armor, 45 kills and hash `0xeabea644`, verified by replaying the entire input
+prefix from startup. A longer failed run remains alive at tic 16,000 with hash
+`0xf0d2cff1` but loops around a lift. Further planner investigations found stale
+blocked-cell memory and a manual-door helper that could turn back through a
+door after momentum had already crossed its threshold. None of these failed
+or partial runs proves a level exit. E1M7 and E1M9 also remain incomplete.
 
 Separate confirmed gameplay follow-ups remain: blue armor currently saves the
 same fraction as green armor, and ammo/backpack capacity rules are incomplete.

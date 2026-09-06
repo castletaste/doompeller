@@ -13,7 +13,10 @@ abstract final class LineSpecial {
   static const int redDoorOpenStay = 33;
   static const int yellowDoorOpenStay = 34;
   // Switch doors found in classic episode maps.
-  static const int switchDoorOpenWaitClose = 103;
+  static const int switchDoorOpenStayOnce = 103;
+  // Compatibility only: the old name misidentified special 103 as a timed door.
+  @Deprecated('Use switchDoorOpenStayOnce; special 103 never closes on a timer.')
+  static const int switchDoorOpenWaitClose = switchDoorOpenStayOnce;
   static const int switchDoorOpenStay = 61;
   static const int switchBlueDoorOpenWaitClose = 99;
   static const int switchRedDoorOpenWaitClose = 134;

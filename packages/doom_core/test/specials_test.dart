@@ -1791,15 +1791,50 @@ void main() {
       },
     );
 
+    for (final int special in <int>[103, 61, 63]) {
+      test('switch door $special preserves its open/close behavior', () {
+        final MapData map = taggedSpecialMap(
+          special: special,
+          targetFloor: 64,
+          targetCeiling: 64,
+          neighborCeilings: <int>[176, 208],
+          switchTexture: true,
+        );
+        final List<TicCmd> commands = <TicCmd>[
+          const TicCmd(buttons: Buttons.use),
+          ...List<TicCmd>.filled(500, TicCmd.empty),
+        ];
+        int replay() {
+          final GameState game = GameState.start(
+            map,
+            const GameConfig(monsters: false),
+          );
+          for (final TicCmd command in commands.take(70)) {
+            game.runTic(command);
+          }
+          expect(game.sectors.elementAt(2).ceilingHeight, toFixed(172));
+          for (final TicCmd command in commands.skip(70)) {
+            game.runTic(command);
+          }
+          expect(
+            game.sectors.elementAt(2).ceilingHeight,
+            toFixed(special == 63 ? 64 : 172),
+            reason: '103 is S1 open-stay, 61 is SR open-stay, 63 is SR raise',
+          );
+          return game.hashState();
+        }
+
+        expect(replay(), replay());
+      });
+    }
+
     test(
       'S1 switch stays pressed and its future-affecting state is hashed',
       () {
         final MapData map = testMap(
           sectors: twoSectors(backCeiling: 32),
           sides: switchSides(),
-          lines: <Linedef>[
-            portal(special: LineSpecial.switchDoorOpenWaitClose),
-          ],
+          lines: <Linedef>[portal(special: LineSpecial.switchDoorOpenStayOnce)],
         );
         final GameState idle = GameState.start(
           map,

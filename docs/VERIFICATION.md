@@ -1,6 +1,6 @@
 # Episode verification — 2026-09-06
 
-Production continuation from `7bc0245`, `85fe080`, then `3106b9c`. Original local DOOM1.WAD, 4,196,020
+Production continuation from `7bc0245`, `85fe080`, `3106b9c`, then `89063ed`. Original local DOOM1.WAD, 4,196,020
 bytes, MD5 `f0cefca49926d00903cf57551d901abe`. This report is not a claim that
 every level has been completed.
 
@@ -9,6 +9,9 @@ every level has been completed.
 - The pinned original E1M1 route uses normal medium-skill gameplay with enemies:
   2,175 commands, current hash `0xaac341ce`, health 84, 6/6 kills. Its original-WAD
   regression also verifies transfer of the final inventory into original E1M2.
+- Original E1M2 and E1M4 also have input-only, default-loadout medium-skill
+  terminal recordings, independently replayed from fresh state. Their exact
+  source revision and live-render evidence are recorded below.
 - The controller test prepares all nine actual maps in episode/secret order,
   preserves inventory, rejects stale/duplicate transitions and supports retry
   after a failed preparation. This proves transitions, not navigation.
@@ -28,9 +31,9 @@ These are not a claim of pixel-perfect geometry.
 
 ## Automated checks
 
-`flutter analyze` is clean; root Flutter suite passes 240 tests. Pure-Dart
-core passes 178 tests, WAD passes 139, and geometry passes 128 (3 intentionally skipped):
-685 passing tests in total. The project contract audit passes. Package analyzers
+`flutter analyze` is clean; root Flutter suite passes 241 tests. Pure-Dart
+core passes 181 tests, WAD passes 139, and geometry passes 128 (3 intentionally skipped):
+689 passing tests in total. The project contract audit passes. Package analyzers
 and shader bundle regeneration passed in the preceding production verification;
 no shader or dependency changed in the subsequent dropped-item correction.
 No external review finding is accepted without checking its
@@ -170,7 +173,7 @@ entitlements. The Wasm/WebGPU release was rebuilt and audited as well:
 `main.dart.wasm` is 1,979,291 bytes, with no dart2js fallback. This last web build
 was not subjected to another browser playthrough.
 
-## Corrected monster action cadence (current)
+## Corrected monster action cadence at `89063ed`
 
 The subsequent replay work exposed a gameplay defect: full-speed monster chase,
 reaction counters and attack decisions ran every game tic even though the walk
@@ -214,7 +217,7 @@ Log: `.local/qa/episode-2026-09-06/native-e1m1-cadence.log`.
 The regenerated E1M2 stream also passed independent fresh replays and the live
 release Metal target, with first normal exit exactly on the last command:
 
-| Current E1M2 result | Observed value |
+| E1M2 result at `89063ed` | Observed value |
 |---|---:|
 | Commands / hash | 3,677 / `0xc6d1affc` |
 | Health / armor / kills | 4 / 0 / 23 of 41 |
@@ -234,15 +237,121 @@ record is `.local/replays/E1M2-cadence.json`, SHA-256
 The old 3,722-command stream no longer reaches the exit under corrected AI;
 neither its old hash nor its old frame measurements are current evidence.
 
+## Switch 103 opens and stays open (current)
+
+Original E1M3's yellow-key return route exposed a wrong special classification:
+line 535 is special 103, tag 10. Its door sector 121 opened to ceiling 172 but
+then returned to floor/ceiling 64, blocking the return across line 532. This was
+not a requirement to race a timed door: original [switch dispatch](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_switch.c)
+defines 103 as S1 open-and-stay, 61 as repeatable open-and-stay, and 63 as
+repeatable open-wait-close.
+
+The core now dispatches 103 to open-stay, preserving one-shot consumption and
+pressed switch state. The corrected public constant is `switchDoorOpenStayOnce`;
+the old misleading name remains a deprecated alias for source compatibility.
+Before the fix, the new core regression failed at ceiling 64 instead of 172;
+61/63 already passed. All three now pass repeated deterministic replays.
+
+The original-WAD component probe retains every E1M3 geometry/special lump and
+places a single player on the switch's front side. It observes actual switch
+535 activation and ceiling 172 throughout 700 idle tics, with no button reset
+or second activation. This authored-spawn probe is not a full-level replay.
+Sol independently reviewed dispatch, one-shot state and hashing, and reran the
+60 core specials tests plus the original E1M3 probe. A bounded Opus CLI smoke
+check failed because its OAuth session had expired; no Opus approval is claimed.
+
+The E1M1 full input and keyboard tests retain hashes `0xaac341ce` and
+`0x41a2a970`. The unchanged 3,677-command E1M2 recording still exits on its final
+command with 4 HP in two fresh core runs, but its hash is now `0x36a3ec92`.
+The accepted local record is `.local/replays/E1M2-switch103.json`, SHA-256
+`4885e5e7c93a7f122ca756723dd661964db8e864e376f3e26862c47dc3fc05fb`.
+Its command array is unchanged from the cadence record (canonical JSON SHA-256
+`3db99ec9a479e3ad2c42d6902821e9dc9ee160424ba8b9356bb1e2d0dfe59529`).
+The first native build attempt rejected a multiline compile-time replay value;
+minifying the developer-only define fixed packaging without changing any input
+command. The fresh release macOS run confirms Impeller Metal and visibly reaches
+`E1M2 REPLAY COMPLETE`: 3,677/3,677 commands, hash `0x36a3ec92`, 4 HP, zero armor,
+23/41 kills, and zero dropped game tics. Log:
+`.local/qa/episode-2026-09-06/native-e1m2-switch103.log`.
+
+It retained 191 surfaces, created 206 buffers and six textures, and uploaded
+748,788 initial bytes plus 167,091,600 bytes in 155,488 dynamic uploads. After
+120 excluded warmup samples (worst setup span 574.368 ms), 12,449 Flutter
+`FrameTiming.totalSpan` samples measured p95 1.739 ms, p99 2.010 ms, maximum
+17.058 ms and one 16.667 ms deadline miss. The window was explicitly raised
+by command 1,259; earlier samples include background time. These are diagnostic
+whole-run timings, not an all-foreground benchmark, GPU timings, presented-frame
+measurements or a 60 FPS guarantee. The successful test process was closed.
+
+The ordinary Wasm/WebGPU release was rebuilt and audited: `main.dart.wasm`
+1,979,471 bytes, original bundled WAD 4,196,020 bytes, no dart2js fallback.
+This is build evidence, not a new browser playthrough.
+
+## Original E1M4 strict replay
+
+The disposable planner now produces a complete original E1M4 command stream:
+6,871 commands, normal exit exactly on the last command, 56 HP, hash
+`0x2d9975d8`. It starts with the unmodified map, default pistol inventory,
+medium skill, enabled monsters and seed zero. The route collects a dropped
+shotgun, supplies, chaingun, blue key and yellow key, opens lines 571/564 and
+uses exit line 554. Only `TicCmd` input changes gameplay state.
+
+An independent Sol reviewer inspected the generator and its imported planner,
+finding no direct changes to player position, health, inventory, original map
+or game configuration. The mutable planning-sector mirror is separate from the
+simulation. Two reviewer processes each ran two fresh strict replays; root ran
+the verifier separately as well. All agree on the terminal tic, health and hash.
+The generator itself is not rerun by the read-only verifier.
+
+Accepted local record: `.local/replays/E1M4-switch103.json`, SHA-256
+`ea26c7318c130ed35d464970a89f8ffa431e7bb0085418652854ef96934609d3`.
+Canonical command-array SHA-256:
+`106da2de1415865fbcf86f039be6ac0a7ca60a4503dbf816810439645dc5c6b3`.
+Planner, recording and developer replay target remain local spike artifacts,
+not production code or release assets.
+
+The new release macOS target also completed visibly on Impeller Metal, with
+the ordinary fixed-tic `DoomRuntimeGame` consuming replay-exclusive input:
+
+| E1M4 live result | Observed value |
+|---|---:|
+| Commands / final hash | 6,871 / `0x2d9975d8` |
+| Health / armor / kills | 56 / 100 / 39 of 54 |
+| Dropped game tics | 0 |
+| Surfaces / created buffers / created textures | 169 / 228 / 6 |
+| Initial upload bytes | 700,176 |
+| Dynamic uploads / bytes | 157,998 / 129,560,640 |
+| Warmup excluded / measured samples | 120 / 23,422 |
+| Flutter total-span p95 / p99 / maximum | 3.268 / 4.620 / 26.573 ms |
+| 16.667 ms deadline misses | 1 |
+
+The excluded setup maximum was 3,341.058 ms. The window was raised near the
+beginning and explicitly focused by clicking its container late in the run;
+foreground was visually confirmed at command 5,570 and at completion. The click
+did not affect the replay: its final hash still exactly matches the plain core.
+Whole-run frame samples can include background time and are not an all-foreground
+benchmark, GPU/presented-frame timing or a 60 FPS guarantee. The visible final
+screen shows the exit switch, both keys, 100% armor, 56% health and an idle shotgun.
+Log: `.local/qa/episode-2026-09-06/native-e1m4-switch103.log`. The test window was
+closed afterward; the ordinary `lib/main.dart` release target is restored.
+
 ## Still required
 
 Normal-gameplay start-to-exit command streams and independent replay verification
-for E1M3–E1M9, including secret-exit traversal and the complete E1M8 boss route.
+for E1M3 and E1M5–E1M9, including secret-exit traversal and the complete E1M8 boss route.
 The Codex goal must remain active until that evidence exists.
 
-The corrected-cadence E1M3 checkpoint reaches its yellow key alive at tic 1,408,
-31 HP, hash `0xd58ef4a7`, with an exact fresh replay. It has not reached the normal
-or secret exit. E1M4/E1M8/E1M9 planner failures are not full-level evidence.
+With switch 103 corrected, E1M3 reaches its yellow key alive at tic 1,408,
+31 HP, hash `0x639a728b`, with an exact fresh replay. It returns through the
+previously blocked door and crosses line 568 at tic 1,745 with 41 HP, but the
+current blue-key approach dies in combat at tic 1,890. It has not reached the
+normal or secret exit. E1M8 reaches its first Baron encounter at tic 2,601,
+92 HP, 104 chaingun bullets and eight kills, hash `0x0efc5896`, after the
+barrel trap, armor/weapon collection, pursuit combat and the tag-6 lift.
+Neither that checkpoint nor E1M5/E1M6/E1M7/E1M9 failed runs prove completion.
+E1M6's authored medikit-and-retreat tactic survives its red-key/tag-10 ambush at
+tic 1,167, 48 HP, eight kills, hash `0x1e671cdc`; fresh replay and a repeated
+run agree. It has not been continued to an exit.
 
 Separate confirmed gameplay follow-ups remain: blue armor currently saves the
 same fraction as green armor, and ammo/backpack capacity rules are incomplete.

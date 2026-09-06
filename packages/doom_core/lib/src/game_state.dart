@@ -3692,6 +3692,7 @@ _DoorKind _doorKind(int special) => switch (special) {
   LineSpecial.redDoorOpenStay ||
   LineSpecial.yellowDoorOpenStay ||
   LineSpecial.shootDoorOpenStayRepeat ||
+  LineSpecial.switchDoorOpenStayOnce ||
   LineSpecial.switchDoorOpenStay ||
   LineSpecial.walkDoorOpenStayOnce ||
   LineSpecial.walkDoorOpenStayRepeat => _DoorKind.openStay,

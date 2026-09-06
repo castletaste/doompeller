@@ -410,17 +410,61 @@ the normal nor secret exit has been reached.
 E1M5's yellow-room route now crosses sectors 92, 91, 79, 78 and 63 without
 crossing the one-sided wall that invalidated the earlier planner. Its exact
 fresh-replayed checkpoint is tic 8,374, 95 HP, yellow key, hash `0x20293768`.
-Later attempts are not yet accepted terminal recordings.
+The newer saved checkpoint activates switch 189: tic 9,240, 49 HP, yellow
+key, sector 21, hash `0xa508e99a`, repeated in two fresh simulations. Sector
+82 is opening (floor 0, ceiling 44 at that tic); this is not a blue-key or
+level-exit claim. A later two-fresh-replay prefix reaches sector 127 at tic
+11,060, 18 HP, yellow key, hash `0x8f991e6c`. The next attempt dies in combat
+before sector 128; blue and the exit remain unproven.
 
 E1M6's authored medikit-and-retreat tactic survives its red-key/tag-10 ambush at
 tic 1,167, 48 HP, eight kills, hash `0x1e671cdc`; fresh replay and a repeated
-run agree. Continuation now reaches tic 5,231 with red and blue keys, 100 HP,
+run agree. Continuation reaches tic 5,231 with red and blue keys, 100 HP,
 71 armor, 45 kills and hash `0xeabea644`, verified by replaying the entire input
 prefix from startup. A longer failed run remains alive at tic 16,000 with hash
 `0xf0d2cff1` but loops around a lift. Further planner investigations found stale
 blocked-cell memory and a manual-door helper that could turn back through a
 door after momentum had already crossed its threshold. None of these failed
-or partial runs proves a level exit. E1M7 and E1M9 also remain incomplete.
+or partial runs proves a level exit.
+
+The newer E1M6 route resolves the yellow-key prerequisite: crossing line 460
+lowers sector 151 from 192 to 48; manual door 1119, the small stairs and blue
+door 1139 then become traversable. Two fresh input replays confirm all three
+keys at tic 5,935, 37 HP, 100 armor, hash `0xeb3374ee`; and passage through
+yellow door 1089 at tic 6,775, 38 HP, hash `0xd0cfd863`. The route subsequently
+activates both S103 switches 822/tag 1 and 599/tag 3. Its independently repeated
+input-only final-room checkpoint is tic 7,939, 37 HP, 87 armor, sector 20,
+hash `0x23ca4252`. This is not a complete E1M6 replay: subsequent attempts die
+in the final-room fight before exit 627. No native E1M6 render or frame result
+is claimed from these command-only checks.
+
+All of these changes are confined to the disposable input driver. The
+production core remains `f3bd4d1`. Two additional bot failure modes were
+identified: a kill-count change can exhaust the driver's route-retry budget
+despite actual progression, and navigation can keep pushing into a melee
+enemy instead of retreating between shots. An attempted eastern-pit shortcut
+was rejected correctly by production collision: lines 736/981/982 carry
+`ML_BLOCKING` (flags 5), despite being two-sided with sufficient vertical
+clearance. A sector graph that ignores that bit is not evidence of a core
+collision defect. E1M7 and E1M9 also remain incomplete.
+
+E1M7 now crosses yellow door 905, triggers the tag-9 lift through line 248,
+and enters the red-key room through line 644. The saved two-fresh-replay
+checkpoint is tic 6,210, 23 HP, 40 armor, 39 kills, yellow key, sector 73,
+hash `0xa50c9298`. The subsequent route bypasses the room's one-sided wall
+652, but dies in the red-key fight; neither red nor blue is claimed collected.
+
+E1M9's saved two-fresh-replay checkpoint reaches both yellow and red keys:
+tic 829, 93 HP, shotgun, 15 of 72 kills, hash `0x2df9f32a`. The next combat
+cluster prevents the attempted continuation. Its no-monster topology checks
+are not accepted gameplay evidence, and neither blue nor an exit is claimed.
+
+All new checkpoints above use original DOOM1.WAD, medium skill, monsters,
+seed 0 and input replay from the default spawn/loadout. The local WAD was
+rechecked at 4,196,020 bytes with MD5 `f0cefca49926d00903cf57551d901abe`.
+The E1M6 final-room prefix was additionally reviewed and repeated
+by a separate agent: 7,939 commands, hash `0x23ca4252`; its input-only JSON
+SHA-256 is `b0650dcad678c9134f552619861ec6d3c47e87409e80b23ecfa5712a897237c0`.
 
 Separate confirmed gameplay follow-ups remain: blue armor currently saves the
 same fraction as green armor, and ammo/backpack capacity rules are incomplete.

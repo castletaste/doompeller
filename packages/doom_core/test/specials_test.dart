@@ -767,13 +767,13 @@ void main() {
         ),
         const GameConfig(monsters: false),
       );
-      for (int i = 0; i < 20; i++) {
+      for (int i = 0; i < 60; i++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }
       expect(game.player.x, lessThan(toFixed(128)));
     });
 
-    test('a drop taller than 24 units is rejected', () {
+    test('the player may descend a drop taller than 24 units', () {
       final List<Sector> sectors = twoSectors(backFloor: -25);
       final GameState game = GameState.start(
         testMap(
@@ -783,10 +783,11 @@ void main() {
         ),
         const GameConfig(monsters: false),
       );
-      for (int i = 0; i < 20; i++) {
+      for (int i = 0; i < 60; i++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }
-      expect(game.player.x, lessThan(toFixed(128)));
+      expect(game.player.x, greaterThan(toFixed(128)));
+      expect(game.player.z, toFixed(-25));
     });
 
     test('low destination ceiling rejects a tall actor', () {

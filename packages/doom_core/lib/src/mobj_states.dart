@@ -24,6 +24,8 @@ enum MobjStateAction {
   monsterMelee,
   demonMelee,
   monsterMissile,
+  baronAttack,
+  bossDeath,
   barrelExplode,
 }
 
@@ -471,6 +473,84 @@ _Catalog _buildCatalog() {
     ],
   );
 
+  b.chain(
+    type: MobjType.baron,
+    phase: MobjState.spawn,
+    name: 'BOSS_STAND',
+    sprite: 'BOSS',
+    frames: const <_Frame>[_Frame(0, 10), _Frame(1, 10)],
+    loop: true,
+  );
+  final int baronSee = b.chain(
+    type: MobjType.baron,
+    phase: MobjState.see,
+    name: 'BOSS_WALK',
+    sprite: 'BOSS',
+    frames: const <_Frame>[
+      _Frame(0, 3),
+      _Frame(0, 3),
+      _Frame(1, 3),
+      _Frame(1, 3),
+      _Frame(2, 3),
+      _Frame(2, 3),
+      _Frame(3, 3),
+      _Frame(3, 3),
+    ],
+    loop: true,
+  );
+  final int baronAttack = b.chain(
+    type: MobjType.baron,
+    phase: MobjState.melee,
+    name: 'BOSS_ATTACK',
+    sprite: 'BOSS',
+    frames: const <_Frame>[
+      _Frame(4, 8),
+      _Frame(5, 8),
+      _Frame(6, 8, action: MobjStateAction.baronAttack),
+    ],
+    next: baronSee,
+  );
+  b.starts[(MobjType.baron, MobjState.missile)] = baronAttack;
+  b.chain(
+    type: MobjType.baron,
+    phase: MobjState.pain,
+    name: 'BOSS_PAIN',
+    sprite: 'BOSS',
+    frames: const <_Frame>[_Frame(7, 2), _Frame(7, 2)],
+    next: baronSee,
+  );
+  b.chain(
+    type: MobjType.baron,
+    phase: MobjState.death,
+    name: 'BOSS_DEATH',
+    sprite: 'BOSS',
+    frames: const <_Frame>[
+      _Frame(8, 8),
+      _Frame(9, 8),
+      _Frame(10, 8),
+      _Frame(11, 8),
+      _Frame(12, 8),
+      _Frame(13, 8),
+      _Frame(14, -1, action: MobjStateAction.bossDeath),
+    ],
+  );
+  b.chain(
+    type: MobjType.baron,
+    phase: MobjState.raise,
+    name: 'BOSS_RAISE',
+    sprite: 'BOSS',
+    frames: const <_Frame>[
+      _Frame(14, 8),
+      _Frame(13, 8),
+      _Frame(12, 8),
+      _Frame(11, 8),
+      _Frame(10, 8),
+      _Frame(9, 8),
+      _Frame(8, 8),
+    ],
+    next: baronSee,
+  );
+
   void decoration({
     required MobjType type,
     required String sprite,
@@ -503,6 +583,21 @@ _Catalog _buildCatalog() {
   decoration(type: MobjType.rocketBox, sprite: 'BROK', frame: 0);
   decoration(type: MobjType.bulletBox, sprite: 'AMMO', frame: 0);
   decoration(type: MobjType.shellBox, sprite: 'SBOX', frame: 0);
+  b.chain(
+    type: MobjType.tallRedTorch,
+    phase: MobjState.spawn,
+    name: 'TALL_RED_TORCH',
+    sprite: 'TRED',
+    frames: const <_Frame>[
+      _Frame(0, 4, fullBright: true),
+      _Frame(1, 4, fullBright: true),
+      _Frame(2, 4, fullBright: true),
+      _Frame(3, 4, fullBright: true),
+    ],
+    loop: true,
+  );
+  decoration(type: MobjType.chainsaw, sprite: 'CSAW', frame: 0);
+  decoration(type: MobjType.rocketAmmo, sprite: 'ROCK', frame: 0);
 
   b.chain(
     type: MobjType.barrel,
@@ -547,6 +642,76 @@ _Catalog _buildCatalog() {
       _Frame(2, 6, fullBright: true),
       _Frame(3, 6, fullBright: true),
       _Frame(4, 6, fullBright: true),
+    ],
+    removeOnExpiry: true,
+  );
+
+  b.chain(
+    type: MobjType.playerRocket,
+    phase: MobjState.spawn,
+    name: 'PLAYER_ROCKET_FLY',
+    sprite: 'MISL',
+    frames: const <_Frame>[
+      _Frame(0, 1, fullBright: true),
+      _Frame(1, 1, fullBright: true),
+    ],
+    loop: true,
+  );
+  b.chain(
+    type: MobjType.playerRocket,
+    phase: MobjState.death,
+    name: 'PLAYER_ROCKET_EXPLODE',
+    sprite: 'MISL',
+    frames: const <_Frame>[
+      _Frame(1, 8, fullBright: true),
+      _Frame(2, 6, fullBright: true),
+      _Frame(3, 4, fullBright: true),
+    ],
+    removeOnExpiry: true,
+  );
+
+  b.chain(
+    type: MobjType.baronShot,
+    phase: MobjState.spawn,
+    name: 'BARON_BALL_FLY',
+    sprite: 'BAL7',
+    frames: const <_Frame>[
+      _Frame(0, 4, fullBright: true),
+      _Frame(1, 4, fullBright: true),
+    ],
+    loop: true,
+  );
+  b.chain(
+    type: MobjType.baronShot,
+    phase: MobjState.death,
+    name: 'BARON_BALL_IMPACT',
+    sprite: 'BAL7',
+    frames: const <_Frame>[
+      _Frame(2, 6, fullBright: true),
+      _Frame(3, 6, fullBright: true),
+      _Frame(4, 6, fullBright: true),
+    ],
+    removeOnExpiry: true,
+  );
+
+  b.chain(
+    type: MobjType.teleportFog,
+    phase: MobjState.spawn,
+    name: 'TELEPORT_FOG',
+    sprite: 'TFOG',
+    frames: const <_Frame>[
+      _Frame(0, 6, fullBright: true),
+      _Frame(1, 6, fullBright: true),
+      _Frame(0, 6, fullBright: true),
+      _Frame(1, 6, fullBright: true),
+      _Frame(2, 6, fullBright: true),
+      _Frame(3, 6, fullBright: true),
+      _Frame(4, 6, fullBright: true),
+      _Frame(5, 6, fullBright: true),
+      _Frame(6, 6, fullBright: true),
+      _Frame(7, 6, fullBright: true),
+      _Frame(8, 6, fullBright: true),
+      _Frame(9, 6, fullBright: true),
     ],
     removeOnExpiry: true,
   );

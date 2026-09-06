@@ -317,6 +317,20 @@ void main() {
         throwsRangeError,
         reason: 'an out-of-range flash must not silently sample garbage',
       );
+      scene.materials.setFixedColorMap(0);
+      expect(
+        scene.materials.materials.every((m) => m.fixedColorMap == 0),
+        isTrue,
+      );
+      scene.materials.setFixedColorMap(-1);
+      expect(
+        scene.materials.materials.every((m) => m.fixedColorMap == -1),
+        isTrue,
+      );
+      expect(
+        () => scene.materials.materials.first.fixedColorMap = -2,
+        throwsRangeError,
+      );
     });
 
     test('cutout mode follows the surface kind', () {

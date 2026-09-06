@@ -5,6 +5,7 @@ import 'dart:ui' show Canvas;
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
+import 'package:flame/game.dart' as flame;
 import 'package:flame_3d/camera.dart';
 import 'package:flame_3d/components.dart';
 import 'package:flame_3d/game.dart';
@@ -1744,7 +1745,7 @@ final class SkyMeshComponent extends CameraLockedMeshComponent {
 /// not authoritative. Deriving the quaternion from forward/right/up keeps the
 /// weapon stable through yaw and pitch even when `target` changes directly.
 class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
-  ViewLockedWeaponComponent({required super.mesh, this.weaponDistance = 0.04});
+  ViewLockedWeaponComponent({required super.mesh, this.weaponDistance = 2});
 
   final double weaponDistance;
 
@@ -1753,12 +1754,35 @@ class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
     final forward = camera.forward.normalized();
     final right = forward.cross(camera.up)..normalize();
     final up = right.cross(forward)..normalize();
+    final verticalScale =
+        2 * weaponDistance * math.tan(camera.fovY * math.pi / 360);
+    final aspectRatio = _cameraAspectRatio(camera);
     position.setFrom(camera.position + forward * weaponDistance);
+    // Weapon vertices are normalized 320x200 psprite coordinates: one local
+    // unit spans the full viewport on either axis. Place the physical quad
+    // beyond DoomCamera's near plane for Flame's pre-render AABB cull, then
+    // scale it to the view plane so its projected size remains unchanged.
+    scale.setValues(verticalScale * aspectRatio, verticalScale, verticalScale);
     rotation.setFrom(
       Quaternion.fromRotation(Matrix3.columns(right, up, -forward))
         ..normalize(),
     );
   }
+}
+
+double _cameraAspectRatio(CameraComponent3D camera) {
+  // The runtime performs an initial camera sync in its constructor, before
+  // Flame has received its first layout. MaxViewport tries to read the parent
+  // game's canvas size in that state, which is not available yet.
+  final parent = camera.parent;
+  if (parent is flame.FlameGame && !parent.hasLayout) {
+    return 4 / 3;
+  }
+  final size = camera.viewport.virtualSize;
+  if (!size.x.isFinite || !size.y.isFinite || size.x <= 0 || size.y <= 0) {
+    return 4 / 3;
+  }
+  return size.x / size.y;
 }
 
 /// Upright actor sprite that rotates only around world Y.

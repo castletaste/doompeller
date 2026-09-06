@@ -39,7 +39,7 @@ uniform DoomMaterial {
   vec4 atlasSize;
   // (paletteIndex, lightScale, distanceScale, alphaThreshold)
   vec4 palette;
-  // (maxLightRow, invulnerabilityRow, unused, unused)
+  // (maxLightRow, invulnerabilityRow, fixedColorMap, unused)
   vec4 lighting;
 } doom_material;
 
@@ -110,7 +110,9 @@ void main() {
   float maxLightRow = doom_material.lighting.x;
   float lightRow;
 
-  if (lightRowOverride >= 0.0) {
+  if (doom_material.lighting.z >= 0.0) {
+    lightRow = doom_material.lighting.z;
+  } else if (lightRowOverride >= 0.0) {
     // An explicit row, used by the invulnerability map and by any surface that
     // needs a fixed shade.
     lightRow = lightRowOverride;
@@ -128,7 +130,7 @@ void main() {
   }
 
   lightRow = clamp(lightRow, 0.0, max(colorMapRows - 1.0, 0.0));
-  if (fuzz) {
+  if (fuzz && doom_material.lighting.z < 0.0) {
     lightRow = max(lightRow, floor(maxLightRow * 0.75));
   }
 

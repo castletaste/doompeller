@@ -25,6 +25,7 @@ final class DoomHudSnapshot {
     required this.armor,
     required this.bullets,
     required this.shells,
+    this.rockets = 0,
     required this.weapon,
     required this.keys,
     required this.kills,
@@ -44,6 +45,7 @@ final class DoomHudSnapshot {
       armor = 0,
       bullets = 50,
       shells = 0,
+      rockets = 0,
       weapon = core.Weapon.pistol,
       keys = const <core.Key>{},
       kills = 0,
@@ -61,6 +63,7 @@ final class DoomHudSnapshot {
   final int armor;
   final int bullets;
   final int shells;
+  final int rockets;
   final core.Weapon weapon;
   final Set<core.Key> keys;
   final int kills;
@@ -76,6 +79,8 @@ final class DoomHudSnapshot {
 }
 
 abstract interface class DoomRuntimeView {
+  core.LevelExit? get levelExit;
+
   ValueListenable<DoomHudSnapshot> get hud;
 
   ValueListenable<DoomAutomapSnapshot> get automap;

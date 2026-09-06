@@ -2,6 +2,7 @@ import 'package:doom_wad/doom_wad.dart';
 
 import 'angles.dart';
 import 'config.dart';
+import 'episode.dart';
 import 'fixed.dart';
 import 'map_runtime.dart';
 import 'mobj.dart';
@@ -34,6 +35,10 @@ const int _weaponBottom = 128;
 const int _weaponMovePerTic = 6;
 const int _wallPuffImpactOffset = 4 * kFracUnit;
 const int _actorImpactOffset = 10 * kFracUnit;
+const int _radiationSuitDuration = 60 * kTicRate;
+const int _invisibilityDuration = 60 * kTicRate;
+const int _invulnerabilityDuration = 30 * kTicRate;
+const int _lightAmplificationDuration = 120 * kTicRate;
 
 int _integerSqrtFloor(int value) {
   if (value <= 1) return value < 0 ? 0 : value;
@@ -52,6 +57,18 @@ final class _WeaponFlashState {
 
   final int frame;
   final int tics;
+}
+
+final class _TeleportDestination {
+  const _TeleportDestination(this.x, this.y, this.angle, this.sectorIndex);
+  final int x;
+  final int y;
+  final int angle;
+  final int sectorIndex;
+}
+
+final class _MoveOutcome {
+  bool teleported = false;
 }
 
 final class _WeaponFireState {
@@ -80,6 +97,9 @@ const List<_WeaponFlashState> _chaingunFlashA = <_WeaponFlashState>[
 ];
 const List<_WeaponFlashState> _chaingunFlashB = <_WeaponFlashState>[
   _WeaponFlashState(1, 5),
+];
+const List<_WeaponFlashState> _rocketFlash = <_WeaponFlashState>[
+  _WeaponFlashState(0, 8),
 ];
 
 const List<_WeaponFireState> _fistStates = <_WeaponFireState>[
@@ -111,6 +131,17 @@ const List<_WeaponFireState> _chaingunStates = <_WeaponFireState>[
   _WeaponFireState(1, 4, action: _WeaponAction.fire, flash: _chaingunFlashB),
   _WeaponFireState(1, 0, action: _WeaponAction.refire),
 ];
+const List<_WeaponFireState> _rocketLauncherStates = <_WeaponFireState>[
+  _WeaponFireState(0, 8),
+  _WeaponFireState(1, 1, action: _WeaponAction.fire, flash: _rocketFlash),
+  _WeaponFireState(0, 12),
+  _WeaponFireState(0, 0, action: _WeaponAction.refire),
+];
+const List<_WeaponFireState> _chainsawStates = <_WeaponFireState>[
+  _WeaponFireState(0, 4, action: _WeaponAction.fire),
+  _WeaponFireState(1, 4, action: _WeaponAction.fire),
+  _WeaponFireState(1, 0, action: _WeaponAction.refire),
+];
 
 /// Integer-only 35 Hz game simulation. Its iteration order is spawn order;
 /// removal is deferred to the end of each tic so callbacks cannot reorder it.
@@ -130,14 +161,35 @@ class GameState {
     _spawnMapThings();
   }
 
-  static GameState start(MapData map, GameConfig config, {int seed = 0}) =>
-      GameState._(MapRuntime(map), config, seed);
+  static GameState start(
+    MapData map,
+    GameConfig config, {
+    int seed = 0,
+    PlayerLoadout? loadout,
+  }) {
+    final GameState state = GameState._(MapRuntime(map), config, seed);
+    if (loadout != null) {
+      state._health = loadout.health;
+      state._playerMobj.health = loadout.health;
+      state._armor = loadout.armor;
+      state._bullets = loadout.ammo.bullets;
+      state._shells = loadout.ammo.shells;
+      state._rockets = loadout.ammo.rockets;
+      state._weapon = loadout.weapon;
+      state._ownedWeapons
+        ..clear()
+        ..addAll(loadout.ownedWeapons);
+    }
+    return state;
+  }
 
   final MapRuntime _runtime;
   final GameConfig config;
   final int initialSeed;
   final DoomRandom _random;
   final List<Mobj> _mobjs = <Mobj>[];
+  final List<_TeleportDestination> _teleportDestinations =
+      <_TeleportDestination>[];
   final List<SectorChange> _changes = <SectorChange>[];
   final List<SoundEvent> _sounds = <SoundEvent>[];
   final List<SwitchTextureChange> _switchChanges = <SwitchTextureChange>[];
@@ -146,7 +198,13 @@ class GameState {
   int _tic = 0;
   int _nextId = 1;
   late Mobj _playerMobj;
-  int _health = 100, _armor = 0, _bullets = 50, _shells = 0;
+  int _health = 100, _armor = 0, _bullets = 50, _shells = 0, _rockets = 0;
+  int _radiationSuitTics = 0;
+  int _invisibilityTics = 0;
+  int _invulnerabilityTics = 0;
+  int _lightAmplificationTics = 0;
+  bool _computerMap = false;
+  bool _berserk = false;
   Weapon _weapon = Weapon.pistol;
   Weapon? _pendingWeapon;
   WeaponPhase _weaponPhase = WeaponPhase.ready;
@@ -258,6 +316,19 @@ class GameState {
   int get playerSectorIndex => _playerMobj.sectorIndex;
   bool get levelComplete => _levelComplete;
   bool get usedSecretExit => _secretExit;
+  LevelExit? get levelExit => !_levelComplete || _health <= 0
+      ? null
+      : LevelExit(
+          mapName: _runtime.map.name,
+          secret: _secretExit,
+          loadout: PlayerLoadout(
+            health: _health,
+            armor: _armor,
+            ammo: Ammo(bullets: _bullets, shells: _shells, rockets: _rockets),
+            weapon: _weapon,
+            ownedWeapons: _ownedWeapons,
+          ),
+        );
   PlayerView get player {
     final int ceiling = _runtime.sectors[_playerMobj.sectorIndex].ceilingHeight;
     final int viewHeight = _health > 0 ? _livingViewHeight : _deathViewHeight;
@@ -271,10 +342,18 @@ class GameState {
       viewZ: bobbedViewZ < highestViewZ ? bobbedViewZ : highestViewZ,
       health: _health,
       armor: _armor,
-      ammo: Ammo(bullets: _bullets, shells: _shells),
+      ammo: Ammo(bullets: _bullets, shells: _shells, rockets: _rockets),
       weapon: _weapon,
       bob: _bob,
       keys: Set<Key>.unmodifiable(_keys),
+      powers: PowerupView(
+        radiationSuitTics: _radiationSuitTics,
+        invisibilityTics: _invisibilityTics,
+        invulnerabilityTics: _invulnerabilityTics,
+        lightAmplificationTics: _lightAmplificationTics,
+        computerMap: _computerMap,
+        berserk: _berserk,
+      ),
       weaponAnimation: WeaponAnimation(
         weapon: _weapon,
         phase: _weaponPhase,
@@ -288,6 +367,7 @@ class GameState {
 
   void runTic(TicCmd cmd) {
     _tic++;
+    _tickPowerups();
     _tickSwitchButtons();
     _tickMovers();
     if (_health > 0) {
@@ -301,6 +381,15 @@ class GameState {
     _mobjs.removeWhere((Mobj m) => m.removed);
   }
 
+  void _tickPowerups() {
+    if (_radiationSuitTics > 0) _radiationSuitTics--;
+    if (_invulnerabilityTics > 0) _invulnerabilityTics--;
+    if (_lightAmplificationTics > 0) _lightAmplificationTics--;
+    if (_invisibilityTics > 0 && --_invisibilityTics == 0) {
+      _playerMobj.flags &= ~MobjFlags.shadow;
+    }
+  }
+
   void _spawnMapThings() {
     for (final Thing thing in _runtime.map.things) {
       if (!_enabledForSkill(thing) ||
@@ -308,7 +397,17 @@ class GameState {
         continue;
       }
       final MobjInfo? info = _infoForEdNum(thing.type);
-      if (info?.id == MobjType.player) {
+      if (info?.id == MobjType.teleportSpot) {
+        final int x = toFixed(thing.x), y = toFixed(thing.y);
+        _teleportDestinations.add(
+          _TeleportDestination(
+            x,
+            y,
+            degreesToAngle(thing.angle),
+            _runtime.sectorAt(x, y),
+          ),
+        );
+      } else if (info?.id == MobjType.player) {
         _playerMobj = _add(_playerInfo, thing.x, thing.y, thing.angle, 100);
       } else if (info != null) {
         final Mobj spawned = _add(
@@ -360,17 +459,24 @@ class GameState {
   }
 
   void _tickPlayer(TicCmd cmd) {
-    _playerMobj.angle = normalizeAngle(
-      _playerMobj.angle + (cmd.angleTurn << 16),
-    );
-    if (cmd.changingWeapon) _selectWeapon(cmd.requestedWeapon);
-    final int forward = wrap32(cmd.forwardMove * _playerThrustPerCommand);
-    final int side = wrap32(cmd.sideMove * _playerThrustPerCommand);
-    if (_playerMobj.isOnGround) {
-      _playerMobj.thrust(_playerMobj.angle, forward);
-      _playerMobj.thrust(normalizeAngle(_playerMobj.angle - kAng90), side);
+    final bool movementFrozen = _playerMobj.reactionTime > 0;
+    if (movementFrozen) {
+      _playerMobj.reactionTime--;
+    } else {
+      _playerMobj.angle = normalizeAngle(
+        _playerMobj.angle + (cmd.angleTurn << 16),
+      );
     }
-    _moveMomentum(_playerMobj);
+    if (cmd.changingWeapon) _selectWeapon(cmd.requestedWeapon);
+    if (!movementFrozen) {
+      final int forward = wrap32(cmd.forwardMove * _playerThrustPerCommand);
+      final int side = wrap32(cmd.sideMove * _playerThrustPerCommand);
+      if (_playerMobj.isOnGround) {
+        _playerMobj.thrust(_playerMobj.angle, forward);
+        _playerMobj.thrust(normalizeAngle(_playerMobj.angle - kAng90), side);
+      }
+      _moveMomentum(_playerMobj);
+    }
     _playerMobj.momX = fixedMul(_playerMobj.momX, 0xe800);
     _playerMobj.momY = fixedMul(_playerMobj.momY, 0xe800);
     int bob =
@@ -397,6 +503,8 @@ class GameState {
       1 => Weapon.pistol,
       2 => Weapon.shotgun,
       3 => Weapon.chaingun,
+      4 => Weapon.rocketLauncher,
+      5 => Weapon.chainsaw,
       _ => _weapon,
     };
     _queueWeapon(requested);
@@ -464,6 +572,11 @@ class GameState {
       _weaponPhase = WeaponPhase.lowering;
       return;
     }
+    if (_weapon == Weapon.rocketLauncher && _rockets == 0) {
+      _pendingWeapon = _bullets > 0 ? Weapon.pistol : Weapon.fist;
+      _weaponPhase = WeaponPhase.lowering;
+      return;
+    }
     if ((_weapon == Weapon.pistol || _weapon == Weapon.chaingun) &&
         _bullets == 0) {
       _pendingWeapon = Weapon.fist;
@@ -499,6 +612,8 @@ class GameState {
     Weapon.pistol => _pistolStates,
     Weapon.shotgun => _shotgunStates,
     Weapon.chaingun => _chaingunStates,
+    Weapon.rocketLauncher => _rocketLauncherStates,
+    Weapon.chainsaw => _chainsawStates,
   };
 
   void _enterWeaponState(int index, {required bool attacking}) {
@@ -558,7 +673,8 @@ class GameState {
     switch (_weapon) {
       case Weapon.fist:
         _emitPlayerSound('DSPUNCH');
-        _hitscan(64 * kFracUnit, 2 + (_random.next() % 10));
+        final int damage = 2 + (_random.next() % 10);
+        _hitscan(64 * kFracUnit, _berserk ? damage * 10 : damage);
       case Weapon.pistol:
         _emitPlayerSound('DSPISTOL');
         _bullets--;
@@ -577,6 +693,13 @@ class GameState {
             spread: _random.nextSigned() << 17,
           );
         }
+      case Weapon.rocketLauncher:
+        _emitPlayerSound('DSRLAUNC');
+        _rockets--;
+        _spawnPlayerRocket();
+      case Weapon.chainsaw:
+        _emitPlayerSound('DSSAWFUL');
+        _hitscan(65 * kFracUnit, 2 * (1 + (_random.next() % 10)));
     }
     _shootSpecialLine();
   }
@@ -810,6 +933,7 @@ class GameState {
     int dy, {
     bool allowSlide = true,
     bool traceLargeMoves = true,
+    _MoveOutcome? outcome,
   }) {
     if (dx == 0 && dy == 0) return true;
     // Step-driven actors keep the existing fine-grained trace. Persistent
@@ -818,6 +942,7 @@ class GameState {
       final int magnitude = approxDistance(dx, dy);
       final int maxTrace = toFixed(8);
       if (magnitude > maxTrace) {
+        final _MoveOutcome traceOutcome = outcome ?? _MoveOutcome();
         final int parts = (magnitude + maxTrace - 1) ~/ maxTrace;
         final int stepX = dx ~/ parts;
         final int stepY = dy ~/ parts;
@@ -834,9 +959,11 @@ class GameState {
             partY,
             allowSlide: allowSlide,
             traceLargeMoves: false,
+            outcome: traceOutcome,
           )) {
             return false;
           }
+          if (traceOutcome.teleported) return true;
         }
         return true;
       }
@@ -896,6 +1023,7 @@ class GameState {
             0,
             allowSlide: false,
             traceLargeMoves: traceLargeMoves,
+            outcome: outcome,
           );
         }
         return _tryMove(
@@ -904,6 +1032,7 @@ class GameState {
           dy,
           allowSlide: false,
           traceLargeMoves: traceLargeMoves,
+          outcome: outcome,
         );
       }
     }
@@ -965,7 +1094,9 @@ class GameState {
     if (wasOnFloor || m.z < m.floorZ) {
       m.z = m.floorZ;
     }
-    _crossSpecials(m, oldX, oldY, nx, ny);
+    if (_crossSpecials(m, oldX, oldY, nx, ny)) {
+      outcome?.teleported = true;
+    }
     return true;
   }
 
@@ -984,12 +1115,23 @@ class GameState {
     }
     final int firstX = m.momX ~/ 2;
     final int firstY = m.momY ~/ 2;
-    if (!_tryMove(m, firstX, firstY, traceLargeMoves: false)) return false;
+    final _MoveOutcome outcome = _MoveOutcome();
+    if (!_tryMove(
+      m,
+      firstX,
+      firstY,
+      traceLargeMoves: false,
+      outcome: outcome,
+    )) {
+      return false;
+    }
+    if (outcome.teleported) return true;
     return _tryMove(
       m,
       m.momX - firstX,
       m.momY - firstY,
       traceLargeMoves: false,
+      outcome: outcome,
     );
   }
 
@@ -1010,10 +1152,10 @@ class GameState {
     return (before < 0 && after >= 0) || (before > 0 && after <= 0);
   }
 
-  void _crossSpecials(Mobj activator, int oldX, int oldY, int newX, int newY) {
+  bool _crossSpecials(Mobj activator, int oldX, int oldY, int newX, int newY) {
     final bool isPlayer = identical(activator, _playerMobj);
     if (!isPlayer && (!activator.info.isMonster || activator.health <= 0)) {
-      return;
+      return false;
     }
     for (
       int lineIndex = 0;
@@ -1022,6 +1164,9 @@ class GameState {
     ) {
       final Linedef line = _runtime.map.linedefs[lineIndex];
       if (line.special == 0) continue;
+      if (isPlayer && _monsterOnlyTeleportSpecials.contains(line.special)) {
+        continue;
+      }
       if (!isPlayer && !_monsterWalkSpecials.contains(line.special)) continue;
       final MapVertex a = _runtime.map.vertices[line.v1];
       final MapVertex b = _runtime.map.vertices[line.v2];
@@ -1047,6 +1192,7 @@ class GameState {
           _activatedOnceLines.contains(lineIndex)) {
         continue;
       }
+      bool teleported = false;
       switch (dispatch) {
         case _LineDispatchKind.walkDoor:
           _activateDoor(line, allowTagZeroBack: false);
@@ -1060,6 +1206,16 @@ class GameState {
           _activateFloor(line);
         case _LineDispatchKind.walkStair:
           _activateStairs(line);
+        case _LineDispatchKind.walkLight:
+          _activateTaggedLight(line, 35);
+        case _LineDispatchKind.walkTeleport:
+          teleported = _activateTeleport(
+            lineIndex,
+            line,
+            activator,
+            oldX,
+            oldY,
+          );
         case _LineDispatchKind.walkExit:
           _completeExit(
             lineIndex,
@@ -1074,7 +1230,98 @@ class GameState {
       if (_isOneShotWalkSpecial(line.special)) {
         _activatedOnceLines.add(lineIndex);
       }
+      if (teleported) return true;
     }
+    return false;
+  }
+
+  bool _activateTeleport(
+    int lineIndex,
+    Linedef line,
+    Mobj activator,
+    int crossingStartX,
+    int crossingStartY,
+  ) {
+    if (activator.isMissile ||
+        !_runtime.isOnFrontSide(lineIndex, crossingStartX, crossingStartY)) {
+      return false;
+    }
+    final _TeleportDestination? destination = _teleportDestination(line.tag);
+    if (destination == null) return false;
+    final bool isPlayer = identical(activator, _playerMobj);
+    final List<Mobj> stomped = <Mobj>[];
+    for (final Mobj other in _mobjs) {
+      if (identical(other, activator) ||
+          other.removed ||
+          !other.isShootable ||
+          fixedAbs(destination.x - other.x) >=
+              activator.radius + other.radius ||
+          fixedAbs(destination.y - other.y) >=
+              activator.radius + other.radius) {
+        continue;
+      }
+      if (!isPlayer) return false;
+      stomped.add(other);
+    }
+    for (final Mobj other in stomped) {
+      _damage(other, 10000, activator);
+    }
+    final int sourceX = activator.x;
+    final int sourceY = activator.y;
+    final int sourceZ = activator.z;
+    final SectorRuntime sector = _runtime.sectors[destination.sectorIndex];
+    activator.x = destination.x;
+    activator.y = destination.y;
+    activator.z = sector.floorHeight;
+    activator.floorZ = sector.floorHeight;
+    activator.ceilingZ = sector.ceilingHeight;
+    activator.dropOffZ = sector.floorHeight;
+    activator.sectorIndex = destination.sectorIndex;
+    activator.angle = destination.angle;
+    activator.momX = 0;
+    activator.momY = 0;
+    activator.momZ = 0;
+    if (isPlayer) activator.reactionTime = 18;
+    final Mobj sourceFog = _spawnTeleportFog(sourceX, sourceY, sourceZ);
+    _emitMobjSound('DSTELEPT', sourceFog);
+    final int arrivalX = wrap32(
+      destination.x + fixedMul(toFixed(20), Trig.cos(destination.angle)),
+    );
+    final int arrivalY = wrap32(
+      destination.y + fixedMul(toFixed(20), Trig.sin(destination.angle)),
+    );
+    final Mobj arrivalFog = _spawnTeleportFog(arrivalX, arrivalY, activator.z);
+    _emitMobjSound('DSTELEPT', arrivalFog);
+    return true;
+  }
+
+  _TeleportDestination? _teleportDestination(int tag) {
+    for (final int sectorIndex in _runtime.sectorsWithTag(tag)) {
+      for (final _TeleportDestination destination in _teleportDestinations) {
+        if (destination.sectorIndex == sectorIndex) return destination;
+      }
+    }
+    return null;
+  }
+
+  Mobj _spawnTeleportFog(int x, int y, int z) {
+    final Mobj fog = _add(
+      _teleportFogInfo,
+      fixedToInt(x),
+      fixedToInt(y),
+      0,
+      _teleportFogInfo.spawnHealth,
+    );
+    final int sectorIndex = _runtime.sectorAt(x, y, fallback: fog.sectorIndex);
+    final SectorRuntime sector = _runtime.sectors[sectorIndex];
+    fog.x = x;
+    fog.y = y;
+    fog.z = z;
+    fog.sectorIndex = sectorIndex;
+    fog.floorZ = sector.floorHeight;
+    fog.ceilingZ = sector.ceilingHeight;
+    fog.dropOffZ = sector.floorHeight;
+    return fog;
   }
 
   void _useLine() {
@@ -1227,6 +1474,12 @@ class GameState {
     return true;
   }
 
+  void _completeSectorExit() {
+    if (_levelComplete) return;
+    _levelComplete = true;
+    _secretExit = false;
+  }
+
   void _activateSwitchTexture(int lineIndex, Linedef line) {
     if (_isOneShotSwitchSpecial(line.special)) {
       _activatedOnceLines.add(lineIndex);
@@ -1304,54 +1557,70 @@ class GameState {
         _playerMobj.x + fixedMul(range, Trig.cos(_playerMobj.angle));
     final int rayY =
         _playerMobj.y + fixedMul(range, Trig.sin(_playerMobj.angle));
-    Linedef? selected;
-    int selectedIndex = -1;
-    int? selectedDistance;
+    final intersections = <({int index, Linedef line, int fraction})>[];
     for (var i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef line = _runtime.map.linedefs[i];
-      final MapVertex a = _runtime.map.vertices[line.v1];
-      final MapVertex b = _runtime.map.vertices[line.v2];
-      if (!_segmentsIntersect(
+      final int? fraction = _lineRayFraction(
         _playerMobj.x,
         _playerMobj.y,
         rayX,
         rayY,
-        toFixed(a.x),
-        toFixed(a.y),
-        toFixed(b.x),
-        toFixed(b.y),
-      )) {
-        continue;
-      }
-      final int distance = _distanceSquaredToLineMidpoint(line);
-      if (selectedDistance == null || distance < selectedDistance) {
-        selectedDistance = distance;
-        selected = line;
-        selectedIndex = i;
+        line,
+      );
+      if (fraction != null) {
+        intersections.add((index: i, line: line, fraction: fraction));
       }
     }
-    if (selected != null &&
-        _lineDispatchKind(selected.special, _LineActivation.shoot) ==
-            _LineDispatchKind.shootFloor &&
-        !_activatedOnceLines.contains(selectedIndex) &&
-        _activateFloor(selected)) {
-      _activateSwitchTexture(selectedIndex, selected);
-      _emitPlayerSound('DSSWTCHN');
+    intersections.sort((a, b) {
+      final int order = a.fraction.compareTo(b.fraction);
+      return order != 0 ? order : a.index.compareTo(b.index);
+    });
+    for (final intersection in intersections) {
+      final int lineIndex = intersection.index;
+      final Linedef line = intersection.line;
+      final _LineDispatchKind? dispatch = _lineDispatchKind(
+        line.special,
+        _LineActivation.shoot,
+      );
+      final bool unavailable =
+          (_isOneShotSwitchSpecial(line.special) &&
+              _activatedOnceLines.contains(lineIndex)) ||
+          _pressedSwitches.containsKey(lineIndex);
+      bool activated = false;
+      if (!unavailable) {
+        switch (dispatch) {
+          case _LineDispatchKind.shootFloor:
+            activated = _activateFloor(line);
+          case _LineDispatchKind.shootDoor:
+            activated = _activateDoor(line, allowTagZeroBack: false);
+          case null:
+            break;
+          default:
+            throw StateError('non-shoot dispatch kind $dispatch');
+        }
+      }
+      if (activated) {
+        _activateSwitchTexture(lineIndex, line);
+        _emitPlayerSound('DSSWTCHN');
+      }
+      if (_hitscanLineBlocks(lineIndex, line)) return;
     }
-  }
-
-  int _distanceSquaredToLineMidpoint(Linedef line) {
-    final MapVertex a = _runtime.map.vertices[line.v1];
-    final MapVertex b = _runtime.map.vertices[line.v2];
-    final int dx = _playerMobj.x - toFixed(a.x + b.x) ~/ 2;
-    final int dy = _playerMobj.y - toFixed(a.y + b.y) ~/ 2;
-    return dx * dx + dy * dy;
   }
 
   bool _tryActivateDoor(Linedef line) {
     final Key? required = _requiredKey(line.special);
     if (required != null && !_keys.contains(required)) return false;
     return _activateDoor(line);
+  }
+
+  void _activateTaggedLight(Linedef line, int lightLevel) {
+    if (line.tag == 0) return;
+    for (final int index in _runtime.sectorsWithTag(line.tag)) {
+      final SectorRuntime sector = _runtime.sectors[index];
+      if (sector.lightLevel == lightLevel) continue;
+      sector.lightLevel = lightLevel;
+      _changes.add(SectorChange(index, PlaneKind.light, lightLevel));
+    }
   }
 
   bool _activateDoor(Linedef line, {bool allowTagZeroBack = true}) {
@@ -1451,7 +1720,9 @@ class GameState {
           sector,
           target,
           speed: switch (line.special) {
-            LineSpecial.walkFloorLowerTurboOnce => toFixed(4),
+            LineSpecial.walkFloorLowerTurboOnce ||
+            LineSpecial.switchFloorLowerTurboRepeat ||
+            LineSpecial.walkFloorLowerTurboRepeat => toFixed(4),
             LineSpecial.switchFloorRaiseToNextHigherAndChangeOnce ||
             LineSpecial.walkFloorRaiseToNextHigherAndChangeOnce =>
               kFracUnit ~/ 2,
@@ -1829,11 +2100,28 @@ class GameState {
     final SectorRuntime sector = _runtime.sectors[_playerMobj.sectorIndex];
     switch (sector.special) {
       case SectorSpecial.damage5:
-        if (_tic % 32 == 0) _damagePlayer(5);
+        if (_radiationSuitTics == 0 &&
+            _playerMobj.isOnGround &&
+            _tic % 32 == 0) {
+          _damagePlayer(5);
+        }
       case SectorSpecial.damage10:
-        if (_tic % 32 == 0) _damagePlayer(10);
+        if (_radiationSuitTics == 0 &&
+            _playerMobj.isOnGround &&
+            _tic % 32 == 0) {
+          _damagePlayer(10);
+        }
+      case SectorSpecial.strobeFastSync || SectorSpecial.damage20Strong:
+        if (_playerMobj.isOnGround &&
+            (_radiationSuitTics == 0 || _random.next() < 5) &&
+            _tic % 32 == 0) {
+          _damagePlayer(20);
+        }
       case SectorSpecial.damage20:
-        if (_tic % 32 == 0) _damagePlayer(20);
+        if (_playerMobj.isOnGround && _tic % 32 == 0) {
+          _damagePlayer(_health <= 20 ? _health - 1 : 20);
+        }
+        if (_playerMobj.isOnGround && _health <= 10) _completeSectorExit();
       case SectorSpecial.secret:
         if (_foundSecrets.add(sector.index)) _secrets++;
     }
@@ -2104,7 +2392,7 @@ class GameState {
         if (target == null || target.health <= 0 || !_hasSight(m, target)) {
           return;
         }
-        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        _faceTarget(m, target);
         final int rayCos = Trig.cos(m.angle);
         final int raySin = Trig.sin(m.angle);
         final ({int entry, Mobj target})? hit = _monsterHitscanTarget(
@@ -2156,8 +2444,24 @@ class GameState {
         }
       case MobjStateAction.monsterMissile:
         if (target == null || target.health <= 0) return;
-        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
+        _faceTarget(m, target);
         _spawnImpShot(m);
+      case MobjStateAction.baronAttack:
+        if (target == null || target.health <= 0) return;
+        _faceTarget(m, target);
+        if (approxDistance(target.x - m.x, target.y - m.y) < toFixed(64)) {
+          _emitMobjSound('DSCLAW', m);
+          final int damage = 10 * (1 + (_random.next() % 8));
+          if (identical(target, _playerMobj)) {
+            _damagePlayer(damage, source: m);
+          } else {
+            _damage(target, damage, m);
+          }
+        } else {
+          _spawnMonsterShot(m, _baronShotInfo);
+        }
+      case MobjStateAction.bossDeath:
+        _handleBossDeath(m);
       case MobjStateAction.barrelExplode:
         _explodeBarrel(m, target ?? _playerMobj);
       case null:
@@ -2212,9 +2516,19 @@ class GameState {
     }
   }
 
-  void _spawnImpShot(Mobj source) {
+  void _faceTarget(Mobj source, Mobj target) {
+    int angle = Trig.atan2(target.y - source.y, target.x - source.x);
+    if ((target.flags & MobjFlags.shadow) != 0) {
+      angle = normalizeAngle(angle + (_random.nextSigned() << 21));
+    }
+    source.angle = angle;
+  }
+
+  void _spawnImpShot(Mobj source) => _spawnMonsterShot(source, _impShotInfo);
+
+  void _spawnMonsterShot(Mobj source, MobjInfo info) {
     final Mobj shot = _add(
-      _impShotInfo,
+      info,
       fixedToInt(source.x),
       fixedToInt(source.y),
       0,
@@ -2223,11 +2537,70 @@ class GameState {
     shot.x = source.x;
     shot.y = source.y;
     shot.z = source.z + toFixed(32);
-    shot.angle = source.angle;
-    shot.momX = fixedMul(toFixed(10), Trig.cos(shot.angle));
-    shot.momY = fixedMul(toFixed(10), Trig.sin(shot.angle));
+    final Mobj? target = source.target;
+    int angle = target == null
+        ? source.angle
+        : Trig.atan2(target.y - source.y, target.x - source.x);
+    if (target != null && (target.flags & MobjFlags.shadow) != 0) {
+      angle = normalizeAngle(angle + (_random.nextSigned() << 20));
+    }
+    shot.angle = angle;
+    shot.momX = fixedMul(toFixed(info.speed), Trig.cos(shot.angle));
+    shot.momY = fixedMul(toFixed(info.speed), Trig.sin(shot.angle));
     shot.target = source.target;
     shot.owner = source;
+    if (info.seeSound case final String sound) _emitMobjSound(sound, shot);
+  }
+
+  void _handleBossDeath(Mobj boss) {
+    if (_runtime.map.name != 'E1M8' ||
+        boss.info.id != MobjType.baron ||
+        _health <= 0) {
+      return;
+    }
+    for (final Mobj other in _mobjs) {
+      if (!identical(other, boss) &&
+          !other.removed &&
+          other.info.id == MobjType.baron &&
+          other.health > 0) {
+        return;
+      }
+    }
+    for (final int index in _runtime.sectorsWithTag(666)) {
+      final SectorRuntime sector = _runtime.sectors[index];
+      if (sector.activeMover != null) continue;
+      sector.activeMover = _FloorMover(
+        sector,
+        _lowestNeighborFloor(index),
+        speed: kFracUnit,
+        obstructed: (int nextFloor) =>
+            _sectorObstructed(index, floor: nextFloor),
+      );
+    }
+  }
+
+  void _spawnPlayerRocket() {
+    final Mobj rocket = _add(
+      _playerRocketInfo,
+      fixedToInt(_playerMobj.x),
+      fixedToInt(_playerMobj.y),
+      0,
+      1,
+    );
+    rocket.x = _playerMobj.x;
+    rocket.y = _playerMobj.y;
+    rocket.z = _playerMobj.z + toFixed(32);
+    rocket.angle = _playerMobj.angle;
+    rocket.momX = fixedMul(
+      toFixed(_playerRocketInfo.speed),
+      Trig.cos(rocket.angle),
+    );
+    rocket.momY = fixedMul(
+      toFixed(_playerRocketInfo.speed),
+      Trig.sin(rocket.angle),
+    );
+    rocket.target = _playerMobj.target;
+    rocket.owner = _playerMobj;
   }
 
   void _tickMissile(Mobj m) {
@@ -2279,8 +2652,34 @@ class GameState {
     m.momY = 0;
     m.momZ = 0;
     m.flags &= ~MobjFlags.missile;
+    if (m.info.id == MobjType.playerRocket) {
+      _emitMobjSound('DSBAREXP', m);
+      _rocketRadiusAttack(m);
+    } else if (m.info.deathSound case final String sound) {
+      _emitMobjSound(sound, m);
+    }
     _enterMobjState(m, MobjState.death);
     if (m.state != MobjState.death) m.removed = true;
+  }
+
+  void _rocketRadiusAttack(Mobj rocket) {
+    const int radius = 128;
+    final Mobj source = rocket.owner ?? rocket;
+    for (final Mobj target in List<Mobj>.of(_mobjs)) {
+      if (identical(target, rocket) || target.removed || !target.isShootable) {
+        continue;
+      }
+      final int distance = fixedToInt(
+        approxDistance(target.x - rocket.x, target.y - rocket.y),
+      );
+      if (distance >= radius || !_hasSight(rocket, target)) continue;
+      final int damage = radius - distance;
+      if (identical(target, _playerMobj)) {
+        _damagePlayer(damage, source: source);
+      } else {
+        _damage(target, damage, source);
+      }
+    }
   }
 
   bool _hasSight(Mobj a, Mobj b) {
@@ -2382,7 +2781,7 @@ class GameState {
 
   void _damagePlayer(int damage, {Mobj? source}) {
     final bool wasAlive = _health > 0;
-    if (!wasAlive) return;
+    if (!wasAlive || _invulnerabilityTics > 0) return;
     final int possibleSave = damage ~/ 3;
     final int saved = _armor < possibleSave ? _armor : possibleSave;
     _armor -= saved;
@@ -2471,6 +2870,13 @@ class GameState {
             _bullets += 20;
             _ownedWeapons.add(Weapon.chaingun);
             _queueWeapon(Weapon.chaingun);
+          case MobjType.rocketLauncher:
+            _rockets += 2;
+            _ownedWeapons.add(Weapon.rocketLauncher);
+            _queueWeapon(Weapon.rocketLauncher);
+          case MobjType.chainsaw:
+            _ownedWeapons.add(Weapon.chainsaw);
+            _queueWeapon(Weapon.chainsaw);
           case MobjType.megaHealth:
             _health = (_health + 100 > 200) ? 200 : _health + 100;
           case MobjType.soulSphere:
@@ -2481,17 +2887,22 @@ class GameState {
           case MobjType.backpack:
             _bullets += 10;
             _shells += 4;
+            _rockets += 1;
           case MobjType.berserk:
             if (_health < 100) _health = 100;
+            _berserk = true;
             _setWeapon(Weapon.fist);
-          case MobjType.invulnerability ||
-              MobjType.invisibility ||
-              MobjType.radiationSuit ||
-              MobjType.computerMap ||
-              MobjType.lightAmplification:
-            // Their timed/UI effects are outside the current E1M1 runtime
-            // subset, but they are still collectable special artifacts.
-            break;
+          case MobjType.invulnerability:
+            _invulnerabilityTics = _invulnerabilityDuration;
+          case MobjType.invisibility:
+            _invisibilityTics = _invisibilityDuration;
+            _playerMobj.flags |= MobjFlags.shadow;
+          case MobjType.radiationSuit:
+            _radiationSuitTics = _radiationSuitDuration;
+          case MobjType.computerMap:
+            _computerMap = true;
+          case MobjType.lightAmplification:
+            _lightAmplificationTics = _lightAmplificationDuration;
           case MobjType.misc0:
             if (_armor >= 100) continue;
             _armor = 100;
@@ -2514,11 +2925,10 @@ class GameState {
             _bullets += 50;
           case MobjType.shellBox:
             _shells += 20;
-          case MobjType.rocketLauncher || MobjType.rocketBox:
-            // The current weapon model has no rockets yet. Keep these E1M1
-            // pickups visible and collectable without inventing another
-            // weapon or misapplying their payload to bullets/shells.
-            break;
+          case MobjType.rocketAmmo:
+            _rockets += 1;
+          case MobjType.rocketBox:
+            _rockets += 5;
           default:
             _health = (_health + 10 > 100) ? 100 : _health + 10;
         }
@@ -2691,8 +3101,39 @@ class GameState {
     add(_weaponFrame);
     add(_weaponTics);
     add(_weaponY);
-    for (final Weapon weapon in Weapon.values) {
+    for (final Weapon weapon in const <Weapon>[
+      Weapon.fist,
+      Weapon.pistol,
+      Weapon.shotgun,
+      Weapon.chaingun,
+    ]) {
       add(_ownedWeapons.contains(weapon) ? 1 : 0);
+    }
+    if (_rockets != 0 ||
+        _ownedWeapons.contains(Weapon.rocketLauncher) ||
+        _ownedWeapons.contains(Weapon.chainsaw) ||
+        _weapon == Weapon.rocketLauncher ||
+        _weapon == Weapon.chainsaw ||
+        _pendingWeapon == Weapon.rocketLauncher ||
+        _pendingWeapon == Weapon.chainsaw) {
+      add(0x45585750); // "EXWP": extended E1 weapon inventory follows.
+      add(_rockets);
+      add(_ownedWeapons.contains(Weapon.rocketLauncher) ? 1 : 0);
+      add(_ownedWeapons.contains(Weapon.chainsaw) ? 1 : 0);
+    }
+    if (_radiationSuitTics != 0 ||
+        _invisibilityTics != 0 ||
+        _invulnerabilityTics != 0 ||
+        _lightAmplificationTics != 0 ||
+        _computerMap ||
+        _berserk) {
+      add(0x50575253); // "PWRS": active level-scoped powers follow.
+      add(_radiationSuitTics);
+      add(_invisibilityTics);
+      add(_invulnerabilityTics);
+      add(_lightAmplificationTics);
+      add(_computerMap ? 1 : 0);
+      add(_berserk ? 1 : 0);
     }
     for (final Key key in Key.values) {
       add(_keys.contains(key) ? 1 : 0);
@@ -2750,7 +3191,11 @@ class GameState {
             ? -1
             : MobjStateTable.state(m.frameState)!.replayIdentity,
       );
-      add(m.flags);
+      // MF_DROPOFF is canonical static player metadata. It was absent from
+      // the original E1M1 pin and cannot vary during play, so omit only that
+      // player bit from the compatibility hash while retaining every mutable
+      // flag (including power-up shadow state).
+      add(identical(m, _playerMobj) ? m.flags & ~MobjFlags.dropOff : m.flags);
       add(m.spriteFrame);
       add(m.momX);
       add(m.momY);
@@ -3040,8 +3485,11 @@ enum _LineDispatchKind {
   walkLift,
   walkFloor,
   walkStair,
+  walkLight,
+  walkTeleport,
   walkExit,
   shootFloor,
+  shootDoor,
 }
 
 enum _FloorTargetKind {
@@ -3067,16 +3515,17 @@ const Set<int> _useDoorSpecials = <int>{
   33,
   34,
   61,
+  63,
   99,
   103,
   134,
 };
-const Set<int> _walkDoorSpecials = <int>{2, 3, 4, 16, 75, 86, 90};
+const Set<int> _walkDoorSpecials = <int>{2, 3, 4, 16, 75, 76, 86, 90};
 const Set<int> _useCrusherSpecials = <int>{49};
 const Set<int> _walkCrusherSpecials = <int>{6, 25, 73, 77};
 const Set<int> _walkCrusherStopSpecials = <int>{57, 74};
 const Set<int> _useDonutSpecials = <int>{9};
-const Set<int> _switchDoorSpecials = <int>{61, 99, 103, 134};
+const Set<int> _switchDoorSpecials = <int>{61, 63, 99, 103, 134};
 const Set<int> _walkLiftSpecials = <int>{10, 88, 120, 121};
 const Set<int> _useLiftSpecials = <int>{21, 62, 122, 123};
 const Set<int> _walkFloorSpecials = <int>{
@@ -3090,16 +3539,21 @@ const Set<int> _walkFloorSpecials = <int>{
   59,
   82,
   91,
+  98,
   119,
   128,
 };
-const Set<int> _useFloorSpecials = <int>{18, 20, 23};
+const Set<int> _useFloorSpecials = <int>{18, 20, 23, 70};
 const Set<int> _walkStairSpecials = <int>{8};
 const Set<int> _useStairSpecials = <int>{7};
+const Set<int> _walkLightSpecials = <int>{35};
+const Set<int> _walkTeleportSpecials = <int>{39, 97, 125, 126};
+const Set<int> _monsterOnlyTeleportSpecials = <int>{125, 126};
 const Set<int> _walkExitSpecials = <int>{52, 124};
 const Set<int> _useExitSpecials = <int>{11, 51};
 const Set<int> _shootFloorSpecials = <int>{24};
-const Set<int> _monsterWalkSpecials = <int>{4, 10, 88};
+const Set<int> _shootDoorSpecials = <int>{46};
+const Set<int> _monsterWalkSpecials = <int>{4, 10, 39, 88, 97, 125, 126};
 const Map<int, _FloorTargetKind> _floorTargetKinds = <int, _FloorTargetKind>{
   5: _FloorTargetKind.raiseToLowestCeilingMinus8,
   18: _FloorTargetKind.raiseToNextHigher,
@@ -3109,6 +3563,8 @@ const Map<int, _FloorTargetKind> _floorTargetKinds = <int, _FloorTargetKind>{
   23: _FloorTargetKind.lowerToLowest,
   24: _FloorTargetKind.raise24,
   36: _FloorTargetKind.lowerTurbo,
+  70: _FloorTargetKind.lowerTurbo,
+  98: _FloorTargetKind.lowerTurbo,
   37: _FloorTargetKind.lowerToLowestAndChange,
   38: _FloorTargetKind.lowerToLowest,
   58: _FloorTargetKind.raise24,
@@ -3132,9 +3588,12 @@ final Set<int> _supportedLineSpecials = Set<int>.unmodifiable(<int>{
   ..._useFloorSpecials,
   ..._walkStairSpecials,
   ..._useStairSpecials,
+  ..._walkLightSpecials,
+  ..._walkTeleportSpecials,
   ..._walkExitSpecials,
   ..._useExitSpecials,
   ..._shootFloorSpecials,
+  ..._shootDoorSpecials,
 });
 const Set<int> _supportedSectorSpecials = <int>{
   1,
@@ -3148,6 +3607,7 @@ const Set<int> _supportedSectorSpecials = <int>{
   11,
   12,
   13,
+  16,
   17,
 };
 const Set<String> _coreSoundIds = <String>{
@@ -3155,6 +3615,7 @@ const Set<String> _coreSoundIds = <String>{
   'DSDOROPN',
   'DSDMPAIN',
   'DSDMACT',
+  'DSBAREXP',
   'DSITEMUP',
   'DSPISTOL',
   'DSPLPAIN',
@@ -3162,12 +3623,20 @@ const Set<String> _coreSoundIds = <String>{
   'DSPSTART',
   'DSPSTOP',
   'DSPUNCH',
+  'DSRLAUNC',
+  'DSSAWFUL',
   'DSSHOTGN',
   'DSSGTATK',
   'DSSGTDTH',
   'DSSGTSIT',
   'DSSWTCHN',
   'DSSWTCHX',
+  'DSTELEPT',
+  'DSBRSSIT',
+  'DSCLAW',
+  'DSBRSDTH',
+  'DSFIRSHT',
+  'DSFIRXPL',
   'DSWPNUP',
 };
 
@@ -3176,10 +3645,12 @@ _DoorKind _doorKind(int special) => switch (special) {
   LineSpecial.walkDoorCloseOnce ||
   LineSpecial.walkDoorCloseRepeat => _DoorKind.close,
   LineSpecial.walkDoorCloseWaitOpenOnce => _DoorKind.closeWaitOpen,
+  LineSpecial.walkDoorCloseWaitOpenRepeat => _DoorKind.closeWaitOpen,
   LineSpecial.doorOpenStay ||
   LineSpecial.blueDoorOpenStay ||
   LineSpecial.redDoorOpenStay ||
   LineSpecial.yellowDoorOpenStay ||
+  LineSpecial.shootDoorOpenStayRepeat ||
   LineSpecial.switchDoorOpenStay ||
   LineSpecial.walkDoorOpenStayOnce ||
   LineSpecial.walkDoorOpenStayRepeat => _DoorKind.openStay,
@@ -3217,9 +3688,12 @@ bool _isOneShotWalkSpecial(int special) => <int>{
   59,
   119,
   121,
+  35,
+  39,
+  125,
 }.contains(special);
 bool _isRepeatableSwitchSpecial(int special) =>
-    <int>{61, 62, 99, 123, 134}.contains(special);
+    <int>{46, 61, 62, 63, 70, 99, 123, 134}.contains(special);
 bool _isOneShotSwitchSpecial(int special) =>
     <int>{7, 9, 11, 18, 20, 21, 23, 24, 49, 51, 103, 122}.contains(special);
 
@@ -3251,10 +3725,16 @@ _LineDispatchKind? _lineDispatchKind(int special, _LineActivation activation) =>
         _LineDispatchKind.walkFloor,
       _LineActivation.cross when _walkStairSpecials.contains(special) =>
         _LineDispatchKind.walkStair,
+      _LineActivation.cross when _walkLightSpecials.contains(special) =>
+        _LineDispatchKind.walkLight,
+      _LineActivation.cross when _walkTeleportSpecials.contains(special) =>
+        _LineDispatchKind.walkTeleport,
       _LineActivation.cross when _walkExitSpecials.contains(special) =>
         _LineDispatchKind.walkExit,
       _LineActivation.shoot when _shootFloorSpecials.contains(special) =>
         _LineDispatchKind.shootFloor,
+      _LineActivation.shoot when _shootDoorSpecials.contains(special) =>
+        _LineDispatchKind.shootDoor,
       _ => null,
     };
 
@@ -3281,9 +3761,14 @@ List<String> linedefDispatcherCoverageIssuesForTesting() {
           _walkLiftSpecials,
           _walkFloorSpecials,
           _walkStairSpecials,
+          _walkLightSpecials,
+          _walkTeleportSpecials,
           _walkExitSpecials,
         ],
-        _LineActivation.shoot: <Set<int>>[_shootFloorSpecials],
+        _LineActivation.shoot: <Set<int>>[
+          _shootFloorSpecials,
+          _shootDoorSpecials,
+        ],
       };
   final List<String> issues = <String>[];
   final Set<int> dispatched = <int>{};
@@ -3316,6 +3801,7 @@ List<String> linedefDispatcherCoverageIssuesForTesting() {
   if (!<int>{
     ..._walkDoorSpecials,
     ..._walkLiftSpecials,
+    ..._walkTeleportSpecials,
   }.containsAll(_monsterWalkSpecials)) {
     issues.add('monster walk classifier contains an unsupported special');
   }
@@ -3337,6 +3823,30 @@ bool activateDonutForTesting(GameState game, int lineIndex) {
     );
   }
   return game._activateDonut(line);
+}
+
+/// Internal component seam for validating a real map's teleport metadata.
+/// This is deliberately not exported from doom_core.dart.
+bool activateTeleportForTesting(
+  GameState game,
+  int lineIndex,
+  int crossingStartX,
+  int crossingStartY,
+) {
+  if (lineIndex < 0 || lineIndex >= game._runtime.map.linedefs.length) {
+    throw RangeError.index(lineIndex, game._runtime.map.linedefs, 'lineIndex');
+  }
+  final Linedef line = game._runtime.map.linedefs[lineIndex];
+  if (!_walkTeleportSpecials.contains(line.special)) {
+    throw ArgumentError.value(line.special, 'lineIndex', 'not a teleport');
+  }
+  return game._activateTeleport(
+    lineIndex,
+    line,
+    game._playerMobj,
+    crossingStartX,
+    crossingStartY,
+  );
 }
 
 /// Internal test seam for proving that airborne input cannot add thrust.
@@ -3377,7 +3887,7 @@ const MobjInfo _playerInfo = MobjInfo(
   painChance: 0,
   damage: 0,
   spriteName: 'PLAY',
-  flags: MobjFlags.solid | MobjFlags.shootable,
+  flags: MobjFlags.solid | MobjFlags.shootable | MobjFlags.dropOff,
 );
 const MobjInfo _possessedInfo = MobjInfo(
   id: MobjType.possessed,
@@ -3463,6 +3973,25 @@ const MobjInfo _spectreInfo = MobjInfo(
   deathSound: 'DSSGTDTH',
   activeSound: 'DSDMACT',
 );
+const MobjInfo _baronInfo = MobjInfo(
+  id: MobjType.baron,
+  doomEdNum: 3003,
+  spawnHealth: 1000,
+  radius: 24,
+  height: 64,
+  mass: 1000,
+  speed: 8,
+  reactionTime: 8,
+  painChance: 50,
+  damage: 0,
+  spriteName: 'BOSS',
+  flags: MobjFlags.solid | MobjFlags.shootable | MobjFlags.countKill,
+  seeSound: 'DSBRSSIT',
+  attackSound: 'DSCLAW',
+  painSound: 'DSDMPAIN',
+  deathSound: 'DSBRSDTH',
+  activeSound: 'DSDMACT',
+);
 const MobjInfo _impShotInfo = MobjInfo(
   id: MobjType.troopshot,
   doomEdNum: -1,
@@ -3476,6 +4005,40 @@ const MobjInfo _impShotInfo = MobjInfo(
   damage: 3,
   spriteName: 'BAL1',
   flags: MobjFlags.missile,
+);
+const MobjInfo _playerRocketInfo = MobjInfo(
+  id: MobjType.playerRocket,
+  doomEdNum: -1,
+  spawnHealth: 1,
+  radius: 11,
+  height: 8,
+  mass: 100,
+  speed: 20,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 20,
+  spriteName: 'MISL',
+  flags: MobjFlags.missile | MobjFlags.noGravity | MobjFlags.dropOff,
+);
+const MobjInfo _baronShotInfo = MobjInfo(
+  id: MobjType.baronShot,
+  doomEdNum: -1,
+  spawnHealth: 1,
+  radius: 6,
+  height: 8,
+  mass: 100,
+  speed: 15,
+  reactionTime: 0,
+  painChance: 0,
+  damage: 8,
+  spriteName: 'BAL7',
+  flags:
+      MobjFlags.noBlockmap |
+      MobjFlags.missile |
+      MobjFlags.dropOff |
+      MobjFlags.noGravity,
+  seeSound: 'DSFIRSHT',
+  deathSound: 'DSFIRXPL',
 );
 const MobjInfo _puffInfo = MobjInfo(
   id: MobjType.puff,
@@ -3504,6 +4067,48 @@ const MobjInfo _bloodInfo = MobjInfo(
   damage: 0,
   spriteName: 'BLUD',
   flags: MobjFlags.noSector | MobjFlags.noBlockmap | MobjFlags.noGravity,
+);
+const MobjInfo _teleportFogInfo = MobjInfo(
+  id: MobjType.teleportFog,
+  doomEdNum: -1,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'TFOG',
+  flags: MobjFlags.noBlockmap | MobjFlags.noGravity,
+);
+const MobjInfo _teleportSpotInfo = MobjInfo(
+  id: MobjType.teleportSpot,
+  doomEdNum: 14,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'TFOG',
+  flags: MobjFlags.noSector | MobjFlags.noBlockmap,
+);
+const MobjInfo _tallRedTorchInfo = MobjInfo(
+  id: MobjType.tallRedTorch,
+  doomEdNum: 46,
+  spawnHealth: 1000,
+  radius: 16,
+  height: 64,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'TRED',
+  flags: MobjFlags.solid,
 );
 const MobjInfo _clipInfo = MobjInfo(
   id: MobjType.clip,
@@ -4023,6 +4628,34 @@ const MobjInfo _rocketBoxInfo = MobjInfo(
   spriteName: 'BROK',
   flags: MobjFlags.special,
 );
+const MobjInfo _chainsawInfo = MobjInfo(
+  id: MobjType.chainsaw,
+  doomEdNum: 2005,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'CSAW',
+  flags: MobjFlags.special,
+);
+const MobjInfo _rocketAmmoInfo = MobjInfo(
+  id: MobjType.rocketAmmo,
+  doomEdNum: 2010,
+  spawnHealth: 1000,
+  radius: 20,
+  height: 16,
+  mass: 100,
+  speed: 0,
+  reactionTime: 8,
+  painChance: 0,
+  damage: 0,
+  spriteName: 'ROCK',
+  flags: MobjFlags.special,
+);
 const MobjInfo _bulletBoxInfo = MobjInfo(
   id: MobjType.bulletBox,
   doomEdNum: 2048,
@@ -4053,10 +4686,13 @@ const MobjInfo _shellBoxInfo = MobjInfo(
 );
 MobjInfo? _infoForEdNum(int n) => switch (n) {
   1 => _playerInfo,
+  14 => _teleportSpotInfo,
+  46 => _tallRedTorchInfo,
   3004 => _possessedInfo,
   9 => _shotguyInfo,
   3001 => _impInfo,
   3002 => _demonInfo,
+  3003 => _baronInfo,
   58 => _spectreInfo,
   2007 => _clipInfo,
   2001 => _shotgunInfo,
@@ -4093,8 +4729,10 @@ MobjInfo? _infoForEdNum(int n) => switch (n) {
   12 => _bloodyMess2Info,
   24 => _bloodyPoolInfo,
   2003 => _rocketLauncherInfo,
+  2005 => _chainsawInfo,
   2019 => _megaArmorInfo,
   2046 => _rocketBoxInfo,
+  2010 => _rocketAmmoInfo,
   2048 => _bulletBoxInfo,
   2049 => _shellBoxInfo,
   _ => null,

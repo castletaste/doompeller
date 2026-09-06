@@ -141,6 +141,7 @@ final class _DoomAppBody extends StatelessWidget {
           setupMessage: state.setupMessage,
           selectionErrorMessage: state.errorMessage,
           onLoadIwad: wadPicker == null ? null : _pickBrowserIwad,
+          onContinue: (exit) => controller.advanceLevel(state.level!, exit),
           runtimeFactory: runtimeFactory,
           gameSurfaceBuilder: gameSurfaceBuilder,
         ),
@@ -221,6 +222,7 @@ final class _DoomReadyView extends StatefulWidget {
     required this.setupMessage,
     required this.selectionErrorMessage,
     required this.onLoadIwad,
+    required this.onContinue,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
   });
@@ -230,6 +232,7 @@ final class _DoomReadyView extends StatefulWidget {
   final String? setupMessage;
   final String? selectionErrorMessage;
   final VoidCallback? onLoadIwad;
+  final Future<void> Function(core.LevelExit) onContinue;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
 
@@ -243,6 +246,7 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
   late final FocusNode _gameFocusNode;
   String? _configurationError;
   bool _showControls = true;
+  bool _advancing = false;
   FrameHistogram? _frameProbe;
   Timer? _frameProbeWarmup;
   Timer? _frameProbeReporter;
@@ -319,6 +323,18 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     _gameFocusNode.requestFocus();
   }
 
+  Future<void> _continueEpisode() async {
+    final core.LevelExit? exit = _runtime.levelExit;
+    if (_advancing || exit == null) return;
+    setState(() => _advancing = true);
+    _runtime.clearInput();
+    try {
+      await widget.onContinue(exit);
+    } finally {
+      if (mounted) setState(() => _advancing = false);
+    }
+  }
+
   Widget _buildGameSurface(BuildContext context) {
     final custom = widget.gameSurfaceBuilder;
     if (custom != null) {
@@ -391,6 +407,7 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                     left: 10,
                     child: _ContentBadge(
                       synthetic: widget.synthetic,
+                      mapName: widget.level.map.name,
                       setupMessage: widget.setupMessage,
                     ),
                   ),
@@ -448,6 +465,16 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                       key: const Key('completion-overlay'),
                       hud: hud,
                       onRestart: _restartLevel,
+                      nextMap: _runtime.levelExit == null
+                          ? null
+                          : core.DoomEpisode.nextMap(
+                              widget.level.map.name,
+                              secret: _runtime.levelExit!.secret,
+                            ),
+                      episodeComplete: widget.level.map.name == 'E1M8',
+                      onContinue: _continueEpisode,
+                      advancing: _advancing,
+                      errorMessage: widget.selectionErrorMessage,
                     ),
                   if (hud.health <= 0 && !hud.levelComplete)
                     _ModalOverlay(
@@ -505,9 +532,14 @@ final class _PauseButton extends StatelessWidget {
 }
 
 final class _ContentBadge extends StatelessWidget {
-  const _ContentBadge({required this.synthetic, this.setupMessage});
+  const _ContentBadge({
+    required this.synthetic,
+    required this.mapName,
+    this.setupMessage,
+  });
 
   final bool synthetic;
+  final String mapName;
   final String? setupMessage;
 
   @override
@@ -526,7 +558,7 @@ final class _ContentBadge extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Text(
-          synthetic ? 'SYNTHETIC TEST MAP' : 'DEVELOPER IWAD · E1M1',
+          synthetic ? 'SYNTHETIC TEST MAP' : 'DEVELOPER IWAD · $mapName',
           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
         ),
         if (synthetic && setupMessage != null)
@@ -622,7 +654,7 @@ final class _ControlsHint extends StatelessWidget {
         Text(
           narrow
               ? 'WASD · SHIFT run · ←→ · CTRL · E'
-              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Ctrl/click fire · Space/E use · 1–4 weapon · Esc pause',
+              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
           style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
         IconButton(
@@ -690,7 +722,8 @@ final class DoomStatusBar extends StatelessWidget {
 
   static String _ammo(DoomHudSnapshot hud) => switch (hud.weapon) {
     core.Weapon.shotgun => '${hud.shells}',
-    core.Weapon.fist => '—',
+    core.Weapon.fist || core.Weapon.chainsaw => '—',
+    core.Weapon.rocketLauncher => '${hud.rockets}',
     core.Weapon.pistol || core.Weapon.chaingun => '${hud.bullets}',
   };
 
@@ -730,10 +763,20 @@ final class _IntermissionOverlay extends StatefulWidget {
     super.key,
     required this.hud,
     required this.onRestart,
+    required this.onContinue,
+    required this.nextMap,
+    required this.episodeComplete,
+    required this.advancing,
+    this.errorMessage,
   });
 
   final DoomHudSnapshot hud;
   final VoidCallback onRestart;
+  final VoidCallback onContinue;
+  final String? nextMap;
+  final bool episodeComplete;
+  final bool advancing;
+  final String? errorMessage;
 
   @override
   State<_IntermissionOverlay> createState() => _IntermissionOverlayState();
@@ -772,7 +815,15 @@ final class _IntermissionOverlayState extends State<_IntermissionOverlay>
     autofocus: true,
     onKeyEvent: (_, KeyEvent event) {
       if (event is KeyDownEvent) {
-        _finishTally();
+        if (_controller.isCompleted &&
+            widget.nextMap != null &&
+            !widget.advancing &&
+            (event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onContinue();
+        } else {
+          _finishTally();
+        }
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
@@ -791,9 +842,11 @@ final class _IntermissionOverlayState extends State<_IntermissionOverlay>
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  const Text(
-                    'LEVEL COMPLETE',
-                    style: TextStyle(
+                  Text(
+                    widget.episodeComplete
+                        ? 'EPISODE COMPLETE'
+                        : 'LEVEL COMPLETE',
+                    style: const TextStyle(
                       color: Color(0xFFC8B45A),
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
@@ -842,9 +895,30 @@ final class _IntermissionOverlayState extends State<_IntermissionOverlay>
                     style: TextStyle(color: Colors.white54, fontSize: 10),
                   ),
                   const SizedBox(height: 16),
+                  if (widget.errorMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        widget.errorMessage!,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  if (widget.nextMap != null)
+                    FilledButton(
+                      key: const Key('intermission-continue'),
+                      onPressed: widget.advancing ? null : widget.onContinue,
+                      child: Text(
+                        widget.advancing
+                            ? 'LOADING…'
+                            : 'CONTINUE TO ${widget.nextMap}',
+                      ),
+                    ),
                   FilledButton.tonal(
                     key: const Key('intermission-restart'),
-                    onPressed: widget.onRestart,
+                    onPressed: widget.advancing ? null : widget.onRestart,
                     child: const Text('RESTART LEVEL'),
                   ),
                 ],

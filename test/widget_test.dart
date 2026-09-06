@@ -30,6 +30,9 @@ Future<PreparedDoomLevel> fixtureLevel() async {
 }
 
 final class FakeRuntime implements DoomRuntimeView {
+  @override
+  core.LevelExit? levelExit;
+
   final ValueNotifier<DoomHudSnapshot> notifier =
       ValueNotifier<DoomHudSnapshot>(const DoomHudSnapshot.initial());
 

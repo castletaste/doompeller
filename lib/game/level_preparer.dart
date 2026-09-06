@@ -14,6 +14,7 @@ final class PreparedDoomLevel {
     required this.geometry,
     required this.gameConfig,
     required this.seed,
+    this.entryLoadout,
   });
 
   final DoomContent content;
@@ -22,10 +23,23 @@ final class PreparedDoomLevel {
   final CompiledLevel geometry;
   final GameConfig gameConfig;
   final int seed;
+  final PlayerLoadout? entryLoadout;
 
   /// Recreates only the deterministic simulation over this prepared level.
   /// Parsed WAD resources and compiled GPU-ready geometry stay shared.
-  GameState createGame() => GameState.start(map, gameConfig, seed: seed);
+  GameState createGame() =>
+      GameState.start(map, gameConfig, seed: seed, loadout: entryLoadout);
+
+  PreparedDoomLevel withEntryLoadout(PlayerLoadout loadout) =>
+      PreparedDoomLevel(
+        content: content,
+        resources: resources,
+        map: map,
+        geometry: geometry,
+        gameConfig: gameConfig,
+        seed: seed,
+        entryLoadout: loadout,
+      );
 
   /// Actor sprite prefixes declared by the immutable source THINGS. This must
   /// never depend on a live [GameState], because pickups and deaths remove or

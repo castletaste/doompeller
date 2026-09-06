@@ -17,6 +17,7 @@ import '../game/sound_playback.dart';
 import 'doom_scene.dart';
 import 'doom_sprite_catalog.dart';
 import 'doom_camera.dart';
+import 'palette_textures.dart';
 
 typedef DoomLevelCompleteCallback = void Function(bool secretExit);
 
@@ -92,12 +93,25 @@ const Set<String> _completionTransientSprites = <String>{
   'BLUD',
   'BEXP',
   'BAL1',
+  'BAL7',
+  'MISL',
+  'TFOG',
 };
 
 /// Production 35 Hz simulation and retained Flame 3D scene boundary.
 final class DoomRuntimeGame extends FlameGame3D
     with KeyboardEvents
     implements DoomRuntimeView {
+  @override
+  LevelExit? get levelExit => gameState.levelExit;
+
+  int _damageFlashTics = 0;
+  int _pickupFlashTics = 0;
+  int _paletteIndex = DoomPaletteVariant.normal;
+
+  /// Current renderer output; it has no effect on replay state.
+  int get paletteIndex => _paletteIndex;
+
   factory DoomRuntimeGame(
     PreparedDoomLevel level, {
     DoomInputState? input,
@@ -117,12 +131,16 @@ final class DoomRuntimeGame extends FlameGame3D
     final Set<String> requested = <String>{
       ...level.initialSpritePrefixes,
       'BAL1',
+      'BAL7',
+      'MISL',
+      'TFOG',
       'BEXP',
       'PUFF',
       'BLUD',
       'PISF',
       'SHTF',
       'CHGF',
+      'MISF',
       ...DoomWeaponSprites.supportedPrefixes,
       if (level.content.isFixture) 'TEST',
     };
@@ -430,12 +448,21 @@ final class DoomRuntimeGame extends FlameGame3D
     _previousPlayer = _currentPlayer;
     gameState.runTic(command);
     _currentPlayer = gameState.player;
+    if (_damageFlashTics > 0) _damageFlashTics--;
+    if (_pickupFlashTics > 0) _pickupFlashTics--;
+    final int damage =
+        (_previousPlayer.health - _currentPlayer.health) +
+        (_previousPlayer.armor - _currentPlayer.armor);
+    if (damage > 0) {
+      _damageFlashTics = math.max(_damageFlashTics, damage.clamp(6, 32));
+    }
     _automap.updatePlayer(
       _currentPlayer,
       sectorIndex: gameState.playerSectorIndex,
     );
     _consumeSectorJournal();
     _consumeSoundJournal();
+    _syncPalette();
     _syncActors();
     _syncWeapon();
     if (gameState.levelComplete) {
@@ -468,6 +495,9 @@ final class DoomRuntimeGame extends FlameGame3D
     final List<SoundEvent> events = _soundJournal.consumeSoundJournal().toList(
       growable: false,
     );
+    if (events.any((event) => event.soundId == 'DSITEMUP')) {
+      _pickupFlashTics = 6;
+    }
     final AudioListener listener = audioListenerFromPlayer(_currentPlayer);
     final int gameTic = gameState.tic;
     _enqueueSoundPlayback(
@@ -478,6 +508,31 @@ final class DoomRuntimeGame extends FlameGame3D
       ),
     );
   }
+
+  void _syncPalette() {
+    final powers = _currentPlayer.powers;
+    final int colorMap = _powerVisible(powers.invulnerabilityTics)
+        ? 32
+        : _powerVisible(powers.lightAmplificationTics)
+        ? 0
+        : -1;
+    scene.materials.setFixedColorMap(colorMap);
+    final int wanted = _damageFlashTics > 0
+        ? DoomPaletteVariant.damage(_damageFlashTics / 32)
+        : _pickupFlashTics > 0
+        ? DoomPaletteVariant.itemPickup(_pickupFlashTics / 6)
+        : _powerVisible(powers.radiationSuitTics)
+        ? DoomPaletteVariant.radiationSuit
+        : DoomPaletteVariant.normal;
+    final int available = wanted < level.resources.playpal.palettes.length
+        ? wanted
+        : DoomPaletteVariant.normal;
+    if (_paletteIndex == available) return;
+    _paletteIndex = available;
+    scene.setPaletteIndex(available);
+  }
+
+  static bool _powerVisible(int tics) => tics > 128 || (tics & 8) != 0;
 
   void _enqueueSoundPlayback(Future<void> Function() operation) {
     final Future<void> previous = _soundPlaybackTail;
@@ -654,14 +709,18 @@ final class DoomRuntimeGame extends FlameGame3D
     if (exact == null) {
       return;
     }
+    // Doom psprites use a 320x200 screen-space origin. Weapon patches retain
+    // their original negative offsets, so sx=0 maps to -160/320 and larger sy
+    // values move the sprite down the screen.
+    const double anchorX = -0.5;
     final double anchorY =
-        -0.48 + (animation.y - 32 + fixedToDouble(_currentPlayer.bob)) / 200;
+        (100.5 - animation.y - fixedToDouble(_currentPlayer.bob)) / 200;
     final current = _weaponSprite;
     if (current == null) {
       _weaponSprite = scene.addWeaponSprite(
         WeaponSpriteInstance(
           lumpName: exact,
-          viewAnchorX: 0,
+          viewAnchorX: anchorX,
           viewAnchorY: anchorY,
         ),
       );
@@ -674,6 +733,7 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   void _syncWeaponFlash(WeaponAnimation animation, double anchorY) {
+    const double anchorX = -0.5;
     final String? flash = animation.flashFrame < 0
         ? null
         : _weaponFlashFrameFor(animation.weapon, animation.flashFrame);
@@ -686,7 +746,7 @@ final class DoomRuntimeGame extends FlameGame3D
       _weaponFlashSprite = scene.addWeaponSprite(
         WeaponSpriteInstance(
           lumpName: flash,
-          viewAnchorX: 0,
+          viewAnchorX: anchorX,
           viewAnchorY: anchorY,
           fullBright: true,
           depthLayer: -2,
@@ -704,6 +764,8 @@ final class DoomRuntimeGame extends FlameGame3D
       Weapon.pistol => DoomWeaponSprites.pistol,
       Weapon.shotgun => DoomWeaponSprites.shotgun,
       Weapon.chaingun => DoomWeaponSprites.chaingun,
+      Weapon.rocketLauncher => DoomWeaponSprites.rocketLauncher,
+      Weapon.chainsaw => DoomWeaponSprites.chainsaw,
     };
     final String candidate = '$prefix${String.fromCharCode(65 + frame)}0';
     return level.resources.spriteNames.contains(candidate) ? candidate : null;
@@ -711,10 +773,11 @@ final class DoomRuntimeGame extends FlameGame3D
 
   String? _weaponFlashFrameFor(Weapon weapon, int frame) {
     final String? prefix = switch (weapon) {
-      Weapon.fist => null,
+      Weapon.fist || Weapon.chainsaw => null,
       Weapon.pistol => 'PISF',
       Weapon.shotgun => 'SHTF',
       Weapon.chaingun => 'CHGF',
+      Weapon.rocketLauncher => 'MISF',
     };
     if (prefix == null) return null;
     final String candidate = '$prefix${String.fromCharCode(65 + frame)}0';
@@ -750,6 +813,7 @@ final class DoomRuntimeGame extends FlameGame3D
       armor: player.armor,
       bullets: player.ammo.bullets,
       shells: player.ammo.shells,
+      rockets: player.ammo.rockets,
       weapon: player.weapon,
       keys: player.keys,
       kills: gameState.killCount,
@@ -819,6 +883,11 @@ final class DoomRuntimeGame extends FlameGame3D
 
   @override
   void restartLevel() {
+    _damageFlashTics = 0;
+    _pickupFlashTics = 0;
+    _paletteIndex = DoomPaletteVariant.normal;
+    scene.setPaletteIndex(_paletteIndex);
+    scene.materials.setFixedColorMap(-1);
     _keyboardControls.clear();
     _pointerAttackPressed = false;
     input.clear();
@@ -938,6 +1007,8 @@ final class DoomRuntimeGame extends FlameGame3D
         LogicalKeyboardKey.digit2 => 1,
         LogicalKeyboardKey.digit3 => 2,
         LogicalKeyboardKey.digit4 => 3,
+        LogicalKeyboardKey.digit5 => 4,
+        LogicalKeyboardKey.digit6 => 5,
         _ => null,
       };
       if (slot != null) {

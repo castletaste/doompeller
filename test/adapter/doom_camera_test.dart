@@ -29,7 +29,10 @@ void main() {
 
   test('sky and weapon clip depths bracket every playable world depth', () {
     const double skyNdcDepth = 0.999999;
-    const double weaponNdcDepth = -0.999999;
+    // Impeller uses the Metal/Vulkan 0..1 NDC depth convention. Keeping the
+    // weapon barely above zero puts it in front without clipping the quad.
+    const double weaponNdcDepth = 0.000001;
+    const double flashNdcDepth = 0.0000005;
     final doom = camera(doomProjection: true);
 
     double ndcDepthAt(double viewDistance) {
@@ -38,12 +41,17 @@ void main() {
     }
 
     final maxMapDiagonal = math.sqrt(2) * 65535;
+    expect(weaponNdcDepth, inInclusiveRange(0.0, 1.0));
+    expect(flashNdcDepth, greaterThan(0));
+    expect(flashNdcDepth, lessThan(weaponNdcDepth));
     expect(ndcDepthAt(maxMapDiagonal), lessThan(skyNdcDepth));
     expect(ndcDepthAt(16), greaterThan(weaponNdcDepth));
 
     final shader = File('shaders/doom_palette.vert').readAsStringSync();
     expect(shader, contains('gl_Position.z = gl_Position.w * 0.999999;'));
-    expect(shader, contains('gl_Position.z = -gl_Position.w * 0.999999;'));
+    expect(shader, contains('gl_Position.z = gl_Position.w * 0.000001;'));
+    expect(shader, contains('gl_Position.z = gl_Position.w * 0.0000005;'));
+    expect(shader, isNot(contains('gl_Position.z = -gl_Position.w')));
   });
 
   test('palette shader uses dithered COLORMAP approximation for spectres', () {

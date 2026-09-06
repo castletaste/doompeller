@@ -104,11 +104,15 @@ abstract final class DoomWeaponSprites {
   static const String pistol = 'PISG';
   static const String shotgun = 'SHTG';
   static const String chaingun = 'CHGG';
+  static const String rocketLauncher = 'MISG';
+  static const String chainsaw = 'SAWG';
 
   static const Set<String> supportedPrefixes = <String>{
     fist,
     pistol,
     shotgun,
     chaingun,
+    rocketLauncher,
+    chainsaw,
   };
 }

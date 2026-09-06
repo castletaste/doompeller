@@ -92,6 +92,7 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
   final List<double> _sectorFloors;
   final List<double> _sectorCeilings;
   int? _lastDiscoveredSector;
+  bool _hasComputerMap = false;
 
   @visibleForTesting
   int discoveryScanCount = 0;
@@ -113,6 +114,7 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
       _sectorCeilings[index] = _map.sectors[index].ceilingHeight.toDouble();
     }
     _lastDiscoveredSector = null;
+    _hasComputerMap = false;
     value = DoomAutomapSnapshot(
       isOpen: false,
       zoom: initialZoom,
@@ -133,6 +135,18 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
 
   void updatePlayer(PlayerView player, {required int sectorIndex}) {
     Set<int>? visitedLines;
+    if (player.powers.computerMap && !_hasComputerMap) {
+      _hasComputerMap = true;
+      final before = _visitedLines.length;
+      for (var index = 0; index < _map.linedefs.length; index++) {
+        if ((_map.linedefs[index].flags & LinedefFlags.dontDraw) == 0) {
+          _visitedLines.add(index);
+        }
+      }
+      if (before != _visitedLines.length) {
+        visitedLines = Set<int>.unmodifiable(_visitedLines);
+      }
+    }
     if (sectorIndex >= 0 &&
         sectorIndex < _map.sectors.length &&
         sectorIndex != _lastDiscoveredSector) {

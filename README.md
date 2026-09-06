@@ -10,6 +10,11 @@ Place `DOOM1.WAD` at `.local/doom/DOOM1.WAD`. It is the default local content
 source, so the app starts E1M1 without a chooser. `DOOM_WAD_PATH` can override
 that path on desktop.
 
+The intermission continues through episode 1 with health, armor, ammo and
+weapons retained. The E1M3 secret exit leads to E1M9, which returns to E1M4;
+E1M8 is the episode finale. See [verification](docs/VERIFICATION.md) for the
+distinction between implemented mechanics, scene checks and completed replays.
+
 ```sh
 /Users/savva/fvm/versions/stable/bin/flutter run -d macos --release
 ```
@@ -73,7 +78,7 @@ final verdicts; `PROBLEMS` exits non-zero.
 - left/right: turn
 - `Ctrl` or primary click: attack
 - `Space` or `E`: use
-- `1`–`4`: fist, pistol, shotgun, chaingun
+- `1`–`6`: fist, pistol, shotgun, chaingun, rocket launcher, chainsaw
 - `Esc`: pause/resume
 - primary-button drag: mouse yaw
 

@@ -33,15 +33,8 @@ void main(List<String> arguments) {
   if (!vertex.contains(inputSignature)) {
     _fail('the exact 20-float vertex input signature is missing');
   }
-  final depthWrites = vertex
-      .split('\n')
-      .where((line) => line.contains('gl_Position.z ='))
-      .toList(growable: false);
-  if (depthWrites.length != 3 ||
-      depthWrites.where((line) => line.contains('0.999999f')).length != 2 ||
-      !depthWrites.last.contains('0.5f')) {
-    _fail('GL-to-WebGPU depth remap is missing');
-  }
+  final depthError = webVertexDepthContractError(vertex);
+  if (depthError != null) _fail(depthError);
   if (!fragment.contains('@fragment')) _fail('fragment entry point is missing');
 
   _expectUniform(
@@ -66,6 +59,50 @@ void main(List<String> arguments) {
   stdout.writeln(
     'WebGPU shader ABI verified: 6 vertex locations, 192/48-byte uniforms',
   );
+}
+
+/// Returns an error when generated WGSL no longer preserves Doompeller's
+/// ordered sky/weapon/flash depth pins and the required GL-to-WebGPU remap.
+///
+/// flame_3d appends the final remap because vector_math projection matrices
+/// produce GL's -1..1 clip depth while WebGPU accepts 0..1. The three authored
+/// pins precede that generated assignment. Match their semantics rather than
+/// compiler-generated temporary names.
+String? webVertexDepthContractError(String vertex) {
+  final depthWrites = vertex
+      .split('\n')
+      .where((line) => line.contains('gl_Position.z ='))
+      .toList(growable: false);
+  if (depthWrites.length != 4) {
+    return 'expected three depth pins followed by the WebGPU depth remap';
+  }
+
+  bool hasPositiveWPin(String literal) {
+    final factor = RegExp(
+      r'^\s*gl_Position\.z\s*=\s*\(\s*\w+\.w\s*\*\s*' +
+          RegExp.escape(literal) +
+          r'\s*\);\s*$',
+    );
+    return depthWrites.where(factor.hasMatch).length == 1;
+  }
+
+  if (!hasPositiveWPin('0.999999f')) {
+    return 'far-plane sky depth pin is missing';
+  }
+  if (!hasPositiveWPin('0.0000005f')) {
+    return 'frontmost muzzle-flash depth pin is missing';
+  }
+  if (!hasPositiveWPin('0.000001f')) {
+    return 'first-person weapon depth pin is missing';
+  }
+
+  final remap = RegExp(
+    r'gl_Position\.z\s*=\s*\(\([^;]+\.z\s*\+\s*[^;]+\.w\)\s*\*\s*0\.5f\);',
+  );
+  if (!remap.hasMatch(depthWrites.last)) {
+    return 'GL-to-WebGPU depth remap is missing';
+  }
+  return null;
 }
 
 void _expectUniform(

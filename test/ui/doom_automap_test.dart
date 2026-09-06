@@ -282,6 +282,35 @@ final class _AutomapKeyGame extends FlameGame with KeyboardEvents {
 }
 
 void main() {
+  test('computer map reveals remote lines once and resets with the level', () {
+    final state = DoomAutomapState(_map(), _player);
+    addTearDown(state.dispose);
+    const powered = PlayerView(
+      x: 0,
+      y: 0,
+      z: 0,
+      angle: 0,
+      viewZ: 0,
+      health: 100,
+      armor: 0,
+      ammo: Ammo(),
+      weapon: Weapon.pistol,
+      bob: 0,
+      keys: <core.Key>{},
+      powers: PowerupView(computerMap: true),
+    );
+    state.updatePlayer(powered, sectorIndex: -1);
+    expect(state.value.visitedLines, contains(6));
+    expect(state.value.visitedLines, isNot(contains(4)));
+    final discovered = state.value.visitedLines;
+    state.updatePlayer(powered, sectorIndex: -1);
+    expect(state.value.visitedLines, same(discovered));
+    state.reset(_player);
+    expect(state.value.visitedLines, isNot(contains(6)));
+    state.updatePlayer(powered, sectorIndex: -1);
+    expect(state.value.visitedLines, contains(6));
+  });
+
   test('painter classifies one-sided and height-transition lines', () {
     final map = _map();
     final snapshot = _snapshot(map);

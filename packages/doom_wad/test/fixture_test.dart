@@ -37,15 +37,16 @@ void main() {
       // Update this only with a deliberate fixture change: it is the tripwire
       // for accidental drift in the generator, the encoder or the BSP builder.
       // The E1 actor expansion deliberately adds generated sprite and sound
-      // lumps plus map things; no commercial bytes participate in this pin.
-      expect(DoomFixtures.hash(), 0x9b9fd35265121407);
+      // lumps plus map things; the episode continuation adds nine generated
+      // sound names. No commercial bytes participate in this pin.
+      expect(DoomFixtures.hash(), 0xbeff6842cbe7b69e);
     });
 
     test('parses as a PWAD with the expected structure', () {
       final WadFile wad = DoomFixtures.wad();
       expect(wad.kind, WadKind.pwad);
-      expect(DoomFixtures.pwadBytes().lengthInBytes, 494332);
-      expect(wad.length, 187);
+      expect(DoomFixtures.pwadBytes().lengthInBytes, 498292);
+      expect(wad.length, 196);
       expect(DoomFixtures.wadSet().mapNames(), <String>['MAP01']);
     });
 

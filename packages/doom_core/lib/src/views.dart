@@ -28,6 +28,27 @@ class WeaponAnimation {
 
 enum WeaponPhase { ready, lowering, raising, firing }
 
+/// Transient and level-scoped player powers sampled after a 35 Hz tic.
+class PowerupView {
+  const PowerupView({
+    this.radiationSuitTics = 0,
+    this.invisibilityTics = 0,
+    this.invulnerabilityTics = 0,
+    this.lightAmplificationTics = 0,
+    this.computerMap = false,
+    this.berserk = false,
+  });
+
+  static const PowerupView none = PowerupView();
+
+  final int radiationSuitTics;
+  final int invisibilityTics;
+  final int invulnerabilityTics;
+  final int lightAmplificationTics;
+  final bool computerMap;
+  final bool berserk;
+}
+
 /// Immutable renderer-facing snapshot. Coordinates are 16.16 fixed point.
 class PlayerView {
   const PlayerView({
@@ -42,12 +63,14 @@ class PlayerView {
     required this.weapon,
     required this.bob,
     required this.keys,
+    this.powers = PowerupView.none,
     this.weaponAnimation = const WeaponAnimation(weapon: Weapon.pistol),
   });
   final int x, y, z, angle, viewZ, health, armor, bob;
   final Ammo ammo;
   final Weapon weapon;
   final Set<Key> keys;
+  final PowerupView powers;
   final WeaponAnimation weaponAnimation;
 }
 

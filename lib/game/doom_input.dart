@@ -48,8 +48,8 @@ final class DoomInputState {
   void triggerPause() => _pausePending = true;
 
   void selectWeapon(int slot) {
-    if (slot < 0 || slot > 3) {
-      throw RangeError.range(slot, 0, 3, 'slot');
+    if (slot < 0 || slot > 5) {
+      throw RangeError.range(slot, 0, 5, 'slot');
     }
     _weaponPending = slot;
   }

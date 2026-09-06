@@ -7,6 +7,14 @@ existing Doom engine, or reuse of Doom's software renderer.
 
 First target level: original **E1M1** only.
 
+Current approved continuation: make the supplied original episode playable
+across **E1M1–E1M9**, including the E1M3 secret exit, E1M9 return to E1M4,
+and E1M8 boss ending. E1M1 remains the pinned regression baseline.
+
+Episode acceptance requires actual command replays under normal gameplay
+rules and a fresh replay verification. No-monster routing probes and scene
+render sweeps are diagnostics, not completed-level evidence.
+
 ## Milestones
 
 | # | Milestone | Done when |
@@ -70,4 +78,4 @@ shader, packed-buffer, dynamic-upload, visual, reload and performance probes.
 - Desktop WAD import UI beyond the developer environment path
 - iOS, Android, Windows, Linux
 - Multiplayer, demo playback compatibility with vanilla, saves
-- Doom II, episodes beyond E1M1
+- Doom II and episodes 2–4 (not present in the supplied DOOM1.WAD)

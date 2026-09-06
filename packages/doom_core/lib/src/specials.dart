@@ -23,9 +23,12 @@ abstract final class LineSpecial {
   static const int walkDoorCloseOnce = 3;
   static const int walkDoorOpenWaitCloseOnce = 4;
   static const int walkDoorCloseWaitOpenOnce = 16;
+  static const int walkDoorCloseWaitOpenRepeat = 76;
   static const int walkDoorCloseRepeat = 75;
   static const int walkDoorOpenStayRepeat = 86;
   static const int walkDoorOpenWaitCloseRepeat = 90;
+  static const int switchDoorOpenWaitCloseRepeat = 63;
+  static const int shootDoorOpenStayRepeat = 46;
   // Ceiling crushers and their in-stasis controls.
   static const int walkFastCrusherOnce = 6;
   static const int walkCrusherOnce = 25;
@@ -43,6 +46,8 @@ abstract final class LineSpecial {
   static const int switchFloorRaiseToNextHigherAndChangeOnce = 20;
   static const int walkFloorRaiseToNextHigherAndChangeOnce = 22;
   static const int walkFloorLowerTurboOnce = 36;
+  static const int switchFloorLowerTurboRepeat = 70;
+  static const int walkFloorLowerTurboRepeat = 98;
   static const int walkFloorLowerToLowestOnce = 38;
   static const int walkFloorLowerToLowestAndChangeOnce = 37;
   static const int walkFloorRaise24Once = 58;
@@ -62,6 +67,11 @@ abstract final class LineSpecial {
   static const int liftBlazeDownWaitUpSwitch = 121;
   static const int liftBlazeDownWaitUpOnce = 122;
   static const int liftBlazeDownWaitUpRepeat = 123;
+  static const int walkLightTurnOn35Once = 35;
+  static const int walkTeleportOnce = 39;
+  static const int walkTeleportRepeat = 97;
+  static const int walkMonsterTeleportOnce = 125;
+  static const int walkMonsterTeleportRepeat = 126;
   // Completion. 11/51 are S1 (front-side use once); 52/124 are W1
   // (player walk once). Keep the old aliases for source compatibility.
   static const int exitSwitchOnce = 11;
@@ -85,4 +95,5 @@ abstract final class SectorSpecial {
   static const int strobeSlowSync = 12;
   static const int strobeFastSync2 = 13;
   static const int lightFlickerSync = 17;
+  static const int damage20Strong = 16;
 }

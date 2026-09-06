@@ -144,7 +144,8 @@ const int kTicRate = 35;
 class TicCmd { int forwardMove, sideMove, angleTurn; int buttons; }
 
 class GameState {
-  static GameState start(MapData map, GameConfig config, {int seed});
+  static GameState start(MapData map, GameConfig config, {int seed, PlayerLoadout? loadout});
+  LevelExit? get levelExit;           // completed map, exit kind, immutable inventory
   int get initialSeed;                     // exact restart seed, hash-neutral
   void runTic(TicCmd cmd);
   int get tic;
@@ -184,6 +185,16 @@ classification; sound ids are the canonical DS lump names emitted by the core.
 `GameConfig.maxDonutBuildVisits` bounds donut and floor-model topology walks,
 also defaults to 65535, and is hashed with a versioned sentinel when non-default
 so the established default replay schema remains stable.
+
+Episode transitions are in-memory. `PlayerLoadout` carries health, armor,
+ammo, current weapon and immutable weapon ownership; position, keys,
+statistics, movers and transient actor/weapon state start fresh. A prepared
+level retains its entry loadout for deterministic restart. `DoomEpisode`
+maps E1M3's secret exit to E1M9, E1M9 to E1M4 and ends at E1M8.
+The app retains the completed level until successor preparation succeeds;
+request/generation fences discard obsolete loads, and failed transitions
+remain retryable. Default startup still loads the original bundled IWAD;
+file selection remains in the pause menu.
 
 Monster awareness stores the latest live sound target per reached sector.
 Traversal uses pre-indexed touching linedefs, crosses at most one
@@ -303,7 +314,8 @@ unified actor hit effects. The isolated combat oracle is pinned at
 pins use semantic actor/state identities; inserting an unused actor state or
 actor type does not change them.
 The generated PWAD itself is pinned at
-`0x9b9fd35265121407` and 494332 bytes. Spawn order is intentionally part of
+`0xbeff6842cbe7b69e` and 498292 bytes (including nine generated episode sound
+lumps). Spawn order is intentionally part of
 deterministic identity and therefore part of the hash; actor hashing itself
 sorts by stable actor id.
 

@@ -215,6 +215,16 @@ enum MobjType {
   rocketBox,
   bulletBox,
   shellBox,
+
+  /// E1 weapon and ammunition actors appended for replay identity stability.
+  chainsaw,
+  rocketAmmo,
+  playerRocket,
+
+  /// Episode-one boss and code-spawned projectile.
+  baron,
+  baronShot,
+  tallRedTorch,
 }
 
 final Map<MobjType, int> _mobjTypeReplayIdentities = () {

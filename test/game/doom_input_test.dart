@@ -3,6 +3,16 @@ import 'package:doompeller/game/doom_input.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('rocket and chainsaw slots remain one-shot TicCmd inputs', () {
+    for (final int slot in <int>[4, 5]) {
+      final input = DoomInputState()..selectWeapon(slot);
+      final command = input.consume().command;
+      expect(command.changingWeapon, isTrue);
+      expect(command.requestedWeapon, slot);
+      expect(input.consume().command, TicCmd.empty);
+    }
+    expect(() => DoomInputState().selectWeapon(6), throwsRangeError);
+  });
   test('held movement and attack become the sole TicCmd input', () {
     final input = DoomInputState()
       ..press(DoomControl.forward)

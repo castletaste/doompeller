@@ -45,11 +45,17 @@ void main() {
   // depthLayer is the fourth repurposed weight. Sky is pinned just inside the
   // far clip plane so normal depth testing can only fill background pixels;
   // the first-person weapon is pinned just inside the near plane so nearby
-  // world geometry cannot clip it. World and actor vertices write 0.
+  // world geometry cannot clip it. Impeller's clip-depth range is 0..w (not
+  // OpenGL's -w..w), so a negative weapon depth is clipped before rasterizing.
+  // World and actor vertices write 0.
   if (vertexWeights.w > 0.5) {
     gl_Position.z = gl_Position.w * 0.999999;
+  } else if (vertexWeights.w < -1.5) {
+    // Muzzle flash lies in front of the weapon even with strict less-than
+    // depth comparison; draw ordering cannot erase overlapping flash pixels.
+    gl_Position.z = gl_Position.w * 0.0000005;
   } else if (vertexWeights.w < -0.5) {
-    gl_Position.z = -gl_Position.w * 0.999999;
+    gl_Position.z = gl_Position.w * 0.000001;
   }
 
   fragTexCoord = vertexTexCoord;

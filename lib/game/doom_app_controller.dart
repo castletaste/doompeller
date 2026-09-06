@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:doom_core/doom_core.dart';
 
 import 'content_source.dart';
 import 'level_load_coordinator.dart';
@@ -84,11 +85,45 @@ final class DoomAppController extends ChangeNotifier {
   DoomAppState _state;
   int _requestGeneration = 0;
   bool _disposed = false;
+  int? _transitionRequest;
 
   DoomAppState get state => _state;
 
+  /// Keep the completed level mounted until the successor is fully prepared.
+  /// A failed load is retryable; a newer start/import invalidates this request.
+  Future<void> advanceLevel(PreparedDoomLevel from, LevelExit exit) async {
+    if (_disposed ||
+        !identical(_state.level, from) ||
+        exit.mapName != from.map.name ||
+        _transitionRequest == _requestGeneration) {
+      return;
+    }
+    final String? next = DoomEpisode.nextMap(exit.mapName, secret: exit.secret);
+    if (next == null) return;
+    final DoomAppState retained = _state;
+    final int request = ++_requestGeneration;
+    _transitionRequest = request;
+    final DoomContent content = DoomContent(
+      wads: from.content.wads,
+      mapName: next,
+      origin: from.content.origin,
+      sourcePath: from.content.sourcePath,
+    );
+    try {
+      await _load(
+        content,
+        request: request,
+        retainOnFailure: retained,
+        entryLoadout: exit.loadout,
+      );
+    } finally {
+      if (_transitionRequest == request) _transitionRequest = null;
+    }
+  }
+
   Future<void> start() async {
     final int request = ++_requestGeneration;
+    _coordinator.cancel();
     _publish(const DoomAppState.loading());
     DoomContentLoadResult result;
     try {
@@ -204,6 +239,7 @@ final class DoomAppController extends ChangeNotifier {
     required int request,
     String? setupMessage,
     DoomAppState? retainOnFailure,
+    PlayerLoadout? entryLoadout,
   }) async {
     final outcome = await _coordinator.load(
       prepare: (token) => _prepare(content, token),
@@ -216,7 +252,7 @@ final class DoomAppController extends ChangeNotifier {
       case LevelPublished<PreparedDoomLevel>(:final level):
         _publish(
           DoomAppState.ready(
-            level,
+            entryLoadout == null ? level : level.withEntryLoadout(entryLoadout),
             phase: content.isFixture
                 ? DoomAppPhase.fixtureReady
                 : DoomAppPhase.developerIwadReady,

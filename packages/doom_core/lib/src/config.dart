@@ -35,13 +35,14 @@ class GameConfig {
   final int maxDonutBuildVisits;
 }
 
-enum Weapon { fist, pistol, shotgun, chaingun }
+enum Weapon { fist, pistol, shotgun, chaingun, rocketLauncher, chainsaw }
 
 /// The three Doom keys. A locked line consumes none of them; it only gates use.
 enum Key { blue, yellow, red }
 
 class Ammo {
-  const Ammo({this.bullets = 50, this.shells = 0});
+  const Ammo({this.bullets = 50, this.shells = 0, this.rockets = 0});
   final int bullets;
   final int shells;
+  final int rockets;
 }

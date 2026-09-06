@@ -82,6 +82,37 @@ void main() {
       expect(replay.player.health, greaterThan(0));
       expect(replay.killCount, replay.totalKills);
       expect(replay.hashState(), first.hash);
+      final LevelExit exit = replay.levelExit!;
+      expect(exit.mapName, 'E1M1');
+      expect(exit.secret, isFalse);
+      final MapData secondMap = MapData.load(WadSet(<WadFile>[wad]), 'E1M2');
+      final GameState second = GameState.start(
+        secondMap,
+        productionConfig,
+        loadout: exit.loadout,
+      );
+      final Thing secondSpawn = secondMap.things.singleWhere(
+        (thing) => thing.type == 1,
+      );
+      expect(second.player.x, toFixed(secondSpawn.x));
+      expect(second.player.y, toFixed(secondSpawn.y));
+      expect(second.player.health, replay.player.health);
+      expect(second.player.armor, replay.player.armor);
+      expect(second.player.ammo.bullets, replay.player.ammo.bullets);
+      expect(second.player.ammo.shells, replay.player.ammo.shells);
+      expect(second.player.weapon, replay.player.weapon);
+      expect(second.player.keys, isEmpty);
+      expect(second.tic, 0);
+      expect(second.killCount, 0);
+      expect(second.levelExit, isNull);
+      final GameState restarted = GameState.start(
+        secondMap,
+        productionConfig,
+        loadout: exit.loadout,
+      );
+      second.runTic(const TicCmd(forwardMove: 25));
+      restarted.runTic(const TicCmd(forwardMove: 25));
+      expect(second.hashState(), restarted.hashState());
       debugPrint(first.summary);
     },
   );

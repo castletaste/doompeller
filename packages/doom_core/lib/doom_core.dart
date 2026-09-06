@@ -1,5 +1,6 @@
 export 'src/angles.dart';
 export 'src/config.dart';
+export 'src/episode.dart';
 export 'src/fixed.dart';
 export 'src/game_state.dart';
 export 'src/mobj_info.dart';

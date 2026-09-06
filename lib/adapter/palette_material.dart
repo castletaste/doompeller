@@ -71,6 +71,17 @@ final class PaletteMaterial extends Material {
   double _lightScale;
   double _distanceScale;
 
+  /// Fixed COLORMAP row for invulnerability/light amplification; -1 restores
+  /// ordinary sector and distance lighting without rewriting geometry.
+  int get fixedColorMap => _fixedColorMap;
+  int _fixedColorMap = -1;
+  set fixedColorMap(int value) {
+    if (value < -1 || value >= textures.data.colorMapRows) {
+      throw RangeError.range(value, -1, textures.data.colorMapRows - 1);
+    }
+    _fixedColorMap = value;
+  }
+
   /// The active PLAYPAL row. See [DoomPaletteVariant].
   int get paletteIndex => _paletteIndex;
   set paletteIndex(int value) {
@@ -141,7 +152,7 @@ final class PaletteMaterial extends Material {
         Vector4(
           data.maxLightRow.toDouble(),
           data.invulnerabilityRow.toDouble(),
-          0,
+          _fixedColorMap.toDouble(),
           0,
         ),
       );
@@ -204,6 +215,14 @@ final class PaletteMaterialCache {
   void setPaletteIndex(int paletteIndex) {
     for (final material in _materials.values) {
       material.paletteIndex = paletteIndex;
+    }
+  }
+
+  void setFixedColorMap(int row) {
+    for (final material in _materials.values) {
+      material.fixedColorMap = row < material.textures.data.colorMapRows
+          ? row
+          : -1;
     }
   }
 

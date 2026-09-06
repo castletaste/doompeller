@@ -548,12 +548,17 @@ void main() {
     final mesh = Mesh();
     final weapon = ViewLockedWeaponComponent(mesh: mesh);
     final camera = CameraComponent3D(
+      viewport: FixedResolutionViewport(resolution: Vector2(800, 600)),
       position: Vector3.zero(),
       target: Vector3(0, 0, -1),
     );
     weapon.syncToCamera(camera);
     final forward = camera.forward.normalized();
     expect(weapon.position.dot(forward), closeTo(weapon.weaponDistance, 1e-6));
+    final verticalScale =
+        2 * weapon.weaponDistance * math.tan(camera.fovY * math.pi / 360);
+    expect(weapon.scale.y, closeTo(verticalScale, 1e-6));
+    expect(weapon.scale.x, closeTo(verticalScale * 4 / 3, 1e-6));
 
     camera.target.setValues(1, 0, 0);
     weapon.syncToCamera(camera);

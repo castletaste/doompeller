@@ -217,6 +217,15 @@ abstract final class DoomFixtures {
     'DSSGTDTH',
     'DSDMPAIN',
     'DSDMACT',
+    'DSBAREXP',
+    'DSBRSDTH',
+    'DSBRSSIT',
+    'DSCLAW',
+    'DSFIRSHT',
+    'DSFIRXPL',
+    'DSRLAUNC',
+    'DSSAWFUL',
+    'DSTELEPT',
   ];
 
   /// Texture names declared in TEXTURE1, in declaration order.

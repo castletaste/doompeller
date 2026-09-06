@@ -36,6 +36,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M1 input-only and native Metal replay | 2,160 | 84 / 97 | 6/6 | `0x9c565b42` |
 | E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
+| E1M3 input-only, independently repeated strict replay | 5,927 | 42 / 1 | 53 | `0x07246777` |
 | E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
 | E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
@@ -84,6 +85,26 @@ then collects reachable healing before the final doors. Earlier late low-HP
 attempts remain failed bot strategies, not gameplay defects. No production
 source change or fresh E1M6 native-render proof accompanies this result.
 
+E1M3 now also has a complete recording on `82a9bd5`: both keys, actual W1
+stair trigger 967, completed real stair movers, manual door 624, and normal
+exit 982 on command 5,927. The final ten stair floors are
+`[56,64,72,80,88,96,104,112,120,128]`; no projected sector planes were injected
+into gameplay. Waiting and fighting from covered sector 15 preserved health
+while the stairs rose. The independent verifier confirms survival throughout,
+default inventory, first normal exit exactly last, and two matching fresh
+replays. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m3_spread/e1m3_commands.json`,
+SHA-256 `5bfb0c5d2df2b15288d8ac9df1981dffe5367060880fc9a7825f38f8516b4faa`.
+Log: `.local/qa/episode-2026-09-06/m3-full-current-independent.txt`.
+This is input-only evidence, not a new rendered or manual playthrough.
+
+The focused original-E1M1 regression rerun passed all 11 tests covering armor
+pickup, effect lifecycle, collision, large-move tunneling, full input route,
+keyboard route and retained-renderer replay lifecycle. Log:
+`.local/qa/episode-2026-09-06/current-original-e1m1-regressions.txt`.
+Edge-case component tests use original geometry with authored actor placement;
+the adapter test uses FakeGPU. These do not provide new native GPU evidence.
+
 The current E1M1 release executable logged Impeller Metal and completed all
 2,160 commands through the ordinary Flame update/render path with the expected
 hash and zero dropped tics. It created 86 surfaces, 94 GPU buffers and six
@@ -99,6 +120,10 @@ accessibility capture and the screenshot retry. Opening by bundle ID also
 launched the separately registered Debug build; that process is not release
 evidence. Both identified test processes were closed. No screenshot or manual
 playthrough is claimed for this correction.
+The follow-up agent-device doctor check also reports `APP_NOT_INSTALLED` for
+both the display name and the exact project bundle ID
+`dev.castletaste.doompeller`; installed-app discovery does not list it. No new
+test window was launched in this follow-up and no GUI success is inferred.
 
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.

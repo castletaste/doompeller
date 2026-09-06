@@ -36,6 +36,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M1 input-only and native Metal replay | 2,160 | 84 / 97 | 6/6 | `0x9c565b42` |
 | E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
+| E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
 
 All use default medium skill, monsters enabled, seed 0, and default starting
 inventory. E1M1 still proves ARM1 pickup, door, lift, damaging floor and normal
@@ -43,6 +44,18 @@ exit. E1M2's first normal exit is exactly its final command; an independent
 verifier additionally checks legal button bits, command ranges, default inventory
 and survival throughout. Its new recording and planner remain in the disposable
 `replay_m2_spread` directory, not production code.
+
+E1M8 was regenerated on the unchanged `82a9bd5` gameplay core. Both Barons
+are dead, the tag-666 floor lowered, the line-233 staircase reached its full
+13-step profile, and the final teleport/damaging-floor exit completed on the
+last command. The map-specific verifier and a separately authored verifier
+both replayed the entire stream twice from fresh default state. The independent
+verifier additionally checked survival throughout and default inventory.
+The recording is local disposable evidence:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m8_spread/e1m8_commands.json`,
+SHA-256 `7fa3c2797c6212c895cc95fab22bd4f535808b604215ae2f228dae26b32b364c`.
+Independent log: `.local/qa/episode-2026-09-06/m8-current-independent.txt`.
+No new native-render or foreground-frame claim accompanies this input replay.
 
 The current E1M1 release executable logged Impeller Metal and completed all
 2,160 commands through the ordinary Flame update/render path with the expected
@@ -63,10 +76,20 @@ playthrough is claimed for this correction.
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.
 Their former native-success evidence cannot be reused for this core revision.
-Only E1M2 has been regenerated so far. The bounded new M4 planner attempt was
-stopped after about 150 seconds without producing a recording; it is not a
-gameplay completion or a demonstrated engine defect. E1M3/M5/M6/M7/M9 partial
-checkpoints below are likewise historical, not current replay guarantees.
+E1M2 and E1M8 have now been regenerated. New current-core partial recordings
+exist for the other episode-one maps, but do not count as full exits. The
+checkpoint details near the end of this document remain historical unless
+explicitly marked otherwise.
+
+The disposable planner's new canonical-linedef candidate index passed two
+differential suites over all nine original maps: 83,850 swept queries per
+suite, comparing every relevant line against exhaustive collision, with zero
+false negatives. One suite used initial sector planes; the other closed all
+portals diagnostically to exercise initially open boundaries. This is planner
+component evidence, not gameplay or a production runtime change. Exact live
+`MapRuntime` narrowphase checks remain in use. Logs:
+`.local/qa/episode-2026-09-06/replay-candidate-index.txt` and
+`.local/qa/episode-2026-09-06/replay-candidate-index-allclosed.txt`.
 
 ## Evidence boundaries
 
@@ -460,7 +483,7 @@ also opened. That control-run window was closed as well. Logs:
 ## Still required
 
 Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M3 through E1M9, including secret-exit traversal;
+replay verification for E1M3–E1M7 and E1M9, including secret-exit traversal;
 fresh native-render verification beyond E1M1. Only episode one is present in
 the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.

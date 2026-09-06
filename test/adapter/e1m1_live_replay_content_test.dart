@@ -12,9 +12,9 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../tool/e1m1_playthrough.dart';
 import 'fake_gpu_backend.dart';
 
-const int _productionCommandCount = 2175;
-// State-entry AI cadence intentionally changes combat and the generated route.
-const int _productionHash = 0xaac341ce;
+const int _productionCommandCount = 2160;
+// Independent monster spread and portal sight intentionally change the route.
+const int _productionHash = 0x9c565b42;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

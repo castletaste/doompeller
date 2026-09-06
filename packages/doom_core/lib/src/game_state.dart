@@ -870,7 +870,7 @@ class GameState {
   }
 
   bool _hitscanLineBlocks(int index, Linedef line) {
-    if (line.blocksMovement || !line.isTwoSided) return true;
+    if (!line.isTwoSided) return true;
     final ({int bottom, int top})? opening = _runtime.openingFor(index);
     return opening == null ||
         opening.top <= _playerMobj.viewZ ||
@@ -2416,28 +2416,32 @@ class GameState {
       case MobjStateAction.monsterChase:
         if (config.monsters) _runMonsterChase(m);
       case MobjStateAction.monsterHitscan:
-        if (target == null || target.health <= 0 || !_hasSight(m, target)) {
-          return;
-        }
+        if (target == null || target.health <= 0) return;
         _faceTarget(m, target);
-        final int rayCos = Trig.cos(m.angle);
-        final int raySin = Trig.sin(m.angle);
-        final ({int entry, Mobj target})? hit = _monsterHitscanTarget(
-          m,
-          rayCos,
-          raySin,
-        );
-        if (hit == null) return;
-        final Mobj struck = hit.target;
-        final int impactDistance = hit.entry > _actorImpactOffset
-            ? hit.entry - _actorImpactOffset
-            : 0;
-        final int impactX = wrap32(m.x + fixedMul(impactDistance, rayCos));
-        final int impactY = wrap32(m.y + fixedMul(impactDistance, raySin));
         final int pellets = m.info.id == MobjType.shotguy ? 3 : 1;
         for (int i = 0; i < pellets; i++) {
+          // Each pellet owns its classic spread and damage rolls. Keep damage
+          // after spread even when the ray misses: DoomRandom is shared replay
+          // state, so skipping either draw would perturb every later action.
+          final int angle = normalizeAngle(
+            m.angle + (_random.nextSigned() << 20),
+          );
           final int damage = 3 * (1 + (_random.next() % 5));
+          final int rayCos = Trig.cos(angle);
+          final int raySin = Trig.sin(angle);
+          final ({int entry, Mobj target})? hit = _monsterHitscanTarget(
+            m,
+            rayCos,
+            raySin,
+          );
+          if (hit == null) continue;
+          final Mobj struck = hit.target;
           if (struck.health <= 0) continue;
+          final int impactDistance = hit.entry > _actorImpactOffset
+              ? hit.entry - _actorImpactOffset
+              : 0;
+          final int impactX = wrap32(m.x + fixedMul(impactDistance, rayCos));
+          final int impactY = wrap32(m.y + fixedMul(impactDistance, raySin));
           _spawnActorHitEffect(struck, damage, impactX, impactY);
           if (identical(struck, _playerMobj)) {
             _damagePlayer(damage, source: m);
@@ -2713,27 +2717,71 @@ class GameState {
     // Map loading already bounds the linedef count. Sight must scan the whole
     // bounded set: a safety cap that returns true would turn large maps into a
     // fail-open wallhack.
+    final int sightZ = a.z + a.height - (a.height >> 2);
+    var bottomSlope = b.z - sightZ;
+    var topSlope = b.z + b.height - sightZ;
     for (int i = 0; i < _runtime.map.linedefs.length; i++) {
       final Linedef l = _runtime.map.linedefs[i];
-      if (_segmentsIntersect(
-        a.x,
-        a.y,
-        b.x,
-        b.y,
-        toFixed(_runtime.map.vertices[l.v1].x),
-        toFixed(_runtime.map.vertices[l.v1].y),
-        toFixed(_runtime.map.vertices[l.v2].x),
-        toFixed(_runtime.map.vertices[l.v2].y),
-      )) {
-        if (l.blocksMovement || !l.isTwoSided) return false;
-        final ({int bottom, int top})? opening = _runtime.openingFor(i);
-        if (opening == null) return false;
-        final int lowEye = a.viewZ < b.viewZ ? a.viewZ : b.viewZ;
-        final int highEye = a.viewZ > b.viewZ ? a.viewZ : b.viewZ;
-        if (opening.top <= lowEye || opening.bottom >= highEye) return false;
+      final int? fraction = _sightLineFraction(a, b, l);
+      if (fraction == null || fraction <= 0 || fraction > kFracUnit) continue;
+      if (!l.isTwoSided) return false;
+      final ({int bottom, int top})? opening = _runtime.openingFor(i);
+      if (opening == null || opening.bottom >= opening.top) return false;
+
+      final int frontIndex = _runtime.frontSector(l);
+      final int? backIndex = _runtime.backSector(l);
+      if (backIndex == null) return false;
+      final SectorRuntime front = _runtime.sectors[frontIndex];
+      final SectorRuntime back = _runtime.sectors[backIndex];
+      if (front.floorHeight != back.floorHeight) {
+        final int slope = fixedDiv(opening.bottom - sightZ, fraction);
+        if (slope > bottomSlope) bottomSlope = slope;
       }
+      if (front.ceilingHeight != back.ceilingHeight) {
+        final int slope = fixedDiv(opening.top - sightZ, fraction);
+        if (slope < topSlope) topSlope = slope;
+      }
+      if (topSlope <= bottomSlope) return false;
     }
     return true;
+  }
+
+  /// Fraction along [a] to [b] where [line] crosses the sight trace.
+  ///
+  /// Quarter-map-unit coordinates keep the cross products and the final 16.16
+  /// fraction below 2^53 at the full signed WAD extent, so VM and Wasm retain
+  /// the same integer result without overflowing full 16.16 intermediates.
+  int? _sightLineFraction(Mobj a, Mobj b, Linedef line) {
+    const int coordinateBits = 2;
+    const int coordinateShift = kFracBits - coordinateBits;
+    final int startX = a.x >> coordinateShift;
+    final int startY = a.y >> coordinateShift;
+    final int rayX = (b.x >> coordinateShift) - startX;
+    final int rayY = (b.y >> coordinateShift) - startY;
+    final MapVertex v1 = _runtime.map.vertices[line.v1];
+    final MapVertex v2 = _runtime.map.vertices[line.v2];
+    final int lineX = (v2.x - v1.x) << coordinateBits;
+    final int lineY = (v2.y - v1.y) << coordinateBits;
+    final int denominator = rayX * lineY - rayY * lineX;
+    if (denominator == 0) return null;
+    final int offsetX = (v1.x << coordinateBits) - startX;
+    final int offsetY = (v1.y << coordinateBits) - startY;
+    final int rayNumerator = offsetX * lineY - offsetY * lineX;
+    final int lineNumerator = offsetX * rayY - offsetY * rayX;
+    final bool positive = denominator > 0;
+    if ((positive &&
+            (rayNumerator < 0 ||
+                rayNumerator > denominator ||
+                lineNumerator < 0 ||
+                lineNumerator > denominator)) ||
+        (!positive &&
+            (rayNumerator > 0 ||
+                rayNumerator < denominator ||
+                lineNumerator > 0 ||
+                lineNumerator < denominator))) {
+      return null;
+    }
+    return (rayNumerator * kFracUnit) ~/ denominator;
   }
 
   bool _segmentsIntersect(

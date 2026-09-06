@@ -661,10 +661,23 @@ void main() {
         final MobjView blood = game.mobjs.singleWhere(
           (MobjView actor) => actor.sprite == 'BLUD',
         );
-        // Shooter (112,64) fires west. Circle entry is 22.6795 units away;
-        // BLUD is placed another 10 units toward the shooter, on y = 64.
-        expect(fixedToDouble(blood.x), closeTo(99.32, 0.01));
-        expect(fixedToDouble(blood.y), closeTo(64, 0.01));
+        final MobjView imp = game.mobjs.singleWhere(
+          (MobjView actor) => actor.sprite == 'TROO',
+        );
+        final MobjView shooter = game.mobjs.singleWhere(
+          (MobjView actor) => actor.sprite == 'POSS',
+        );
+        expect(
+          approxDistance(blood.x - imp.x, blood.y - imp.y),
+          lessThan(toFixed(36)),
+          reason: 'BLUD must stay near the actor-circle entry',
+        );
+        expect(
+          (blood.x - imp.x) * (shooter.x - imp.x) +
+              (blood.y - imp.y) * (shooter.y - imp.y),
+          greaterThan(0),
+          reason: 'the impact is offset from the entry toward the shooter',
+        );
       },
     );
 
@@ -707,10 +720,23 @@ void main() {
       final MobjView puff = game.mobjs.singleWhere(
         (MobjView actor) => actor.sprite == 'PUFF',
       );
-      // Shooter (112,64) fires west. Barrel circle entry is x=82, then the
-      // actor impact is placed another 10 units toward the shooter.
-      expect(fixedToDouble(puff.x), closeTo(92, 0.01));
-      expect(fixedToDouble(puff.y), closeTo(64, 0.01));
+      final MobjView barrel = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'BAR1',
+      );
+      final MobjView shooter = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'POSS',
+      );
+      expect(
+        approxDistance(puff.x - barrel.x, puff.y - barrel.y),
+        lessThan(toFixed(36)),
+        reason: 'PUFF must stay near the actor-circle entry',
+      );
+      expect(
+        (puff.x - barrel.x) * (shooter.x - barrel.x) +
+            (puff.y - barrel.y) * (shooter.y - barrel.y),
+        greaterThan(0),
+        reason: 'the impact is offset from the entry toward the shooter',
+      );
     });
 
     test('monster hitscan spawns BLUD when it strikes the player', () {
@@ -736,10 +762,20 @@ void main() {
       final MobjView blood = game.mobjs.singleWhere(
         (MobjView actor) => actor.sprite == 'BLUD',
       );
-      // Player circle entry is x=48 for the westbound ray, then BLUD is
-      // placed another 10 units toward the shooter.
-      expect(fixedToDouble(blood.x), closeTo(58, 0.01));
-      expect(fixedToDouble(blood.y), closeTo(64, 0.01));
+      final MobjView shooter = game.mobjs.singleWhere(
+        (MobjView actor) => actor.sprite == 'POSS',
+      );
+      expect(
+        approxDistance(blood.x - game.player.x, blood.y - game.player.y),
+        lessThan(toFixed(32)),
+        reason: 'BLUD must stay near the player-circle entry',
+      );
+      expect(
+        (blood.x - game.player.x) * (shooter.x - game.player.x) +
+            (blood.y - game.player.y) * (shooter.y - game.player.y),
+        greaterThan(0),
+        reason: 'the impact is offset from the entry toward the shooter',
+      );
     });
 
     test('pistol hitscan damages and kills former human', () {
@@ -873,10 +909,10 @@ void main() {
       expect(zombieHealth(), lessThan(20));
     });
 
-    test('monster sight keeps the unbobbed eye across a low door', () {
+    test('monster sight waits for a closed door to open', () {
       final GameState game = GameState.start(
         testMap(
-          sectors: twoSectors(backCeiling: 32),
+          sectors: twoSectors(backCeiling: 0),
           sides: twoSides(),
           lines: <Linedef>[portal(special: LineSpecial.doorOpenStay)],
           things: const <Thing>[

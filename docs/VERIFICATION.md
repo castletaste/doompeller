@@ -1,13 +1,77 @@
-# Episode verification — 2026-09-06
+# Episode verification — 2026-09-07
 
 Production continuation from `7bc0245`, `85fe080`, `3106b9c`, `89063ed`, then `f3bd4d1`. Original local DOOM1.WAD, 4,196,020
 bytes, MD5 `f0cefca49926d00903cf57551d901abe`. This report is not a claim that
-every level has been completed.
+every level has been completed. The current combat correction after `cb84aa6`
+supersedes the earlier replay identities; those results remain historical.
+
+## Current monster spread and portal sight correction
+
+POSS now fires one spread ray and SPOS fires three independent spread rays.
+Every pellet consumes two angle draws and one damage draw, including misses.
+Open two-sided movement-blocking rails no longer block sight or wall-impact
+traces. Sight clips a target-body vertical interval through every crossed
+portal; incompatible successive openings cannot each independently grant sight.
+Movement collision flags and actor-state cadence are unchanged. Behavior was
+checked against the original [enemy attacks](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_enemy.c)
+and [sight rules](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_sight.c).
+This does not claim complete vanilla vertical hitscan/autoaim parity.
+
+Independent tests cover seeded misses, distinct shotgun pellet impacts,
+missed-pellet RNG consumption, single action-frame firing, rail collision vs
+visibility, wall-puff placement, partially visible targets, closed walls, and
+cumulative vertical occlusion. The new defect tests fail on the old core.
+Two independent test owners and a separate read-only Sol review checked the
+source correction. The attempted Opus review failed before running with
+`unreadable_encrypted_agent_task`; it is not an Opus approval.
+
+Current checks: root Flutter 241 PASS, core 190 PASS, WAD 139 PASS, geometry
+128 PASS with 3 intentional skips (698 passing tests). All four analyzers and
+the project-contract audit pass. E1M1 preflight remains `READY WITH FALLBACKS`:
+2,800 triangles, zero unmatched/degenerate edges/triangles and T-junctions,
+six fallback sectors with area delta 51.40640861486281. No geometry changed.
+
+| Current original-map proof | Tics | Health / armor | Kills | Hash |
+|---|---:|---:|---:|---|
+| E1M1 input-only and native Metal replay | 2,160 | 84 / 97 | 6/6 | `0x9c565b42` |
+| E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
+| E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
+
+All use default medium skill, monsters enabled, seed 0, and default starting
+inventory. E1M1 still proves ARM1 pickup, door, lift, damaging floor and normal
+exit. E1M2's first normal exit is exactly its final command; an independent
+verifier additionally checks legal button bits, command ranges, default inventory
+and survival throughout. Its new recording and planner remain in the disposable
+`replay_m2_spread` directory, not production code.
+
+The current E1M1 release executable logged Impeller Metal and completed all
+2,160 commands through the ordinary Flame update/render path with the expected
+hash and zero dropped tics. It created 86 surfaces, 94 GPU buffers and six
+textures; initial upload was 386,364 bytes, followed by 12,026 dynamic uploads
+(19,564,640 bytes). After 120 warmup samples, 7,246 `FrameTiming.totalSpan`
+samples had p95 2.747 ms, p99 3.980 ms, max 5.262 ms and zero >16.667 ms spans.
+These are Flutter timings, not GPU or presented-frame measurements. The first
+warmup span included a 48.622 s vsync delay, and foreground focus throughout
+was not verified. This is not an all-foreground 60 FPS acceptance claim.
+Log: `.local/qa/episode-2026-09-06/native-e1m1-spread.log`.
+Current GUI inspection is unverified: agent-device 0.20.3 timed out on both
+accessibility capture and the screenshot retry. Opening by bundle ID also
+launched the separately registered Debug build; that process is not release
+evidence. Both identified test processes were closed. No screenshot or manual
+playthrough is claimed for this correction.
+
+The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
+at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.
+Their former native-success evidence cannot be reused for this core revision.
+Only E1M2 has been regenerated so far. The bounded new M4 planner attempt was
+stopped after about 150 seconds without producing a recording; it is not a
+gameplay completion or a demonstrated engine defect. E1M3/M5/M6/M7/M9 partial
+checkpoints below are likewise historical, not current replay guarantees.
 
 ## Evidence boundaries
 
-- The pinned original E1M1 route uses normal medium-skill gameplay with enemies:
-  2,175 commands, current hash `0xaac341ce`, health 84, 6/6 kills. Its original-WAD
+- The previous original E1M1 route used normal medium-skill gameplay with enemies:
+  2,175 commands, historical hash `0xaac341ce`, health 84, 6/6 kills. Its original-WAD
   regression also verifies transfer of the final inventory into original E1M2.
 - Original E1M2, E1M4 and E1M8 also have input-only, default-loadout medium-skill
   terminal recordings, independently replayed from fresh state. Their exact
@@ -29,7 +93,7 @@ unmatched edges and zero degenerate triangles. BSP sector fallbacks remain;
 T-junction diagnostics remain on E1M2 (9), E1M5 (1), E1M6 (2), E1M7 (3).
 These are not a claim of pixel-perfect geometry.
 
-## Automated checks
+## Earlier automated checks (before the current combat correction)
 
 `flutter analyze` is clean; root Flutter suite passes 241 tests. Pure-Dart
 core passes 181 tests, WAD passes 139, and geometry passes 128 (3 intentionally skipped):
@@ -237,7 +301,7 @@ record is `.local/replays/E1M2-cadence.json`, SHA-256
 The old 3,722-command stream no longer reaches the exit under corrected AI;
 neither its old hash nor its old frame measurements are current evidence.
 
-## Switch 103 opens and stays open (current)
+## Switch 103 opens and stays open (historical replay evidence)
 
 Original E1M3's yellow-key return route exposed a wrong special classification:
 line 535 is special 103, tag 10. Its door sector 121 opened to ceiling 172 but
@@ -395,9 +459,13 @@ also opened. That control-run window was closed as well. Logs:
 
 ## Still required
 
-Normal-gameplay start-to-exit command streams and independent replay verification
-for E1M3, E1M5, E1M6, E1M7 and E1M9, including secret-exit traversal.
+Current-core normal-gameplay start-to-exit command streams and independent
+replay verification for E1M3 through E1M9, including secret-exit traversal;
+fresh native-render verification beyond E1M1. Only episode one is present in
+the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.
+
+The remaining checkpoint details below describe the prior core revision.
 
 With switch 103 corrected, E1M3 reaches its yellow key alive at tic 1,408,
 31 HP, hash `0x639a728b`, with an exact fresh replay. It returns through the

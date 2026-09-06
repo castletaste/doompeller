@@ -40,8 +40,10 @@ void main() {
     expect(first.totalSecrets, 1);
     expect(first.player.keys, contains(Key.blue));
     expect(first.mobjs.length, lessThanOrEqualTo(initialActors));
-    // Includes canonical dropped pickups and state-entry-paced monster AI.
-    expect(hashes.last, 0x67840199);
+    // Includes canonical dropped pickups, state-entry-paced monster AI,
+    // independent monster pellet spread, and vertical portal sight clipping.
+    // Their shared RNG and collision trajectory are replay-significant.
+    expect(hashes.last, 0x4c4136d3);
 
     final GameState second = GameState.start(
       map,

@@ -319,7 +319,9 @@ void main() {
     // future-affecting too. Monster look/chase callbacks now run only when
     // their timed actor states are entered, so their state and RNG history is
     // intentionally different from the former every-tic approximation.
-    expect(a.hashState(), 0x5ac72999);
+    // Independent monster pellet spread and the vertical sight interval also
+    // change shared RNG and the resulting combat trajectory.
+    expect(a.hashState(), 0x0c13da39);
   });
 
   test('replay hash ignores an unused actor-state table insertion', () {

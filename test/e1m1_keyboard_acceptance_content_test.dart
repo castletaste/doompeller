@@ -9,9 +9,9 @@ import '../tool/e1m1_playthrough.dart';
 
 const String _wadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
-const int _productionKeyboardCommandCount = 2157;
-// State-entry AI cadence intentionally changes combat and the sampled route.
-const int _productionKeyboardHash = 0x41a2a970;
+const int _productionKeyboardCommandCount = 2155;
+// Independent monster spread and portal sight intentionally change the route.
+const int _productionKeyboardHash = 0x55608565;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -47,6 +47,7 @@ void main() {
         seed: _productionSeed,
         includeArmor: true,
       ).run();
+      debugPrint(route.summary);
       final GameState game = GameState.start(
         map,
         productionConfig,

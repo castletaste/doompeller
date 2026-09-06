@@ -421,7 +421,8 @@ void main() {
           ],
         ),
         const GameConfig(),
-        seed: 2,
+        // Seed 3 keeps this action-entry test on a real spread ray that hits.
+        seed: 3,
       );
       for (var tic = 0; tic < 100 && _actor(zombie, 'POSS').frame != 4; tic++) {
         zombie.runTic(TicCmd.empty);

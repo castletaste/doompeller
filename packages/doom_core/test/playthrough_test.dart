@@ -40,8 +40,8 @@ void main() {
     expect(first.totalSecrets, 1);
     expect(first.player.keys, contains(Key.blue));
     expect(first.mobjs.length, lessThanOrEqualTo(initialActors));
-    // Includes the canonical dropped pickups from killed former humans.
-    expect(hashes.last, 0xc17b80de);
+    // Includes canonical dropped pickups and state-entry-paced monster AI.
+    expect(hashes.last, 0x67840199);
 
     final GameState second = GameState.start(
       map,

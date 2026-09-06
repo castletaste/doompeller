@@ -20,9 +20,9 @@ import 'e1m1_playthrough.dart';
 
 const bool _replayEnabled = bool.fromEnvironment('DOOM_E1M1_REPLAY');
 const int _productionSeed = 0;
-const int _productionCommandCount = 2151;
-// Enemy drops are simulation state; the 2,151-command route is unchanged.
-const int _productionHash = 0x59c769da;
+const int _productionCommandCount = 2175;
+// State-entry AI cadence intentionally changes combat and the generated route.
+const int _productionHash = 0xaac341ce;
 const int _frameWarmupSamples = 120;
 
 Future<void> main() async {

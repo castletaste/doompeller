@@ -9,9 +9,9 @@ import '../tool/e1m1_playthrough.dart';
 
 const String _wadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
-const int _productionKeyboardCommandCount = 2154;
-// Former-human drops now participate in replay state; input count is unchanged.
-const int _productionKeyboardHash = 0xc3964f83;
+const int _productionKeyboardCommandCount = 2157;
+// State-entry AI cadence intentionally changes combat and the sampled route.
+const int _productionKeyboardHash = 0x41a2a970;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -644,7 +644,7 @@ void main() {
 
         for (
           var tic = 0;
-          tic < 16 &&
+          tic < 32 &&
               game.mobjs.every((MobjView actor) => actor.sprite != 'BLUD');
           tic++
         ) {
@@ -684,7 +684,7 @@ void main() {
 
       for (
         var tic = 0;
-        tic < 16 &&
+        tic < 32 &&
             game.mobjs.every(
               (MobjView actor) =>
                   actor.sprite != 'PUFF' && actor.sprite != 'BLUD',
@@ -725,7 +725,7 @@ void main() {
 
       for (
         var tic = 0;
-        tic < 16 &&
+        tic < 32 &&
             game.mobjs.every((MobjView actor) => actor.sprite != 'BLUD');
         tic++
       ) {

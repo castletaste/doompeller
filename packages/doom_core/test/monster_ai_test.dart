@@ -382,6 +382,90 @@ void main() {
     expect(_monster(game, 'POSS').x, isNot(startX));
   });
 
+  test('look and chase run only on monster state-entry boundaries', () {
+    for (final (edNum, sprite, walkTics, speed) in <(int, String, int, int)>[
+      (3004, 'POSS', 4, 8),
+      (9, 'SPOS', 3, 8),
+      (3001, 'TROO', 3, 8),
+      (3002, 'SARG', 2, 10),
+    ]) {
+      final GameState game = GameState.start(
+        _openMap(<Thing>[
+          const Thing(x: 0, y: 0, angle: 0, type: 1, flags: _skills),
+          Thing(x: 512, y: 0, angle: 180, type: edNum, flags: _skills),
+        ]),
+        const GameConfig(),
+        seed: 0,
+      );
+      final int startX = _monster(game, sprite).x;
+
+      for (var tic = 0; tic < 9; tic++) {
+        game.runTic(TicCmd.empty);
+        expect(_monster(game, sprite).x, startX, reason: '$sprite tic $tic');
+      }
+
+      game.runTic(TicCmd.empty);
+      expect(
+        _monster(game, sprite).x,
+        startX - toFixed(speed),
+        reason: '$sprite first chase entry',
+      );
+      for (var tic = 1; tic < walkTics; tic++) {
+        game.runTic(TicCmd.empty);
+        expect(
+          _monster(game, sprite).x,
+          startX - toFixed(speed),
+          reason: '$sprite must not chase between state entries',
+        );
+      }
+      game.runTic(TicCmd.empty);
+      expect(
+        _monster(game, sprite).x,
+        startX - toFixed(speed * 2),
+        reason: '$sprite second chase entry',
+      );
+    }
+  });
+
+  test('monster-before-player construction defers the initial look action', () {
+    final GameState game = GameState.start(
+      _openMap(const <Thing>[
+        Thing(x: 512, y: 0, angle: 180, type: 3002, flags: _skills),
+        Thing(x: 0, y: 0, angle: 0, type: 1, flags: _skills),
+      ]),
+      const GameConfig(),
+    );
+    final int startX = _monster(game, 'SARG').x;
+
+    for (var tic = 0; tic < 9; tic++) {
+      game.runTic(TicCmd.empty);
+    }
+    expect(_monster(game, 'SARG').x, startX);
+    game.runTic(TicCmd.empty);
+    expect(_monster(game, 'SARG').x, startX - toFixed(10));
+  });
+
+  test('disabled AI still advances animation without looking or chasing', () {
+    final GameState game = GameState.start(
+      _openMap(const <Thing>[
+        Thing(x: 512, y: 0, angle: 180, type: 3004, flags: _skills),
+        Thing(x: 0, y: 0, angle: 0, type: 1, flags: _skills),
+      ]),
+      const GameConfig(monsters: false),
+    );
+    final int startX = _monster(game, 'POSS').x;
+    final int startFrame = _monster(game, 'POSS').frame;
+
+    for (var tic = 0; tic < 10; tic++) {
+      game.runTic(TicCmd.empty);
+    }
+
+    expect(_monster(game, 'POSS').frame, isNot(startFrame));
+    expect(_monster(game, 'POSS').x, startX);
+    expect(game.player.health, 100);
+    expect(game.consumeSoundJournal(), isEmpty);
+  });
+
   test('weapon noise crosses one ML_SOUNDBLOCK but not two', () {
     final List<Sector> sectors = <Sector>[
       ...twoSectors(),
@@ -582,7 +666,9 @@ void main() {
           const GameConfig(),
           seed: seed,
         );
-        game.runTic(TicCmd.empty);
+        for (var tic = 0; tic < 10; tic++) {
+          game.runTic(TicCmd.empty);
+        }
         if (_monster(game, 'POSS').frame == 4) attacks++;
       }
       return attacks;
@@ -604,7 +690,9 @@ void main() {
       const GameConfig(),
       seed: 0,
     );
-    game.runTic(TicCmd.empty);
+    for (var tic = 0; tic < 10; tic++) {
+      game.runTic(TicCmd.empty);
+    }
     expect(_monster(game, 'POSS').frame, 4);
     for (var tic = 0; tic < 26; tic++) {
       game.runTic(TicCmd.empty);

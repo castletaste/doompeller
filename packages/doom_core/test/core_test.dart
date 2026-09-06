@@ -316,8 +316,10 @@ void main() {
     // momentum; ordered actor ids, state records, and shared chase RNG remain
     // part of the same future-affecting replay identity. Barrel no-blood flags
     // and exact monster ray-circle targeting and actor hit effects are
-    // future-affecting too.
-    expect(a.hashState(), 0xe553be3f);
+    // future-affecting too. Monster look/chase callbacks now run only when
+    // their timed actor states are entered, so their state and RNG history is
+    // intentionally different from the former every-tic approximation.
+    expect(a.hashState(), 0x5ac72999);
   });
 
   test('replay hash ignores an unused actor-state table insertion', () {

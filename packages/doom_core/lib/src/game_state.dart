@@ -376,7 +376,7 @@ class GameState {
       _tickDeathView();
     }
     _tickSectorEffects();
-    _tickActors(runAi: config.monsters);
+    _tickActors();
     _collectPickups();
     _mobjs.removeWhere((Mobj m) => m.removed);
   }
@@ -462,7 +462,7 @@ class GameState {
     m.ceilingZ = _runtime.sectors[sector].ceilingHeight;
     m.reactionTime = info.reactionTime;
     final int? spawnState = MobjStateTable.start(info.id, MobjState.spawn);
-    if (spawnState != null) _setMobjState(m, spawnState);
+    if (spawnState != null) _setMobjState(m, spawnState, runAction: false);
     _mobjs.add(m);
     return m;
   }
@@ -2208,7 +2208,7 @@ class GameState {
     }
   }
 
-  void _tickActors({required bool runAi}) {
+  void _tickActors() {
     final List<Mobj> actors = List<Mobj>.of(_mobjs);
     for (final Mobj m in actors) {
       if (m.removed) continue;
@@ -2218,37 +2218,6 @@ class GameState {
         _tickMissile(m);
         continue;
       }
-      if (!runAi || !m.info.isMonster || m.health <= 0) continue;
-      if (m.state != MobjState.spawn && m.state != MobjState.see) continue;
-      if (m.reactionTime > 0) m.reactionTime--;
-      if (m.threshold > 0) m.threshold--;
-      if (m.target != null && (m.target!.health <= 0 || m.target!.removed)) {
-        m.target = null;
-        m.threshold = 0;
-      }
-      if (m.target == null && !_lookForTarget(m)) continue;
-      final Mobj target = m.target!;
-      final int distance = approxDistance(target.x - m.x, target.y - m.y);
-
-      if ((m.flags & MobjFlags.justAttacked) != 0) {
-        m.flags &= ~MobjFlags.justAttacked;
-        _newChaseDir(m, target);
-        continue;
-      }
-
-      if (distance < toFixed(64) &&
-          MobjStateTable.start(m.info.id, MobjState.melee) != null) {
-        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
-        _enterMobjState(m, MobjState.melee);
-        continue;
-      }
-      if (m.moveCount == 0 && _checkMissileRange(m, target, distance)) {
-        m.angle = Trig.atan2(target.y - m.y, target.x - m.x);
-        m.flags |= MobjFlags.justAttacked;
-        _enterMobjState(m, MobjState.missile);
-        continue;
-      }
-      _chaseMove(m, target);
     }
   }
 
@@ -2263,10 +2232,53 @@ class GameState {
       monster.target = _playerMobj;
     }
     if (monster.target == null) return false;
-    _enterMobjState(monster, MobjState.see);
     final String? seeSound = monster.info.seeSound;
     if (seeSound != null) _emitMobjSound(seeSound, monster);
+    _enterMobjState(monster, MobjState.see);
     return true;
+  }
+
+  void _runMonsterChase(Mobj monster) {
+    if (monster.health <= 0 || monster.state != MobjState.see) return;
+    if (monster.target != null &&
+        (monster.target!.health <= 0 || monster.target!.removed)) {
+      monster.target = null;
+      monster.threshold = 0;
+    }
+    if (monster.target == null) {
+      // Finding a target enters the first see state, whose chase action runs
+      // synchronously. The outer action must not run a second chase step.
+      _lookForTarget(monster);
+      return;
+    }
+    if (monster.reactionTime > 0) monster.reactionTime--;
+    if (monster.threshold > 0) monster.threshold--;
+    final Mobj target = monster.target!;
+    final int distance = approxDistance(
+      target.x - monster.x,
+      target.y - monster.y,
+    );
+
+    if ((monster.flags & MobjFlags.justAttacked) != 0) {
+      monster.flags &= ~MobjFlags.justAttacked;
+      _newChaseDir(monster, target);
+      return;
+    }
+
+    if (distance < toFixed(64) &&
+        MobjStateTable.start(monster.info.id, MobjState.melee) != null) {
+      monster.angle = Trig.atan2(target.y - monster.y, target.x - monster.x);
+      _enterMobjState(monster, MobjState.melee);
+      return;
+    }
+    if (monster.moveCount == 0 &&
+        _checkMissileRange(monster, target, distance)) {
+      monster.angle = Trig.atan2(target.y - monster.y, target.x - monster.x);
+      monster.flags |= MobjFlags.justAttacked;
+      _enterMobjState(monster, MobjState.missile);
+      return;
+    }
+    _chaseMove(monster, target);
   }
 
   bool _checkMissileRange(Mobj monster, Mobj target, int distance) {
@@ -2383,7 +2395,7 @@ class GameState {
     if (state != null) _setMobjState(m, state);
   }
 
-  void _setMobjState(Mobj m, int stateId) {
+  void _setMobjState(Mobj m, int stateId, {bool runAction = true}) {
     final MobjFrameState state = MobjStateTable.state(stateId)!;
     m.frameState = state.id;
     m.state = state.phase;
@@ -2391,12 +2403,18 @@ class GameState {
     m.spriteFrame = state.frame;
     m.fullBright = state.fullBright;
     m.stateTics = state.tics;
-    _runMobjStateAction(m, state.action);
+    if (runAction) _runMobjStateAction(m, state.action);
   }
 
   void _runMobjStateAction(Mobj m, MobjStateAction? action) {
     final Mobj? target = m.target;
     switch (action) {
+      case MobjStateAction.monsterLook:
+        if (config.monsters && m.health > 0 && m.state == MobjState.spawn) {
+          _lookForTarget(m);
+        }
+      case MobjStateAction.monsterChase:
+        if (config.monsters) _runMonsterChase(m);
       case MobjStateAction.monsterHitscan:
         if (target == null || target.health <= 0 || !_hasSight(m, target)) {
           return;

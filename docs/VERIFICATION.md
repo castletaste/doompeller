@@ -1,13 +1,13 @@
 # Episode verification — 2026-09-06
 
-Production continuation from `7bc0245`, then `85fe080`. Original local DOOM1.WAD, 4,196,020
+Production continuation from `7bc0245`, `85fe080`, then `3106b9c`. Original local DOOM1.WAD, 4,196,020
 bytes, MD5 `f0cefca49926d00903cf57551d901abe`. This report is not a claim that
 every level has been completed.
 
 ## Evidence boundaries
 
 - The pinned original E1M1 route uses normal medium-skill gameplay with enemies:
-  2,151 commands, current hash `0x59c769da`, health 66, 6/6 kills. Its original-WAD
+  2,175 commands, current hash `0xaac341ce`, health 84, 6/6 kills. Its original-WAD
   regression also verifies transfer of the final inventory into original E1M2.
 - The controller test prepares all nine actual maps in episode/secret order,
   preserves inventory, rejects stale/duplicate transitions and supports retry
@@ -28,9 +28,9 @@ These are not a claim of pixel-perfect geometry.
 
 ## Automated checks
 
-`flutter analyze` is clean; root Flutter suite passes 239 tests. Pure-Dart
-core passes 174 tests, WAD passes 139, and geometry passes 128 (3 intentionally skipped):
-680 passing tests in total. The project contract audit passes. Package analyzers
+`flutter analyze` is clean; root Flutter suite passes 240 tests. Pure-Dart
+core passes 178 tests, WAD passes 139, and geometry passes 128 (3 intentionally skipped):
+685 passing tests in total. The project contract audit passes. Package analyzers
 and shader bundle regeneration passed in the preceding production verification;
 no shader or dependency changed in the subsequent dropped-item correction.
 No external review finding is accepted without checking its
@@ -106,7 +106,7 @@ inside that menu. The build audit confirms a Wasm-only bootstrap and no
 proves startup/menu rendering, not a browser playthrough or performance budget.
 The temporary browser tab and native test windows were closed after testing.
 
-## Enemy drops and original E1M2 replay
+## Enemy drops and original E1M2 replay at `3106b9c` (historical)
 
 The post-`85fe080` correction creates dropped clips and shotguns at the enemy's
 exact fixed-point death coordinates, on the current sector floor. Dropped items
@@ -170,8 +170,81 @@ entitlements. The Wasm/WebGPU release was rebuilt and audited as well:
 `main.dart.wasm` is 1,979,291 bytes, with no dart2js fallback. This last web build
 was not subjected to another browser playthrough.
 
+## Corrected monster action cadence (current)
+
+The subsequent replay work exposed a gameplay defect: full-speed monster chase,
+reaction counters and attack decisions ran every game tic even though the walk
+states last two to four tics. Look and Chase now run on state entry, as described
+by the original [actor states](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/info.c)
+and [state dispatcher](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_mobj.c).
+Dividing movement speed alone would not correct the accelerated attack decisions
+or random-number consumption.
+
+Initial actor construction assigns the spawn frame without running its action;
+this avoids accessing the player before all THINGS are initialized. Later
+transitions dispatch once, including the first Chase entered by Look. Disabled
+AI still allows animations, effects and death callbacks. Exact timing,
+monster-before-player construction and disabled-AI tests pass; Sol independently
+reviewed the state-entry lifecycle. No public API or replay-schema field changed.
+
+An input-only probe of unchanged original E1M9 walks out of spawn for 40 tics,
+then waits for 70. The old `85fe080` core produced 234 cadence violations among
+237 compared movement intervals; the fixed core produces zero among 61.
+The root regression requires actual observed pursuit, so an idle, occluded
+spawn cannot pass vacuously. These are timing probes, not E1M9 completion.
+
+The unchanged E1M1 route generator now emits 2,175 commands, hash `0xaac341ce`;
+its keyboard-sampled variant emits 2,157 commands, hash `0x41a2a970` (82 HP).
+Both retain armor/door/lift/damage/collision/all-kills checks and match two fresh
+replays. The historical 2,151-command stream dies on the new rules instead of
+exiting; its old success and timing remain historical. No old pin was simply
+relabelled as a passing replay.
+
+The new E1M1 release Metal replay also completed visibly and matched the core:
+2,175/2,175 commands, hash `0xaac341ce`, 84 HP, 97 armor, 6/6 kills, zero dropped
+tics. The final screen shows the exit switch and an idle pistol. Its 7,243
+post-warmup Flutter total-span samples measured p95 2.708 ms, p99 3.683 ms,
+maximum 6.830 ms and zero 16.667 ms deadline misses. There were 86 surfaces,
+94 created buffers, six created textures, 386,364 initial upload bytes and
+12,103 dynamic uploads totaling 19,710,880 bytes. The excluded setup maximum
+was 48,869.957 ms because this developer target synchronously generates its
+route; ordinary startup does not. These are not presented-frame/GPU timings.
+Log: `.local/qa/episode-2026-09-06/native-e1m1-cadence.log`.
+
+The regenerated E1M2 stream also passed independent fresh replays and the live
+release Metal target, with first normal exit exactly on the last command:
+
+| Current E1M2 result | Observed value |
+|---|---:|
+| Commands / hash | 3,677 / `0xc6d1affc` |
+| Health / armor / kills | 4 / 0 / 23 of 41 |
+| Dropped game tics | 0 |
+| Surfaces / created buffers / created textures | 191 / 206 / 6 |
+| Initial upload bytes | 748,788 |
+| Dynamic uploads / bytes | 155,659 / 167,137,520 |
+| Warmup excluded / measured samples | 120 / 12,435 |
+| Flutter total-span p95 / p99 / maximum | 3.499 / 4.139 / 25.974 ms |
+| 16.667 ms deadline misses | 1 |
+
+The excluded setup maximum was 834.988 ms. The visible final window shows
+`E1M2 REPLAY COMPLETE`, 3677/3677, 4% health and the idle pistol. Log:
+`.local/qa/episode-2026-09-06/native-e1m2-cadence.log`. The accepted local input
+record is `.local/replays/E1M2-cadence.json`, SHA-256
+`d10ee236f16d015d6604abb939dbf90b1f60186dc06dd75501566733c57cff42`.
+The old 3,722-command stream no longer reaches the exit under corrected AI;
+neither its old hash nor its old frame measurements are current evidence.
+
 ## Still required
 
 Normal-gameplay start-to-exit command streams and independent replay verification
 for E1M3–E1M9, including secret-exit traversal and the complete E1M8 boss route.
 The Codex goal must remain active until that evidence exists.
+
+The corrected-cadence E1M3 checkpoint reaches its yellow key alive at tic 1,408,
+31 HP, hash `0xd58ef4a7`, with an exact fresh replay. It has not reached the normal
+or secret exit. E1M4/E1M8/E1M9 planner failures are not full-level evidence.
+
+Separate confirmed gameplay follow-ups remain: blue armor currently saves the
+same fraction as green armor, and ammo/backpack capacity rules are incomplete.
+They require their own focused inventory and episode-carry regressions; they
+were not bundled into the monster-cadence correction.

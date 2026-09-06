@@ -65,6 +65,32 @@ void main() {
       expect(state, first);
     });
 
+    test('monster stand and walk frames carry their AI entry actions', () {
+      for (final (type, walkTics) in <(MobjType, int)>[
+        (MobjType.possessed, 4),
+        (MobjType.shotguy, 3),
+        (MobjType.troop, 3),
+        (MobjType.sergeant, 2),
+        (MobjType.baron, 3),
+      ]) {
+        var state = MobjStateTable.start(type, MobjState.spawn)!;
+        for (var frame = 0; frame < 2; frame++) {
+          final MobjFrameState record = MobjStateTable.state(state)!;
+          expect(record.action, MobjStateAction.monsterLook, reason: '$type');
+          state = record.next!;
+        }
+
+        state = MobjStateTable.start(type, MobjState.see)!;
+        for (var frame = 0; frame < 8; frame++) {
+          final MobjFrameState record = MobjStateTable.state(state)!;
+          expect(record.tics, walkTics, reason: '$type');
+          expect(record.action, MobjStateAction.monsterChase, reason: '$type');
+          state = record.next!;
+        }
+        expect(state, MobjStateTable.start(type, MobjState.see));
+      }
+    });
+
     test('death and gib chains terminate in permanent corpse frames', () {
       for (final MobjState phase in <MobjState>[
         MobjState.death,

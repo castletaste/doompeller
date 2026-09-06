@@ -20,6 +20,8 @@ enum MobjState {
 
 /// Deterministic gameplay callback invoked when an actor enters a frame.
 enum MobjStateAction {
+  monsterLook,
+  monsterChase,
   monsterHitscan,
   monsterMelee,
   demonMelee,
@@ -244,7 +246,10 @@ _Catalog _buildCatalog() {
       phase: MobjState.spawn,
       name: '${sprite}_STAND',
       sprite: sprite,
-      frames: const <_Frame>[_Frame(0, 10), _Frame(1, 10)],
+      frames: const <_Frame>[
+        _Frame(0, 10, action: MobjStateAction.monsterLook),
+        _Frame(1, 10, action: MobjStateAction.monsterLook),
+      ],
       loop: true,
     );
     final int see = b.chain(
@@ -253,14 +258,14 @@ _Catalog _buildCatalog() {
       name: '${sprite}_WALK',
       sprite: sprite,
       frames: <_Frame>[
-        _Frame(0, walkTics),
-        _Frame(0, walkTics),
-        _Frame(1, walkTics),
-        _Frame(1, walkTics),
-        _Frame(2, walkTics),
-        _Frame(2, walkTics),
-        _Frame(3, walkTics),
-        _Frame(3, walkTics),
+        _Frame(0, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(0, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(1, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(1, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(2, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(2, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(3, walkTics, action: MobjStateAction.monsterChase),
+        _Frame(3, walkTics, action: MobjStateAction.monsterChase),
       ],
       loop: true,
     );
@@ -478,7 +483,10 @@ _Catalog _buildCatalog() {
     phase: MobjState.spawn,
     name: 'BOSS_STAND',
     sprite: 'BOSS',
-    frames: const <_Frame>[_Frame(0, 10), _Frame(1, 10)],
+    frames: const <_Frame>[
+      _Frame(0, 10, action: MobjStateAction.monsterLook),
+      _Frame(1, 10, action: MobjStateAction.monsterLook),
+    ],
     loop: true,
   );
   final int baronSee = b.chain(
@@ -487,14 +495,14 @@ _Catalog _buildCatalog() {
     name: 'BOSS_WALK',
     sprite: 'BOSS',
     frames: const <_Frame>[
-      _Frame(0, 3),
-      _Frame(0, 3),
-      _Frame(1, 3),
-      _Frame(1, 3),
-      _Frame(2, 3),
-      _Frame(2, 3),
-      _Frame(3, 3),
-      _Frame(3, 3),
+      _Frame(0, 3, action: MobjStateAction.monsterChase),
+      _Frame(0, 3, action: MobjStateAction.monsterChase),
+      _Frame(1, 3, action: MobjStateAction.monsterChase),
+      _Frame(1, 3, action: MobjStateAction.monsterChase),
+      _Frame(2, 3, action: MobjStateAction.monsterChase),
+      _Frame(2, 3, action: MobjStateAction.monsterChase),
+      _Frame(3, 3, action: MobjStateAction.monsterChase),
+      _Frame(3, 3, action: MobjStateAction.monsterChase),
     ],
     loop: true,
   );

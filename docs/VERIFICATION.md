@@ -36,6 +36,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M1 input-only and native Metal replay | 2,160 | 84 / 97 | 6/6 | `0x9c565b42` |
 | E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
+| E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
 
 All use default medium skill, monsters enabled, seed 0, and default starting
@@ -57,6 +58,18 @@ SHA-256 `7fa3c2797c6212c895cc95fab22bd4f535808b604215ae2f228dae26b32b364c`.
 Independent log: `.local/qa/episode-2026-09-06/m8-current-independent.txt`.
 No new native-render or foreground-frame claim accompanies this input replay.
 
+E1M4 was also regenerated on `82a9bd5`: both keys collected, door 548 reopened
+and crossed, then normal exit 554 activated on command 10,064. The full command
+stream survived from default spawn/inventory in two fresh independent replays,
+with the expected final hash. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m4_spread/e1m4_commands.json`,
+SHA-256 `b554d4b0eae329bf2af7499a7a2ebb439ac590497ba7e0d4d4ac718a2c68a78b`.
+Log: `.local/qa/episode-2026-09-06/m4-current-independent.txt`.
+This is input-only proof, not a fresh native-render result. Earlier stopped
+routes were planner/timing failures: direct legal movement crossed open door
+776 in six tics, and prompt traversal of reopened door 548 resolved the last
+gate without changing gameplay collision or door timing.
+
 The current E1M1 release executable logged Impeller Metal and completed all
 2,160 commands through the ordinary Flame update/render path with the expected
 hash and zero dropped tics. It created 86 surfaces, 94 GPU buffers and six
@@ -76,7 +89,7 @@ playthrough is claimed for this correction.
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.
 Their former native-success evidence cannot be reused for this core revision.
-E1M2 and E1M8 have now been regenerated. New current-core partial recordings
+E1M2, E1M4 and E1M8 have now been regenerated. New current-core partial recordings
 exist for the other episode-one maps, but do not count as full exits. The
 checkpoint details near the end of this document remain historical unless
 explicitly marked otherwise.
@@ -483,7 +496,7 @@ also opened. That control-run window was closed as well. Logs:
 ## Still required
 
 Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M3–E1M7 and E1M9, including secret-exit traversal;
+replay verification for E1M3, E1M5–E1M7 and E1M9, including secret-exit traversal;
 fresh native-render verification beyond E1M1. Only episode one is present in
 the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.

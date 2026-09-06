@@ -9,7 +9,8 @@ import '../tool/e1m1_playthrough.dart';
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
 const int _productionCommandCount = 2151;
-const int _productionHash = 0x36d1d056;
+// Enemy drops are simulation state; the 2,151-command route is unchanged.
+const int _productionHash = 0x59c769da;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

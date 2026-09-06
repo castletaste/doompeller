@@ -8,7 +8,7 @@ does not embed, wrap, download, or extract another Doom engine.
 
 Place `DOOM1.WAD` at `.local/doom/DOOM1.WAD`. It is the default local content
 source, so the app starts E1M1 without a chooser. `DOOM_WAD_PATH` can override
-that path on desktop.
+that path on desktop when the process has permission to read the file.
 
 The intermission continues through episode 1 with health, armor, ammo and
 weapons retained. The E1M3 secret exit leads to E1M9, which returns to E1M4;
@@ -19,10 +19,10 @@ distinction between implemented mechanics, scene checks and completed replays.
 /Users/savva/fvm/versions/stable/bin/flutter run -d macos --release
 ```
 
-```sh
-DOOM_WAD_PATH=.local/doom/DOOM1.WAD \
-  /Users/savva/fvm/versions/stable/bin/flutter run -d macos --release
-```
+Leave `DOOM_WAD_PATH` unset for the normal macOS release: it uses the bundled
+local original WAD. The macOS app sandbox may reject an external path override,
+including a relative path into the source checkout. An explicit override is
+never silently replaced with the bundled copy if reading it fails.
 
 If a configured path is unreadable, invalid, not an IWAD, or lacks E1M1, the
 app shows an error. It will not silently switch content; the synthetic fallback

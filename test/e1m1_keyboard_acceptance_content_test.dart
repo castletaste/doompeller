@@ -10,7 +10,8 @@ import '../tool/e1m1_playthrough.dart';
 const String _wadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
 const int _productionKeyboardCommandCount = 2154;
-const int _productionKeyboardHash = 0x82b6aada;
+// Former-human drops now participate in replay state; input count is unchanged.
+const int _productionKeyboardHash = 0xc3964f83;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

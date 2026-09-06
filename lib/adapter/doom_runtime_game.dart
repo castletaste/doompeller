@@ -88,6 +88,10 @@ final class _ReplayTerminalDelivery {
   final DoomLevelCompleteCallback? onLevelComplete;
 }
 
+// Actor types created by gameplay rather than declared by source THINGS still
+// need atlas coverage before the retained scene is assembled.
+const Set<String> _dynamicDropSpritePrefixes = <String>{'CLIP', 'SHOT', 'MGUN'};
+
 const Set<String> _completionTransientSprites = <String>{
   'PUFF',
   'BLUD',
@@ -130,6 +134,7 @@ final class DoomRuntimeGame extends FlameGame3D
     };
     final Set<String> requested = <String>{
       ...level.initialSpritePrefixes,
+      ..._dynamicDropSpritePrefixes,
       'BAL1',
       'BAL7',
       'MISL',

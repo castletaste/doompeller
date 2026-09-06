@@ -437,15 +437,24 @@ class GameState {
   }
 
   Mobj _add(MobjInfo info, int x, int y, int degrees, int health) {
-    final int fx = toFixed(x), fy = toFixed(y);
-    final int sector = _runtime.sectorAt(fx, fy);
+    return _addFixed(
+      info,
+      toFixed(x),
+      toFixed(y),
+      degreesToAngle(degrees),
+      health,
+    );
+  }
+
+  Mobj _addFixed(MobjInfo info, int x, int y, int angle, int health) {
+    final int sector = _runtime.sectorAt(x, y);
     final Mobj m = Mobj(
       id: _nextId++,
       info: info,
-      x: fx,
-      y: fy,
+      x: x,
+      y: y,
       z: _runtime.sectors[sector].floorHeight,
-      angle: degreesToAngle(degrees),
+      angle: angle,
       health: health,
       sectorIndex: sector,
     );
@@ -2772,6 +2781,20 @@ class GameState {
       target.height ~/= 4;
       _enterMobjState(target, deathState);
       _emitMobjSound(target.info.deathSound ?? 'DSPODTH1', target);
+      final MobjInfo? dropInfo = switch (target.info.id) {
+        MobjType.possessed => _clipInfo,
+        MobjType.shotguy => _shotgunInfo,
+        _ => null,
+      };
+      if (dropInfo != null) {
+        _addFixed(
+          dropInfo,
+          target.x,
+          target.y,
+          0,
+          dropInfo.spawnHealth,
+        ).flags |= MobjFlags.dropped;
+      }
     } else if (_random.chance(target.info.painChance)) {
       _enterMobjState(target, MobjState.pain);
       final String? painSound = target.info.painSound;
@@ -2861,13 +2884,13 @@ class GameState {
       } else {
         switch (m.info.id) {
           case MobjType.clip:
-            _bullets += 10;
+            _bullets += (m.flags & MobjFlags.dropped) != 0 ? 5 : 10;
           case MobjType.shotgun:
-            _shells += 8;
+            _shells += (m.flags & MobjFlags.dropped) != 0 ? 4 : 8;
             _ownedWeapons.add(Weapon.shotgun);
             _queueWeapon(Weapon.shotgun);
           case MobjType.chaingun:
-            _bullets += 20;
+            _bullets += (m.flags & MobjFlags.dropped) != 0 ? 10 : 20;
             _ownedWeapons.add(Weapon.chaingun);
             _queueWeapon(Weapon.chaingun);
           case MobjType.rocketLauncher:

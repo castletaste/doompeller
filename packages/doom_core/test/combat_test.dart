@@ -778,7 +778,8 @@ void main() {
       expect(corpse.frame, greaterThanOrEqualTo(7));
       // Actor and exact frame-state identities are semantic, so unrelated enum
       // or table insertions cannot move this pin.
-      expect(game.hashState(), 0x2a47da36);
+      // The dead former human now contributes its canonical dropped clip.
+      expect(game.hashState(), 0x66dfe8ae);
       for (var tic = 0; tic < 30; tic++) {
         game.runTic(const TicCmd(forwardMove: 8));
       }

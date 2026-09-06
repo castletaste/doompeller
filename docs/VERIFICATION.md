@@ -37,6 +37,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
 | E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
+| E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
 
 All use default medium skill, monsters enabled, seed 0, and default starting
@@ -70,6 +71,19 @@ routes were planner/timing failures: direct legal movement crossed open door
 776 in six tics, and prompt traversal of reopened door 548 resolved the last
 gate without changing gameplay collision or door timing.
 
+E1M6 now has a complete current-core recording as well: all three keys,
+switch 599 opening sector 28, manual door 614, and normal exit 627. The first
+exit is command 7,933; the player survives every preceding command. The
+map-specific verifier and independent full-stream verifier each replayed it
+twice from fresh default state with identical hash. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m6_finish/e1m6_commands.json`,
+SHA-256 `9c3386df925b693ed5ce6f4965238bd4489c294bba5f3b3fd1f61d425ca95181`.
+Log: `.local/qa/episode-2026-09-06/m6-full-current-independent.txt`.
+The successful input strategy starts the final fight with 100 HP, uses cover,
+then collects reachable healing before the final doors. Earlier late low-HP
+attempts remain failed bot strategies, not gameplay defects. No production
+source change or fresh E1M6 native-render proof accompanies this result.
+
 The current E1M1 release executable logged Impeller Metal and completed all
 2,160 commands through the ordinary Flame update/render path with the expected
 hash and zero dropped tics. It created 86 surfaces, 94 GPU buffers and six
@@ -89,7 +103,8 @@ playthrough is claimed for this correction.
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.
 Their former native-success evidence cannot be reused for this core revision.
-E1M2, E1M4 and E1M8 have now been regenerated. New current-core partial recordings
+E1M2, E1M4 and E1M8 have now been regenerated, and E1M6 completed for the first
+time. New current-core partial recordings
 exist for the other episode-one maps, but do not count as full exits. The
 checkpoint details near the end of this document remain historical unless
 explicitly marked otherwise.
@@ -496,7 +511,7 @@ also opened. That control-run window was closed as well. Logs:
 ## Still required
 
 Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M3, E1M5–E1M7 and E1M9, including secret-exit traversal;
+replay verification for E1M3, E1M5, E1M7 and E1M9, including secret-exit traversal;
 fresh native-render verification beyond E1M1. Only episode one is present in
 the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.

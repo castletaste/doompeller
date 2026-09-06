@@ -50,9 +50,9 @@ hash and zero dropped tics. It created 86 surfaces, 94 GPU buffers and six
 textures; initial upload was 386,364 bytes, followed by 12,026 dynamic uploads
 (19,564,640 bytes). After 120 warmup samples, 7,246 `FrameTiming.totalSpan`
 samples had p95 2.747 ms, p99 3.980 ms, max 5.262 ms and zero >16.667 ms spans.
-These are Flutter timings, not GPU or presented-frame measurements. The first
-warmup span included a 48.622 s vsync delay, and foreground focus throughout
-was not verified. This is not an all-foreground 60 FPS acceptance claim.
+These are Flutter timings, not GPU or presented-frame measurements. The worst
+warmup span was 48.622 s total, including 48.596 s vsync overhead; foreground
+focus throughout was not verified. This is not an all-foreground 60 FPS claim.
 Log: `.local/qa/episode-2026-09-06/native-e1m1-spread.log`.
 Current GUI inspection is unverified: agent-device 0.20.3 timed out on both
 accessibility capture and the screenshot retry. Opening by bundle ID also

@@ -1,19 +1,21 @@
 # Architecture refactor verification — 2026-09-07
 
-Refactor of baseline `d12073a`; see [runtime boundaries](ARCHITECTURE.md).
+Refactor of baseline `d12073a`, integrated with main `6e8ba73` in `67f82ef`;
+see [runtime boundaries](ARCHITECTURE.md). Main's Enter/touch controls and CI
+policies are retained.
 The results in this section were rerun on the refactored worktree. Existing
 per-map recordings were reused as inputs; their original capture evidence is
 retained below.
 
-- App: `dart run tool/test.dart` **237 PASS** without an IWAD;
-  `dart run tool/test.dart --include-content` **265 PASS**, using the ignored
+- App: `dart run tool/test.dart` **266 PASS** without an IWAD;
+  `dart run tool/test.dart --include-content` **302 PASS**, using the ignored
   local original DOOM1.WAD. Content is read directly and is not copied into the
   temporary Flutter test asset bundle.
 - Packages: `doom_core` **190 PASS**, `doom_geometry` **129 PASS / 3 opt-in stress
-  skips**, `doom_wad` **139 PASS**. **723 tests pass** across packages and the
+  skips**, `doom_wad` **139 PASS**. **760 tests pass** across packages and the
   content-inclusive app suite; synthetic tests are a subset, not additional.
 - Root Flutter analyzer and all three package analyzers: no issues. Formatter
-  dry run: 206 files unchanged. Project contract audit and `git diff --check` pass.
+  dry run: 209 files unchanged. Project contract audit and `git diff --check` pass.
 - Production E1M1 and FakeGPU adapter replay: **2,160 tics, `0x9c565b42`**.
   Keyboard route: **2,155 tics, `0x55608565`**. Both match the baseline.
   Native preparation also covered every episode successor and secret-map branch.
@@ -32,16 +34,25 @@ retained below.
 - Audio tests cover separate messengers/channels, replacement owners, stale
   dispose/stop/play and completion IDs, delayed replies, bounded overflow with
   critical cues retained, failure recovery and disposal after stop failure.
-- macOS Release: `flutter build macos --release --no-pub` passes (45.2 MB).
-  Exact worktree executable (PID 84021) was launched directly; its log confirmed
-  Impeller Metal. Fresh GUI observations showed E1M1, pause/resume, automap and a
-  primary-click shot (ammo 50 to 49). The test process exited cleanly. This is a
-  targeted smoke, not a fresh native full-episode replay or audible-output test.
-- Wasm/WebGPU: `tool/build_web_release.sh` passes, including shader verification,
-  bootstrap finalization, pins and local IWAD checksum. `main.dart.wasm` is
-  1,994,330 bytes; packaged IWAD is 4,196,020 bytes. The build retains the existing
-  Flutter warning about the optional Cupertino icon font; no new Cupertino icon
-  usage was introduced. No browser runtime/performance claim is made here.
+  Native ownership takeover also covers voices on channels the new owner does
+  not reuse, delayed cleanup replies and observable cleanup failure.
+- macOS Release: `flutter build macos --release --no-pub` passes (45.7 MB).
+  Exact merged worktree executable at `67f82ef` (PID 29119) was launched directly; its log confirmed
+  Impeller Metal. Fresh GUI observations showed E1M1, Enter firing (ammo 50 to
+  49), pause/resume, the touch-controls switch, touch automap open/close and touch
+  firing (ammo 49 to 48). The test process exited with code 0. This is a targeted
+  smoke, not a fresh native full-episode replay or audible-output test.
+- Wasm/WebGPU: `tool/build_web_release.sh` passes with the pinned Flutter SDK,
+  including shader verification, bootstrap finalization, pins and local IWAD
+  checksum. `main.dart.wasm` is 2,061,337 bytes; packaged IWAD is 4,196,020 bytes.
+  The build retains the existing optional Cupertino icon-font warning.
+  Three actual Chrome Wasm regressions pass: line-37 collision, corner running
+  wall-slide and line-125 puff impact. These are targeted engine regressions,
+  not a browser gameplay performance measurement.
+- CI-policy checks: **35 Node tests**, **8 Python shareware-fetch tests** and
+  **4 Python artifact tests** pass. GitHub Actions run
+  [34108419272](https://github.com/castletaste/doompeller/actions/runs/34108419272)
+  passed Verify and build Wasm for `67f82ef`; deployment was skipped.
 
 Pinned toolchain: Flutter 3.44.4, Dart 3.12.2, naga 30.0.1. No dependency versions,
 renderer pins, native audio protocol, gameplay rules or replay schemas changed.

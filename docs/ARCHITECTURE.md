@@ -52,7 +52,9 @@ state machine own their local state. Their inputs are narrow callbacks or values
 not access to the entire game. Actor iteration, RNG calls, integer arithmetic
 and replay hash word order remain unchanged.
 
-The runtime owns keyboard/pointer latches, replay progress and the scene. Replay
+The runtime owns device input, replay progress and the scene. `DoomDeviceInput`
+tracks keyboard, mouse and touch owners independently, including pending
+one-shot controls and analog axes. Blur, pause and reset clear all owners. Replay
 completion callbacks run after the tick driver returns so a callback may safely
 restart or dispose the runtime. `DoomScene` composes dynamic world geometry,
 sky, sprite components and an actor pool. Dynamic geometry indexes sector and
@@ -69,10 +71,13 @@ Factories create runtimes when a level is mounted or replaced; changing a
 callback closure does not restart gameplay. A new host key explicitly replaces
 a live runtime. Surface builder changes update the existing runtime's view, and
 a directly embedded game view handles level replacement itself.
-HUD, overlays and automap listen
-within their own subtrees. Equal HUD snapshots suppress redundant notification.
-The three StatefulWidgets have actual ownership duties: the app controller,
-the runtime/focus, and the intermission animation. Loading, failure and ready
+HUD, overlays and automap listen within their own subtrees. The game view
+selects only input-blocked and map-open transitions, so movement and HUD values
+do not rebuild the game surface or touch panel. Equal HUD snapshots suppress
+redundant notification. The four StatefulWidgets have actual ownership duties:
+the app controller, runtime/focus, intermission animation and touch pointer
+captures. The app owns the touch-control preference; the game view resets input
+on lifecycle changes and the touch panel owns individual pointer captures. Loading, failure and ready
 are sealed states, with a non-null prepared level in the ready state. Navigation
 continues to use these states and overlays; no router or DI package is needed.
 
@@ -92,7 +97,10 @@ may provide an immutable encoding through `SoundDefinition.wavBytes`; mutable
 custom PCM without one continues to be encoded per request.
 
 `MacOsAudioBackend` leases the transport by BinaryMessenger identity and channel
-name. Only the newest owner can send native commands or deliver completions.
+name. Takeover dispatches the previous owner's native cleanup before publishing
+the new owner, including voices on channels the new mixer never reuses. A cleanup
+failure is reported through Flutter's error handler. Only the newest owner can
+send subsequent native commands or deliver completions.
 Transport playback IDs are unique across owners, even when logical mixer IDs
 restart from zero. Ownership is checked at dispatch, and no await precedes a
 native teardown dispatch. Flutter's MethodChannel FIFO ordering preserves that

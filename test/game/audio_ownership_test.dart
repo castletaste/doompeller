@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:doompeller/game/macos_audio_backend.dart';
 import 'package:doompeller/game/sound_playback.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -81,13 +82,96 @@ void main() {
       addTearDown(current.dispose);
       await current.play(_request(1));
       final activePlayback = nativePlayback[2];
+      final acceptedCalls = calls.length;
       await old.dispose();
       expect(
         nativePlayback[2],
         activePlayback,
         reason: 'native dispose clears the shared AVAudioEngine',
       );
-      expect(calls.where((call) => call.method == 'dispose'), isEmpty);
+      expect(calls.length, acceptedCalls);
+      expect(calls.map((call) => call.method), ['dispose', 'play']);
+    },
+  );
+
+  test(
+    'a replacement owner retires voices on channels it does not reuse',
+    () async {
+      final old = MacOsAudioBackend(channel: channel);
+      await old.play(_request(1));
+      final current = MacOsAudioBackend(channel: channel);
+      addTearDown(current.dispose);
+      await current.play(_request(1, channelId: 3));
+      await old.dispose();
+      expect(
+        nativePlayback.keys,
+        [3],
+        reason: 'retired runtime voices must not survive transport takeover',
+      );
+    },
+  );
+
+  test(
+    'takeover cleanup is dispatched before play without waiting for its reply',
+    () async {
+      final entered = Completer<void>();
+      final reply = Completer<void>();
+      final replied = Completer<void>();
+      var firstDispose = true;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        apply(call);
+        if (call.method == 'dispose' && firstDispose) {
+          firstDispose = false;
+          entered.complete();
+          await reply.future;
+          replied.complete();
+        }
+        return null;
+      });
+      addTearDown(() {
+        if (!reply.isCompleted) reply.complete();
+      });
+      final old = MacOsAudioBackend(channel: channel);
+      await old.play(_request(1));
+      final current = MacOsAudioBackend(channel: channel);
+      addTearDown(current.dispose);
+      await entered.future;
+      await current.play(_request(1, channelId: 3));
+      expect(calls.map((call) => call.method), ['play', 'dispose', 'play']);
+      expect(nativePlayback.keys, [3]);
+      reply.complete();
+      await replied.future;
+      await old.dispose();
+      expect(nativePlayback.keys, [3]);
+    },
+  );
+
+  test(
+    'failed takeover cleanup is reported without disabling the owner',
+    () async {
+      final reported = Completer<FlutterErrorDetails>();
+      final previousHandler = FlutterError.onError;
+      FlutterError.onError = reported.complete;
+      addTearDown(() => FlutterError.onError = previousHandler);
+      var firstDispose = true;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'dispose' && firstDispose) {
+          firstDispose = false;
+          throw PlatformException(code: 'cleanup_failed');
+        }
+        apply(call);
+        return null;
+      });
+      final old = MacOsAudioBackend(channel: channel);
+      final current = MacOsAudioBackend(channel: channel);
+      addTearDown(current.dispose);
+      await current.play(_request(1));
+      final error = await reported.future;
+      expect(error.exception, isA<PlatformException>());
+      expect(error.context.toString(), contains('retiring the previous owner'));
+      expect(nativePlayback.keys, [2]);
+      await old.dispose();
+      expect(nativePlayback.keys, [2]);
     },
   );
 
@@ -158,16 +242,17 @@ void main() {
   }
 }
 
-AudioPlayRequest _request(int playbackId) => AudioPlayRequest(
-  channelId: 2,
-  playbackId: playbackId,
-  soundId: 'DSPISTOL',
-  wavBytes: Uint8List.fromList([82, 73, 70, 70]),
-  volume: 0.75,
-  pan: 0,
-  sourceId: 1,
-  fromPlayer: true,
-);
+AudioPlayRequest _request(int playbackId, {int channelId = 2}) =>
+    AudioPlayRequest(
+      channelId: channelId,
+      playbackId: playbackId,
+      soundId: 'DSPISTOL',
+      wavBytes: Uint8List.fromList([82, 73, 70, 70]),
+      volume: 0.75,
+      pan: 0,
+      sourceId: 1,
+      fromPlayer: true,
+    );
 
 Future<void> _complete(
   TestDefaultBinaryMessenger messenger,

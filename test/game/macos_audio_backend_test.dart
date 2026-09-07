@@ -40,7 +40,9 @@ void main() {
   test(
     'production factory selects the macOS MethodChannel backend on VM',
     () {
-      expect(createDefaultAudioBackend(), isA<MacOsAudioBackend>());
+      final backend = createDefaultAudioBackend();
+      addTearDown(backend.dispose);
+      expect(backend, isA<MacOsAudioBackend>());
     },
     testOn: 'mac-os',
   );
@@ -54,6 +56,10 @@ void main() {
     () async {
       final DoomRuntimeGame runtime =
           createProductionDoomRuntime(await _fixtureLevel()) as DoomRuntimeGame;
+      addTearDown(() async {
+        runtime.dispose();
+        await runtime.soundPlaybackIdleForTest;
+      });
       runtime.input.press(DoomControl.attack);
       for (var tic = 0; tic < 20; tic++) {
         runtime.advanceMicrosForTest(28572);

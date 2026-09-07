@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'sound_playback.dart';
@@ -7,6 +10,24 @@ final class MacOsAudioBackend implements AudioBackend {
   MacOsAudioBackend({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(channelName) {
     final owners = _owners[_channel.binaryMessenger] ??= {};
+    final previous = owners[_channel.name]?.target;
+    if (previous != null) {
+      // Retire all native voices before publishing the next owner. Dispose
+      // dispatches synchronously, so MethodChannel FIFO keeps that cleanup
+      // ahead of this owner's first play even when its reply is delayed.
+      unawaited(
+        previous.dispose().catchError((Object error, StackTrace stackTrace) {
+          FlutterError.reportError(
+            FlutterErrorDetails(
+              exception: error,
+              stack: stackTrace,
+              library: 'Doom audio',
+              context: ErrorDescription('while retiring the previous owner'),
+            ),
+          );
+        }),
+      );
+    }
     final WeakReference<MacOsAudioBackend> backend = WeakReference(this);
     owners[_channel.name] = backend;
     _channel.setMethodCallHandler((MethodCall call) async {

@@ -39,6 +39,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M3 input-only, independently repeated strict replay | 5,927 | 42 / 1 | 53/74 | `0x07246777` |
 | E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
 | E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
+| E1M7 input-only, independently repeated strict replay | 14,565 | 40 / 75 | 76/84 | `0x14d19d2d` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
 
 All use default medium skill, monsters enabled, seed 0, and default starting
@@ -97,6 +98,22 @@ The successful input strategy starts the final fight with 100 HP, uses cover,
 then collects reachable healing before the final doors. Earlier late low-HP
 attempts remain failed bot strategies, not gameplay defects. No production
 source change or fresh E1M6 native-render proof accompanies this result.
+
+E1M7 now has a complete recording on the same core: all three keys and normal
+exit on command 14,565, with 76/84 kills, 40 HP and 75 armor. The independent
+fail-closed verifier replayed the entire stream twice from fresh default
+state, confirmed identical hashes, survival throughout (minimum 20 HP), and
+first normal exit exactly last. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m7_final/e1m7_commands.json`,
+SHA-256 `adf7bf3ccd34023177886a5c586eb12d08260126e767eb2b7966b3840ff73ae4`.
+Log: `.local/qa/episode-2026-09-06/m7-full-current-independent.txt`.
+Fresh preflight is `READY WITH FALLBACKS`: no missing textures, flats, sprites
+or expected sounds; 5,168 triangles, one mesh/atlas, 7,858/65,535 vertices,
+zero unmatched edges or degenerate triangles. Eighteen fallback sectors have
+area delta 1630.1131288869 and three T-junction diagnostics remain. Log:
+`.local/qa/episode-2026-09-06/m7-current-wad-report.txt`.
+This is input-only completion and geometry diagnostics, not a native rendered
+E1M7 playthrough or a pixel-perfect geometry claim.
 
 E1M3 now also has a complete recording on `82a9bd5`: both keys, actual W1
 stair trigger 967, completed real stair movers, manual door 624, and normal

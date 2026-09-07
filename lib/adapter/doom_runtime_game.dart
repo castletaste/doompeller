@@ -771,31 +771,94 @@ final class DoomRuntimeGame extends FlameGame3D
     }
     if (input.takePauseToggle()) {
       _paused = !_paused;
+      if (_paused) clearInput();
     }
   }
 
+  bool get _acceptsGameplayInput =>
+      !_disposed && !hasReplayInput && !_paused && !gameState.levelComplete;
+
   @override
-  void setPointerAttack(bool pressed) {
+  void setPointerAttack(bool pressed, {bool cancelled = false}) {
     if (_disposed) return;
-    if (hasReplayInput) return;
-    if (pressed && gameState.player.health <= 0) {
+    if (!pressed) {
+      _devices.setPointerAttack(false, cancelled: cancelled);
+      return;
+    }
+    if (!_acceptsGameplayInput) return;
+    if (gameState.player.health <= 0) {
       restartLevel();
       return;
     }
-    _devices.setPointerAttack(pressed);
+    _devices.setPointerAttack(true);
   }
 
   @override
   void addPointerYaw(double deltaX) {
-    if (_disposed) return;
-    if (hasReplayInput) return;
+    if (!_acceptsGameplayInput) return;
     input.addPointerTurn((-deltaX * 24).round());
   }
 
   @override
-  void togglePause() {
+  void setTouchMovement(
+    int pointer, {
+    required int forward,
+    required int side,
+  }) {
     if (_disposed) return;
-    if (!hasReplayInput) input.triggerPause();
+    _devices.setTouchMovement(
+      pointer,
+      forward: forward,
+      side: side,
+      enabled: _acceptsGameplayInput,
+    );
+  }
+
+  @override
+  void pressTouchControl(int pointer, DoomControl control) {
+    if (_disposed) return;
+    if (_devices.pressTouchControl(
+          pointer,
+          control,
+          enabled: _acceptsGameplayInput,
+          playerDead: gameState.player.health <= 0,
+        ) ==
+        DoomDeviceAction.restart) {
+      restartLevel();
+    }
+  }
+
+  @override
+  void releaseTouchPointer(int pointer, {bool cancelled = false}) {
+    if (_disposed) return;
+    _devices.releaseTouchPointer(pointer, cancelled: cancelled);
+  }
+
+  @override
+  void clearTouchInput() {
+    if (!_disposed) _devices.clearTouchInput();
+  }
+
+  @override
+  void triggerUse() {
+    if (!_acceptsGameplayInput) return;
+    if (gameState.player.health <= 0) {
+      restartLevel();
+      return;
+    }
+    input.triggerUse();
+  }
+
+  @override
+  void selectWeapon(int slot) {
+    if (_acceptsGameplayInput) input.selectWeapon(slot);
+  }
+
+  @override
+  void togglePause() {
+    if (!_disposed && !hasReplayInput && !gameState.levelComplete) {
+      input.triggerPause();
+    }
   }
 
   @override
@@ -875,7 +938,12 @@ final class DoomRuntimeGame extends FlameGame3D
     Set<LogicalKeyboardKey> keysPressed,
   ) {
     if (_disposed || hasReplayInput) return KeyEventResult.handled;
-    switch (_devices.handle(event, playerDead: gameState.player.health <= 0)) {
+    switch (_devices.handle(
+      event,
+      playerDead: gameState.player.health <= 0,
+      paused: _paused,
+      levelComplete: gameState.levelComplete,
+    )) {
       case DoomDeviceAction.ignored:
         return KeyEventResult.ignored;
       case DoomDeviceAction.handled:

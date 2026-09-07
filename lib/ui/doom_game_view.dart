@@ -12,6 +12,7 @@ import 'doom_automap.dart';
 import 'doom_game_overlays.dart';
 import 'doom_status_bar.dart';
 import 'doom_intermission.dart';
+import 'doom_touch_controls.dart';
 
 /// Creates a runtime owned by the level host. Custom runtimes can implement
 /// [DoomRuntimeLifecycle] to release their resources when the host unmounts.
@@ -37,6 +38,9 @@ final class DoomGameView extends StatefulWidget {
     required this.onContinue,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
+    this.touchControlsEnabled = false,
+    this.onTouchDetected,
+    this.onTouchControlsChanged,
   });
 
   final PreparedDoomLevel level;
@@ -47,6 +51,9 @@ final class DoomGameView extends StatefulWidget {
   final Future<void> Function(core.LevelExit) onContinue;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final bool touchControlsEnabled;
+  final VoidCallback? onTouchDetected;
+  final ValueChanged<bool>? onTouchControlsChanged;
 
   @override
   State<DoomGameView> createState() => _DoomGameViewState();
@@ -60,6 +67,10 @@ final class _DoomGameViewState extends State<DoomGameView>
   bool _showControls = true;
   bool _advancing = false;
   DoomFrameProbe? _frameProbe;
+  int _touchResetGeneration = 0;
+  int? _mousePointer;
+  late bool _hudInputBlocked;
+  late bool _mapOpen;
 
   @override
   void initState() {
@@ -75,14 +86,17 @@ final class _DoomGameViewState extends State<DoomGameView>
   void didUpdateWidget(covariant DoomGameView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.level, widget.level)) {
+      _detachInputListeners();
+      _clearDeviceInput(rebuild: false);
       if (_runtime case final DoomRuntimeLifecycle owned) owned.dispose();
       _createRuntime();
       _showControls = true;
       _advancing = false;
     } else if (!identical(
-      oldWidget.gameSurfaceBuilder,
-      widget.gameSurfaceBuilder,
-    )) {
+          oldWidget.gameSurfaceBuilder,
+          widget.gameSurfaceBuilder,
+        ) ||
+        !identical(oldWidget.onTouchDetected, widget.onTouchDetected)) {
       _createSurface();
     }
   }
@@ -91,6 +105,10 @@ final class _DoomGameViewState extends State<DoomGameView>
     _runtime = (widget.runtimeFactory ?? createProductionDoomRuntime)(
       widget.level,
     );
+    _hudInputBlocked = _blocksInput(_runtime.hud.value);
+    _mapOpen = _runtime.automap.value.isOpen;
+    _runtime.hud.addListener(_handleHudInputState);
+    _runtime.automap.addListener(_handleMapInputState);
     _createSurface();
   }
 
@@ -99,6 +117,10 @@ final class _DoomGameViewState extends State<DoomGameView>
       runtime: _runtime,
       focusNode: _gameFocusNode,
       surfaceBuilder: widget.gameSurfaceBuilder,
+      onPointerDown: _handlePointerDown,
+      onPointerMove: _handlePointerMove,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
     );
   }
 
@@ -106,6 +128,8 @@ final class _DoomGameViewState extends State<DoomGameView>
   void dispose() {
     _frameProbe?.dispose();
     WidgetsBinding.instance.removeObserver(this);
+    _detachInputListeners();
+    _clearDeviceInput(rebuild: false);
     _gameFocusNode
       ..removeListener(_handleFocusChange)
       ..dispose();
@@ -116,17 +140,84 @@ final class _DoomGameViewState extends State<DoomGameView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      _runtime.clearInput();
+      _clearDeviceInput();
     }
   }
 
   void _handleFocusChange() {
     if (!_gameFocusNode.hasFocus) {
-      _runtime.clearInput();
+      _clearDeviceInput();
     }
   }
 
+  static bool _blocksInput(DoomHudSnapshot hud) =>
+      hud.paused || hud.levelComplete || hud.health <= 0;
+
+  void _detachInputListeners() {
+    _runtime.hud.removeListener(_handleHudInputState);
+    _runtime.automap.removeListener(_handleMapInputState);
+  }
+
+  void _handleHudInputState() {
+    final blocked = _blocksInput(_runtime.hud.value);
+    if (blocked == _hudInputBlocked) return;
+    _hudInputBlocked = blocked;
+    if (blocked) _clearDeviceInput(rebuild: false);
+    if (mounted) setState(() {});
+  }
+
+  void _handleMapInputState() {
+    final open = _runtime.automap.value.isOpen;
+    if (open == _mapOpen) return;
+    if (mounted) setState(() => _mapOpen = open);
+  }
+
+  void _clearDeviceInput({bool rebuild = true}) {
+    _mousePointer = null;
+    _runtime.clearInput();
+    _touchResetGeneration++;
+    if (rebuild && mounted) setState(() {});
+  }
+
+  void _setTouchControls(bool enabled) {
+    _clearDeviceInput();
+    widget.onTouchControlsChanged?.call(enabled);
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _gameFocusNode.requestFocus();
+    if (event.kind == PointerDeviceKind.touch) {
+      widget.onTouchDetected?.call();
+    } else if (event.kind == PointerDeviceKind.mouse &&
+        (event.buttons & kPrimaryMouseButton) != 0 &&
+        _mousePointer == null) {
+      _mousePointer = event.pointer;
+      _runtime.setPointerAttack(true);
+    }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (event.kind == PointerDeviceKind.mouse &&
+        event.pointer == _mousePointer &&
+        (event.buttons & kPrimaryMouseButton) != 0) {
+      _runtime.addPointerYaw(event.delta.dx);
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    if (event.pointer != _mousePointer) return;
+    _mousePointer = null;
+    _runtime.setPointerAttack(false);
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (event.pointer != _mousePointer) return;
+    _mousePointer = null;
+    _runtime.setPointerAttack(false, cancelled: true);
+  }
+
   void _restartLevel() {
+    _clearDeviceInput();
     _runtime.restartLevel();
     _gameFocusNode.requestFocus();
   }
@@ -136,7 +227,7 @@ final class _DoomGameViewState extends State<DoomGameView>
     final core.LevelExit? exit = runtime.levelExit;
     if (_advancing || exit == null) return;
     setState(() => _advancing = true);
-    runtime.clearInput();
+    _clearDeviceInput();
     try {
       await widget.onContinue(exit);
     } finally {
@@ -148,67 +239,117 @@ final class _DoomGameViewState extends State<DoomGameView>
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => ColoredBox(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _surface,
-          ValueListenableBuilder<DoomAutomapSnapshot>(
-            valueListenable: _runtime.automap,
-            builder: (context, map, _) => map.isOpen
-                ? DoomAutomapOverlay(map: widget.level.map, snapshot: map)
-                : const SizedBox.shrink(),
-          ),
-          Positioned(
-            top: 10,
-            left: 10,
-            child: DoomContentBadge(
-              synthetic: widget.synthetic,
-              mapName: widget.level.map.name,
-              setupMessage: widget.setupMessage,
+    builder: (context, constraints) {
+      final narrow = constraints.maxWidth < 1100;
+      return ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _surface,
+            ValueListenableBuilder<DoomAutomapSnapshot>(
+              valueListenable: _runtime.automap,
+              builder: (context, map, _) => map.isOpen
+                  ? DoomAutomapOverlay(map: widget.level.map, snapshot: map)
+                  : const SizedBox.shrink(),
             ),
-          ),
-          Positioned(
-            top: 10,
-            right: 10,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_showControls)
-                  DoomControlsHint(
-                    narrow: constraints.maxWidth < 620,
-                    onHide: () => setState(() => _showControls = false),
-                  )
-                else
-                  IconButton(
-                    key: const Key('show-controls'),
-                    tooltip: 'Show controls',
-                    onPressed: () => setState(() => _showControls = true),
-                    icon: const Icon(Icons.keyboard_alt_outlined, size: 18),
+            SafeArea(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (widget.touchControlsEnabled)
+                          Positioned.fill(
+                            top: 44,
+                            child: _buildTouchControls(),
+                          ),
+                        Positioned(
+                          top: 10,
+                          left: 10,
+                          child: DoomContentBadge(
+                            synthetic: widget.synthetic,
+                            mapName: widget.level.map.name,
+                            setupMessage: widget.setupMessage,
+                          ),
+                        ),
+                        if (!widget.touchControlsEnabled)
+                          Positioned(
+                            top: narrow && _showControls ? 44 : 10,
+                            right: 10,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (_showControls)
+                                  DoomControlsHint(
+                                    narrow: narrow,
+                                    onHide: () =>
+                                        setState(() => _showControls = false),
+                                  )
+                                else
+                                  IconButton(
+                                    key: const Key('show-controls'),
+                                    tooltip: 'Show controls',
+                                    onPressed: () =>
+                                        setState(() => _showControls = true),
+                                    icon: const Icon(
+                                      Icons.keyboard_alt_outlined,
+                                      size: 18,
+                                    ),
+                                  ),
+                                DoomPauseButton(
+                                  onPressed: _runtime.togglePause,
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                DoomPauseButton(onPressed: _runtime.togglePause),
-              ],
+                  ValueListenableBuilder<DoomHudSnapshot>(
+                    valueListenable: _runtime.hud,
+                    builder: (context, hud, _) =>
+                        DoomStatusBar(hud: hud, synthetic: widget.synthetic),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ValueListenableBuilder<DoomHudSnapshot>(
+            ValueListenableBuilder<DoomHudSnapshot>(
               valueListenable: _runtime.hud,
-              builder: (context, hud, _) =>
-                  DoomStatusBar(hud: hud, synthetic: widget.synthetic),
+              builder: (context, hud, _) => _buildOverlay(hud),
             ),
-          ),
-          ValueListenableBuilder<DoomHudSnapshot>(
-            valueListenable: _runtime.hud,
-            builder: (context, hud, _) => _buildOverlay(hud),
-          ),
-        ],
-      ),
-    ),
+          ],
+        ),
+      );
+    },
   );
+
+  Widget _buildTouchControls() {
+    final runtime = _runtime;
+    return DoomTouchControls(
+      enabled: !_hudInputBlocked && !_advancing,
+      resetGeneration: _touchResetGeneration,
+      mapOpen: _mapOpen,
+      onMove: (pointer, forward, side) {
+        // Cancellation sends zero axes; it must not steal focus back.
+        if (forward != 0 || side != 0) _gameFocusNode.requestFocus();
+        runtime.setTouchMovement(pointer, forward: forward, side: side);
+      },
+      onLook: runtime.addPointerYaw,
+      onControlDown: (pointer, control) {
+        _gameFocusNode.requestFocus();
+        runtime.pressTouchControl(pointer, control);
+      },
+      onPointerUp: (pointer, cancelled) =>
+          runtime.releaseTouchPointer(pointer, cancelled: cancelled),
+      onUse: runtime.triggerUse,
+      onSelectWeapon: runtime.selectWeapon,
+      onToggleMap: runtime.toggleAutomap,
+      onZoomMap: (inwards) => runtime.zoomAutomap(inwards: inwards),
+      onPause: runtime.togglePause,
+    );
+  }
 
   Widget _buildOverlay(DoomHudSnapshot hud) {
     if (hud.levelComplete) {
@@ -241,6 +382,8 @@ final class _DoomGameViewState extends State<DoomGameView>
     if (hud.paused) {
       return DoomPauseOverlay(
         key: const Key('pause-overlay'),
+        touchControlsEnabled: widget.touchControlsEnabled,
+        onTouchControlsChanged: _setTouchControls,
         onResume: _runtime.togglePause,
         onLoadIwad: widget.onLoadIwad,
         errorMessage: widget.selectionErrorMessage,
@@ -258,28 +401,27 @@ final class _DoomInputSurface extends StatelessWidget {
     required this.runtime,
     required this.focusNode,
     this.surfaceBuilder,
+    required this.onPointerDown,
+    required this.onPointerMove,
+    required this.onPointerUp,
+    required this.onPointerCancel,
   });
   final DoomRuntimeView runtime;
   final FocusNode focusNode;
   final DoomGameSurfaceBuilder? surfaceBuilder;
+  final void Function(PointerDownEvent) onPointerDown;
+  final void Function(PointerMoveEvent) onPointerMove;
+  final void Function(PointerUpEvent) onPointerUp;
+  final void Function(PointerCancelEvent) onPointerCancel;
 
   @override
   Widget build(BuildContext context) => Listener(
     key: const Key('game-input-surface'),
     behavior: HitTestBehavior.opaque,
-    onPointerDown: (event) {
-      focusNode.requestFocus();
-      if ((event.buttons & kPrimaryMouseButton) != 0) {
-        runtime.setPointerAttack(true);
-      }
-    },
-    onPointerMove: (event) {
-      if ((event.buttons & kPrimaryMouseButton) != 0) {
-        runtime.addPointerYaw(event.delta.dx);
-      }
-    },
-    onPointerUp: (_) => runtime.setPointerAttack(false),
-    onPointerCancel: (_) => runtime.setPointerAttack(false),
+    onPointerDown: onPointerDown,
+    onPointerMove: onPointerMove,
+    onPointerUp: onPointerUp,
+    onPointerCancel: onPointerCancel,
     child: surfaceBuilder != null
         ? Focus(
             key: const Key('doom-game-focus'),

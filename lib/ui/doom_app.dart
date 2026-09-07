@@ -38,6 +38,12 @@ final class _DoomAppState extends State<DoomApp> {
   final DoomLevelPreparer _preparer = DoomLevelPreparer();
   late DoomAppController _controller;
   late bool _ownsController;
+  bool _touchDetected = false;
+  bool? _touchControlsOverride;
+
+  void _detectTouch() {
+    if (!_touchDetected) setState(() => _touchDetected = true);
+  }
 
   @override
   void didUpdateWidget(covariant DoomApp oldWidget) {
@@ -94,6 +100,10 @@ final class _DoomAppState extends State<DoomApp> {
         controller: _controller,
         runtimeFactory: widget.runtimeFactory,
         gameSurfaceBuilder: widget.gameSurfaceBuilder,
+        touchControlsEnabled: _touchControlsOverride ?? _touchDetected,
+        onTouchDetected: _detectTouch,
+        onTouchControlsChanged: (enabled) =>
+            setState(() => _touchControlsOverride = enabled),
         onLoadIwad: widget.wadPicker != null || browserWadPickerAvailable
             ? _pickIwad
             : null,
@@ -105,12 +115,18 @@ final class _DoomAppState extends State<DoomApp> {
 final class _DoomAppBody extends StatelessWidget {
   const _DoomAppBody({
     required this.controller,
+    required this.touchControlsEnabled,
+    required this.onTouchDetected,
+    required this.onTouchControlsChanged,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
     this.onLoadIwad,
   });
 
   final DoomAppController controller;
+  final bool touchControlsEnabled;
+  final VoidCallback onTouchDetected;
+  final ValueChanged<bool> onTouchControlsChanged;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
   final VoidCallback? onLoadIwad;
@@ -142,6 +158,9 @@ final class _DoomAppBody extends StatelessWidget {
           onContinue: (exit) => controller.advanceLevel(level, exit),
           runtimeFactory: runtimeFactory,
           gameSurfaceBuilder: gameSurfaceBuilder,
+          touchControlsEnabled: touchControlsEnabled,
+          onTouchDetected: onTouchDetected,
+          onTouchControlsChanged: onTouchControlsChanged,
         ),
       },
     );

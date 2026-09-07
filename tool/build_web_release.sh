@@ -2,8 +2,24 @@
 # Reproducible Flutter Wasm + flame_3d WebGPU release build.
 set -euo pipefail
 
-DOOMPELLER_FLUTTER="${DOOMPELLER_FLUTTER:-/Users/savva/fvm/versions/stable/bin/flutter}"
-DOOMPELLER_DART="${DOOMPELLER_DART:-$(dirname "$DOOMPELLER_FLUTTER")/dart}"
+if [[ -n "${DOOMPELLER_FLUTTER:-}" ]]; then
+  : # Keep the explicit CI/developer override.
+elif command -v flutter >/dev/null 2>&1; then
+  DOOMPELLER_FLUTTER="$(command -v flutter)"
+else
+  echo "error: Flutter 3.44.4 is required; set DOOMPELLER_FLUTTER or add flutter to PATH" >&2
+  exit 1
+fi
+if [[ -n "${DOOMPELLER_DART:-}" ]]; then
+  : # Keep the explicit CI/developer override.
+elif [[ -x "$(dirname "$DOOMPELLER_FLUTTER")/dart" ]]; then
+  DOOMPELLER_DART="$(dirname "$DOOMPELLER_FLUTTER")/dart"
+elif command -v dart >/dev/null 2>&1; then
+  DOOMPELLER_DART="$(command -v dart)"
+else
+  echo "error: the Dart executable for Flutter 3.44.4 is required" >&2
+  exit 1
+fi
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IWAD_SOURCE="$PROJECT_ROOT/.local/doom/DOOM1.WAD"
 IWAD_DESTINATION="$PROJECT_ROOT/build/web/assets/.local/doom/DOOM1.WAD"
@@ -15,10 +31,30 @@ if [[ ! -x "$DOOMPELLER_FLUTTER" ]]; then
   echo "error: pinned Flutter executable not found: $DOOMPELLER_FLUTTER" >&2
   exit 1
 fi
+if [[ ! -x "$DOOMPELLER_DART" ]]; then
+  echo "error: Dart executable not found: $DOOMPELLER_DART" >&2
+  exit 1
+fi
+flutter_version="$("$DOOMPELLER_FLUTTER" --version --machine | sed -n 's/.*"frameworkVersion": *"\([^"]*\)".*/\1/p' | head -n 1)"
+if [[ "$flutter_version" != "3.44.4" ]]; then
+  echo "error: expected Flutter 3.44.4, found ${flutter_version:-unknown}" >&2
+  exit 1
+fi
 if ! command -v naga >/dev/null 2>&1; then
   echo "error: naga-cli is required for the WebGPU shader bundle" >&2
   exit 1
 fi
+
+sha256_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    echo "error: shasum or sha256sum is required" >&2
+    return 1
+  fi
+}
 if [[ "$(naga --version)" != "30.0.1" ]]; then
   echo "error: expected naga 30.0.1, found $(naga --version)" >&2
   exit 1
@@ -33,7 +69,7 @@ if [[ "$source_iwad_bytes" != "$EXPECTED_IWAD_BYTES" ]]; then
   echo "error: expected $EXPECTED_IWAD_BYTES IWAD bytes, found $source_iwad_bytes" >&2
   exit 1
 fi
-source_iwad_sha256="$(shasum -a 256 "$IWAD_SOURCE" | awk '{print $1}')"
+source_iwad_sha256="$(sha256_file "$IWAD_SOURCE")"
 if [[ "$source_iwad_sha256" != "$EXPECTED_IWAD_SHA256" ]]; then
   echo "error: unexpected IWAD SHA-256: $source_iwad_sha256" >&2
   exit 1
@@ -91,7 +127,7 @@ if ! grep -Fq '"useLocalCanvasKit":true' build/web/flutter_bootstrap.js; then
   exit 1
 fi
 destination_iwad_bytes="$(wc -c < "$IWAD_DESTINATION" | tr -d ' ')"
-destination_iwad_sha256="$(shasum -a 256 "$IWAD_DESTINATION" | awk '{print $1}')"
+destination_iwad_sha256="$(sha256_file "$IWAD_DESTINATION")"
 if [[ "$destination_iwad_bytes" != "$EXPECTED_IWAD_BYTES" ]] ||
   [[ "$destination_iwad_sha256" != "$EXPECTED_IWAD_SHA256" ]]; then
   echo "error: bundled IWAD failed post-copy validation" >&2

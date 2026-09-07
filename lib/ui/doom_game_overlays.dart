@@ -153,61 +153,83 @@ final class DoomPauseOverlay extends StatelessWidget {
   const DoomPauseOverlay({
     super.key,
     required this.onResume,
+    this.touchControlsEnabled = false,
+    this.onTouchControlsChanged,
     this.onLoadIwad,
     this.errorMessage,
   });
 
   final VoidCallback onResume;
+  final bool touchControlsEnabled;
+  final ValueChanged<bool>? onTouchControlsChanged;
   final VoidCallback? onLoadIwad;
   final String? errorMessage;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Colors.black.withValues(alpha: 0.78),
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Text(
-            'PAUSED',
-            style: TextStyle(
-              color: Color(0xFFC8B45A),
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
+    child: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Text(
+                  'PAUSED',
+                  style: TextStyle(
+                    color: Color(0xFFC8B45A),
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Press Esc to resume',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.tonal(
+                  key: const Key('overlay-action'),
+                  onPressed: onResume,
+                  child: const Text('RESUME'),
+                ),
+                const SizedBox(height: 8),
+                Material(
+                  type: MaterialType.transparency,
+                  child: SwitchListTile.adaptive(
+                    key: const Key('pause-touch-controls'),
+                    title: const Text('TOUCH CONTROLS'),
+                    value: touchControlsEnabled,
+                    onChanged: onTouchControlsChanged,
+                  ),
+                ),
+                if (onLoadIwad != null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    key: const Key('pause-load-iwad'),
+                    onPressed: onLoadIwad,
+                    child: const Text('SELECT LOCAL IWAD'),
+                  ),
+                ],
+                if (errorMessage != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Text(
+                      errorMessage!,
+                      key: const Key('pause-iwad-error'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFFFF6B5F)),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Press Esc to resume',
-            style: TextStyle(color: Colors.white70),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.tonal(
-            key: const Key('overlay-action'),
-            onPressed: onResume,
-            child: const Text('RESUME'),
-          ),
-          if (onLoadIwad != null) ...<Widget>[
-            const SizedBox(height: 10),
-            OutlinedButton(
-              key: const Key('pause-load-iwad'),
-              onPressed: onLoadIwad,
-              child: const Text('SELECT LOCAL IWAD'),
-            ),
-          ],
-          if (errorMessage != null) ...<Widget>[
-            const SizedBox(height: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Text(
-                errorMessage!,
-                key: const Key('pause-iwad-error'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFFF6B5F)),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     ),
   );
@@ -233,8 +255,8 @@ final class DoomControlsHint extends StatelessWidget {
       children: <Widget>[
         Text(
           narrow
-              ? 'WASD · SHIFT run · ←→ · CTRL · E'
-              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
+              ? 'WASD · Shift run · ←→ · Enter fire · E use'
+              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Enter/Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
           style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
         IconButton(

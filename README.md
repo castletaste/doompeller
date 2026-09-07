@@ -48,7 +48,8 @@ build packages `.local/doom/DOOM1.WAD` at
 **SELECT LOCAL IWAD** remains available only from the pause menu for switching
 content at runtime.
 
-Build the reproducible release with Flutter 3.44.4 and naga-cli 30.0.1 on PATH:
+Build the reproducible release with Flutter 3.44.4, naga-cli 30.0.1 and
+ripgrep (`rg`) on PATH:
 
 ```sh
 DOOMPELLER_FLUTTER="$(command -v flutter)" bash tool/build_web_release.sh

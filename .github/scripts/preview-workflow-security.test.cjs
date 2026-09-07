@@ -108,6 +108,17 @@ test('the source workflow builds PRs and uploads the exact single-file archive',
   );
 });
 
+test('clean checkout generates declared shader assets before app validation', () => {
+  const dependencies = productionWorkflow.indexOf('run: flutter pub get --enforce-lockfile');
+  const generation = productionWorkflow.indexOf('flutter pub run flame_3d:build_shaders --with-web-gpu');
+  const verification = productionWorkflow.indexOf('dart run tool/verify_web_shader_bundle.dart');
+  const analysis = productionWorkflow.indexOf('run: flutter analyze');
+  assert.ok(dependencies >= 0);
+  assert.ok(generation > dependencies);
+  assert.ok(verification > generation);
+  assert.ok(analysis > verification);
+});
+
 test('production uses the same locked tools and archive contract only from main', () => {
   const installStep = productionWorkflow.indexOf(
     '- name: Install pinned Wrangler without deployment credentials',

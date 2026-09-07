@@ -15,6 +15,7 @@ the app's assets, or provide the same verified `DOOM1.WAD` yourself:
 ```sh
 python3 tool/fetch_shareware.py
 flutter pub get --enforce-lockfile
+flutter pub run flame_3d:build_shaders
 ```
 
 The file stays ignored at `.local/doom/DOOM1.WAD`; it is bundled into the app

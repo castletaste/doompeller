@@ -1,0 +1,386 @@
+name: Publish Doompeller PR preview
+
+on:
+  workflow_run:
+    workflows:
+      - Verify and deploy Doompeller web
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful pull-request web-build run ID
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate and sanitize preview bundle
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      artifact_id: ${{ steps.source.outputs.artifact_id }}
+      build_sha: ${{ steps.source.outputs.build_sha }}
+      head_sha: ${{ steps.source.outputs.head_sha }}
+      pr_number: ${{ steps.source.outputs.pr_number }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      sanitized_artifact_id: ${{ steps.sanitized.outputs.artifact-id }}
+
+    steps:
+      - name: Check out trusted policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate source run, pull request, and artifact
+        id: source
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          SOURCE_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.source_run_id || github.event.workflow_run.id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const path = require('node:path');
+            const policy = require(path.join(
+              process.env.GITHUB_WORKSPACE,
+              '.github/scripts/preview-artifact-policy.cjs',
+            ));
+            const expectedRef = `refs/heads/${context.payload.repository.default_branch}`;
+            if (process.env.GITHUB_REF !== expectedRef) {
+              throw new Error(`preview publisher must run from ${expectedRef}`);
+            }
+            const runId = Number(process.env.SOURCE_RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) {
+              throw new Error('source_run_id must be a positive safe integer');
+            }
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const {data: expectedWorkflow} = await github.rest.actions.getWorkflow({
+              owner,
+              repo,
+              workflow_id: 'deploy-web.yml',
+            });
+            const {data: run} = await github.rest.actions.getWorkflowRun({
+              owner,
+              repo,
+              run_id: runId,
+            });
+            const prNumber = policy.requireSinglePullRequestNumber(run);
+            const {data: pullRequest} = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner, repo, run_id: runId, per_page: 100},
+            );
+            const source = policy.validatePreviewSource({
+              repository: context.payload.repository,
+              expectedWorkflow,
+              run,
+              pullRequest,
+              artifacts,
+            });
+            for (const [name, value] of Object.entries({
+              artifact_id: source.artifactId,
+              build_sha: source.buildSha,
+              head_sha: source.headSha,
+              pr_number: source.prNumber,
+              run_id: source.runId,
+            })) {
+              core.setOutput(name, String(value));
+            }
+            await core.summary
+              .addHeading('Validated preview source', 2)
+              .addTable([
+                [{data: 'PR', header: true}, `#${source.prNumber}`],
+                [{data: 'PR head', header: true}, source.headSha],
+                [{data: 'Tested build', header: true}, source.buildSha],
+                [{data: 'Source run', header: true}, String(source.runId)],
+                [{data: 'Artifact', header: true}, String(source.artifactId)],
+              ])
+              .write();
+
+      - name: Download exact source-run artifact outside the workspace
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.source.outputs.artifact_id }}
+          path: ${{ runner.temp }}/source-artifact
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+
+      - name: Copy only verified inert static assets
+        env:
+          BUILD_SHA: ${{ steps.source.outputs.build_sha }}
+          SOURCE_DIRECTORY: ${{ runner.temp }}/source-artifact
+          SANITIZED_DIRECTORY: ${{ runner.temp }}/sanitized-artifact
+        run: >-
+          node .github/scripts/preview-artifact-policy.cjs sanitize-archive
+          "$SOURCE_DIRECTORY" "$SANITIZED_DIRECTORY" "$BUILD_SHA"
+
+      - name: Upload sanitized bundle for the credentialed job
+        id: sanitized
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: doompeller-preview-sanitized-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sanitized-artifact
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  deploy:
+    name: Publish verified PR preview
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+    concurrency:
+      group: doompeller-cloudflare-pages-preview-pr-${{ needs.validate.outputs.pr_number }}
+      cancel-in-progress: true
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      deployment_url: ${{ steps.published.outputs.deployment_url }}
+      alias_url: ${{ steps.published.outputs.alias_url }}
+
+    steps:
+      - name: Check out trusted policy
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Recheck current PR head and publish pending status
+        id: fresh
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const path = require('node:path');
+            const policy = require(path.join(
+              process.env.GITHUB_WORKSPACE,
+              'trusted-source/.github/scripts/preview-artifact-policy.cjs',
+            ));
+            const expectedRef = `refs/heads/${context.payload.repository.default_branch}`;
+            if (process.env.GITHUB_REF !== expectedRef) {
+              throw new Error(`preview publisher must run from ${expectedRef}`);
+            }
+            const prNumber = Number(process.env.PR_NUMBER);
+            const {data: pullRequest} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            policy.validateCurrentPullRequest({
+              repository: context.payload.repository,
+              pullRequest,
+              prNumber,
+              headSha: process.env.EXPECTED_HEAD_SHA,
+            });
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.EXPECTED_HEAD_SHA,
+              state: 'pending',
+              context: 'Cloudflare Pages preview',
+              description: `Publishing verified preview for PR #${prNumber}`,
+            });
+
+      - name: Download sanitized bundle outside the workspace
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.validate.outputs.sanitized_artifact_id }}
+          path: ${{ runner.temp }}/preview-site
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          digest-mismatch: error
+
+      - name: Install pinned Wrangler without deployment credentials
+        working-directory: trusted-source/.github/preview-tools
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node -e "if (require('./node_modules/wrangler/package.json').version !== '4.125.0') process.exit(1)"
+
+      - name: Recheck current PR head immediately before deployment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const path = require('node:path');
+            const policy = require(path.join(
+              process.env.GITHUB_WORKSPACE,
+              'trusted-source/.github/scripts/preview-artifact-policy.cjs',
+            ));
+            const prNumber = Number(process.env.PR_NUMBER);
+            const {data: pullRequest} = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            policy.validateCurrentPullRequest({
+              repository: context.payload.repository,
+              pullRequest,
+              prNumber,
+              headSha: process.env.EXPECTED_HEAD_SHA,
+            });
+
+      - name: Deploy static preview to Cloudflare Pages
+        id: cloudflare
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        env:
+          NPM_CONFIG_AUDIT: "false"
+          NPM_CONFIG_FUND: "false"
+          NPM_CONFIG_IGNORE_SCRIPTS: "true"
+          NPM_CONFIG_OFFLINE: "true"
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          packageManager: npm
+          workingDirectory: trusted-source/.github/preview-tools
+          wranglerVersion: 4.125.0
+          command: >-
+            pages deploy ${{ runner.temp }}/preview-site
+            --project-name=castletaste-doompeller
+            --branch=pr-${{ needs.validate.outputs.pr_number }}
+            --commit-hash=${{ needs.validate.outputs.head_sha }}
+            --commit-dirty=false
+
+      - name: Publish exact preview URL on the PR head
+        id: published
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          ALIAS_URL: ${{ steps.cloudflare.outputs.pages-deployment-alias-url }}
+          BUILD_SHA: ${{ needs.validate.outputs.build_sha }}
+          DEPLOYMENT_URL: ${{ steps.cloudflare.outputs.deployment-url }}
+          EXPECTED_HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SOURCE_RUN_ID: ${{ needs.validate.outputs.run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const path = require('node:path');
+            const policy = require(path.join(
+              process.env.GITHUB_WORKSPACE,
+              'trusted-source/.github/scripts/preview-artifact-policy.cjs',
+            ));
+            const preview = policy.validatePreviewUrls({
+              deploymentUrl: process.env.DEPLOYMENT_URL,
+              aliasUrl: process.env.ALIAS_URL,
+              prNumber: process.env.PR_NUMBER,
+            });
+            core.setOutput('deployment_url', preview.deploymentUrl);
+            core.setOutput('alias_url', preview.aliasUrl);
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.EXPECTED_HEAD_SHA,
+              state: 'success',
+              target_url: preview.deploymentUrl,
+              context: 'Cloudflare Pages preview',
+              description: `Source run ${process.env.SOURCE_RUN_ID}; build ${process.env.BUILD_SHA.slice(0, 7)}`,
+            });
+            await core.summary
+              .addHeading('Cloudflare Pages preview', 2)
+              .addTable([
+                [{data: 'Immutable URL', header: true}, preview.deploymentUrl],
+                [{data: 'Branch alias', header: true}, preview.aliasUrl],
+                [{data: 'PR head', header: true}, process.env.EXPECTED_HEAD_SHA],
+                [{data: 'Tested build', header: true}, process.env.BUILD_SHA],
+                [{data: 'Source run', header: true}, process.env.SOURCE_RUN_ID],
+              ])
+              .write();
+
+      - name: Mark preview status as failed
+        if: failure() && steps.fresh.outcome == 'success'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.EXPECTED_HEAD_SHA,
+              state: 'error',
+              context: 'Cloudflare Pages preview',
+              description: 'Verified preview publication failed',
+            });
+
+  comment:
+    name: Update preview comment
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: doompeller-preview-comment-pr-${{ needs.validate.outputs.pr_number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      statuses: read
+      pull-requests: write
+
+    steps:
+      - name: Check out trusted comment publisher
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Create or update the bot's preview comment
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          ALIAS_URL: ${{ needs.deploy.outputs.alias_url }}
+          DEPLOYMENT_URL: ${{ needs.deploy.outputs.deployment_url }}
+          BUILD_SHA: ${{ needs.validate.outputs.build_sha }}
+          EXPECTED_HEAD_SHA: ${{ needs.validate.outputs.head_sha }}
+          PR_NUMBER: ${{ needs.validate.outputs.pr_number }}
+          SOURCE_RUN_ID: ${{ needs.validate.outputs.run_id }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const path = require('node:path');
+            const {publishPreviewComment} = require(path.join(
+              process.env.GITHUB_WORKSPACE,
+              '.github/scripts/preview-comment.cjs',
+            ));
+            const result = await publishPreviewComment({
+              github,
+              context,
+              prNumber: Number(process.env.PR_NUMBER),
+              headSha: process.env.EXPECTED_HEAD_SHA,
+              buildSha: process.env.BUILD_SHA,
+              sourceRunId: Number(process.env.SOURCE_RUN_ID),
+              deploymentUrl: process.env.DEPLOYMENT_URL,
+              aliasUrl: process.env.ALIAS_URL,
+            });
+            core.info(`Preview comment ${result.action}: ${result.commentUrl ?? result.reason}`);

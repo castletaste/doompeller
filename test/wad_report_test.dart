@@ -7,7 +7,25 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../tool/wad_report.dart' as wad_report;
 
-const String _dart = '/Users/savva/fvm/versions/stable/bin/dart';
+String get _dart {
+  final String? configured = Platform.environment['DOOMPELLER_DART'];
+  if (configured != null && configured.trim().isNotEmpty) {
+    return configured;
+  }
+  final String? flutterRoot = Platform.environment['FLUTTER_ROOT'];
+  if (flutterRoot != null && flutterRoot.trim().isNotEmpty) {
+    final String bundled = <String>[
+      flutterRoot,
+      'bin',
+      'cache',
+      'dart-sdk',
+      'bin',
+      Platform.isWindows ? 'dart.exe' : 'dart',
+    ].join(Platform.pathSeparator);
+    if (File(bundled).existsSync()) return bundled;
+  }
+  return Platform.isWindows ? 'dart.exe' : 'dart';
+}
 
 void main() {
   late Directory temp;

@@ -9,6 +9,8 @@ fail() {
   exit 1
 }
 
+command -v rg >/dev/null 2>&1 || fail "ripgrep (rg) is required"
+
 need_line() {
   pattern=$1
   file=$2

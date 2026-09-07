@@ -43,6 +43,13 @@ jobs:
           python3 --version
           cargo --version
 
+      - name: Install and check contract audit prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
+          rg --version
+          sh tool/audit_project_contracts.sh
+
       - name: Install naga-cli 30.0.1
         run: |
           cargo install naga-cli --version 30.0.1 --locked --force

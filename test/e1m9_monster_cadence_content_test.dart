@@ -1,7 +1,12 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 // A timing regression on unchanged original content, not an E1M9 playthrough.
 const Map<String, int> _walkCadence = <String, int>{
@@ -15,7 +20,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('original E1M9 monsters do not chase between walk actions', () async {
-    final ByteData asset = await rootBundle.load('.local/doom/DOOM1.WAD');
+    final ByteData asset = await loadLocalIwad('.local/doom/DOOM1.WAD');
     final WadFile wad = WadFile.parse(
       asset.buffer.asUint8List(asset.offsetInBytes, asset.lengthInBytes),
     );

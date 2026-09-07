@@ -18,7 +18,11 @@ class DoomFormatFailure extends DoomFailure {
 
 /// The input is well formed but exceeds a configured budget in [DoomLimits].
 class DoomLimitFailure extends DoomFailure {
-  const DoomLimitFailure(super.message, {required this.limitName, required this.limit});
+  const DoomLimitFailure(
+    super.message, {
+    required this.limitName,
+    required this.limit,
+  });
 
   final String limitName;
   final int limit;

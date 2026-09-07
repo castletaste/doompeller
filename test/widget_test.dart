@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doompeller/game/content_source.dart';
@@ -141,9 +143,12 @@ void main() {
 
   testWidgets('fallback button explicitly loads the fixture', (tester) async {
     final source = DoomContentSource(environment: const <String, String>{});
+    final prepared = await fixtureLevel();
+    final preparation = Completer<PreparedDoomLevel>();
     final controller = DoomAppController(
       initialState: const DoomAppState.failure('bad configured IWAD'),
       loadFixture: source.loadFixture,
+      prepare: (_, _) => preparation.future,
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -156,6 +161,9 @@ void main() {
     );
 
     await tester.tap(find.byKey(const Key('fixture-fallback')));
+    await tester.pump();
+    expect(find.byKey(const Key('status-bar')), findsNothing);
+    preparation.complete(prepared);
     await tester.pumpAndSettle();
 
     expect(find.text('SYNTHETIC TEST MAP'), findsOneWidget);

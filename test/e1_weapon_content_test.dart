@@ -1,7 +1,12 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 const String _wadPath = '.local/doom/DOOM1.WAD';
 const int _skills = ThingFlags.easy | ThingFlags.medium | ThingFlags.hard;
@@ -12,7 +17,7 @@ void main() {
   test(
     'original E1 pickup things grant rockets and both new weapons',
     () async {
-      final ByteData asset = await rootBundle.load(_wadPath);
+      final ByteData asset = await loadLocalIwad(_wadPath);
       final Uint8List bytes = asset.buffer.asUint8List(
         asset.offsetInBytes,
         asset.lengthInBytes,

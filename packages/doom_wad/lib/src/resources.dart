@@ -4,7 +4,15 @@ import 'dart:typed_data';
 import 'failures.dart';
 import 'limits.dart';
 import 'resources_model.dart';
+import 'sound_decoder.dart';
+import 'patch_decoder.dart';
+import 'resource_decoders.dart';
 import 'wad.dart';
+
+export 'sound_decoder.dart';
+export 'patch_decoder.dart';
+export 'resource_decoders.dart'
+    show kPatchNameBytes, kTexturePatchBytes, kTextureHeaderBytes;
 
 /// Lumps that open the flat namespace. Vanilla only uses F_START, but PWADs
 /// and merge tools emit the FF_ and F1_/F2_/F3_ variants.
@@ -30,202 +38,6 @@ const List<String> kSpriteStartMarkers = <String>['S_START', 'SS_START'];
 
 /// Lumps that close the sprite namespace.
 const List<String> kSpriteEndMarkers = <String>['S_END', 'SS_END'];
-
-/// Post terminator in the column-post patch encoding.
-const int kPatchPostEnd = 0xFF;
-
-/// Bytes in one PNAMES entry.
-const int kPatchNameBytes = 8;
-
-/// Bytes in one TEXTUREx patch record.
-const int kTexturePatchBytes = 10;
-
-/// Bytes in one TEXTUREx header record, excluding its patch list.
-const int kTextureHeaderBytes = 22;
-
-/// Type word used by DMX digital-sound lumps.
-const int kDmxDigitalSoundType = 3;
-
-/// Guard bytes commonly duplicated around playable DMX PCM.
-const int kDmxGuardSamples = 16;
-
-/// Decodes one unsigned 8-bit mono DMX sound lump.
-///
-/// The declared sample count includes the common 16-byte guards. They are
-/// removed only when both guards actually repeat their adjacent edge sample;
-/// arbitrary short sounds therefore cannot lose legitimate data.
-DoomSound decodeDoomSound(
-  Uint8List lump, {
-  String? name,
-  DoomLimits limits = DoomLimits.defaults,
-}) {
-  final String key = normaliseLumpName(name ?? 'sound');
-  final int length = lump.lengthInBytes;
-  if (length < kDmxSoundHeaderBytes) {
-    throw DoomFormatFailure(
-      '$key: only $length bytes, too short for a DMX sound header',
-    );
-  }
-  final ByteData data = ByteData.sublistView(lump);
-  final int type = data.getUint16(0, Endian.little);
-  if (type != kDmxDigitalSoundType) {
-    throw DoomFormatFailure(
-      '$key: DMX sound type is $type, expected $kDmxDigitalSoundType',
-    );
-  }
-  final int sampleRate = data.getUint16(2, Endian.little);
-  if (sampleRate == 0) {
-    throw DoomFormatFailure('$key: DMX sound sample rate is zero');
-  }
-  DoomLimits.check(sampleRate, limits.maxSoundSampleRate, 'maxSoundSampleRate');
-
-  final int declared = data.getUint32(4, Endian.little);
-  final int available = length - kDmxSoundHeaderBytes;
-  if (declared > available) {
-    throw DoomFormatFailure(
-      '$key: declares $declared samples but only $available bytes remain',
-    );
-  }
-  DoomLimits.check(declared, limits.maxSoundSamples, 'maxSoundSamples');
-
-  var start = kDmxSoundHeaderBytes;
-  var count = declared;
-  if (_hasDmxGuards(lump, start, count)) {
-    start += kDmxGuardSamples;
-    count -= kDmxGuardSamples * 2;
-  }
-  final Uint8List pcm = Uint8List(count);
-  pcm.setRange(0, count, lump, start);
-  return DoomSound(name: key, sampleRate: sampleRate, pcm: pcm);
-}
-
-bool _hasDmxGuards(Uint8List lump, int start, int count) {
-  if (count <= kDmxGuardSamples * 2) return false;
-  final int firstSample = lump[start + kDmxGuardSamples];
-  for (var i = 0; i < kDmxGuardSamples; i++) {
-    if (lump[start + i] != firstSample) return false;
-  }
-  final int lastSample = lump[start + count - kDmxGuardSamples - 1];
-  for (var i = count - kDmxGuardSamples; i < count; i++) {
-    if (lump[start + i] != lastSample) return false;
-  }
-  return true;
-}
-
-/// Decodes a Doom patch lump into a row-major [PatchImage].
-///
-/// The on-disk layout is a header, then one 32-bit file offset per column,
-/// then each column as a chain of posts: a topdelta byte, a length byte, a
-/// pad byte, the pixels, and a trailing pad byte. A topdelta of 0xFF ends the
-/// column.
-///
-/// Two vanilla quirks are handled:
-///
-///  * Tall patches. The topdelta byte cannot address rows past 254, so patches
-///    taller than that encode later posts as deltas relative to the previous
-///    post: whenever a topdelta is not greater than the previous absolute top,
-///    it is added to it instead of replacing it. Patches under 255 rows have
-///    strictly increasing topdeltas and are unaffected.
-///  * Posts that run past the declared height. Vanilla clips them; rows
-///    outside the image are dropped rather than treated as corruption.
-///
-/// Throws [DoomFormatFailure] on a structurally invalid lump.
-PatchImage decodeDoomPatch(
-  Uint8List lump, {
-  String? name,
-  DoomLimits limits = DoomLimits.defaults,
-}) {
-  final String label = name ?? 'patch';
-  final int length = lump.lengthInBytes;
-  if (length < 8) {
-    throw DoomFormatFailure(
-      '$label: only $length bytes, too short for a patch header',
-    );
-  }
-  final ByteData data = ByteData.sublistView(lump);
-  final int width = data.getInt16(0, Endian.little);
-  final int height = data.getInt16(2, Endian.little);
-  final int leftOffset = data.getInt16(4, Endian.little);
-  final int topOffset = data.getInt16(6, Endian.little);
-
-  if (width <= 0 || height <= 0) {
-    throw DoomFormatFailure('$label: bad dimensions ${width}x$height');
-  }
-  DoomLimits.check(
-    width * height,
-    limits.maxCompositePixels,
-    'maxCompositePixels',
-  );
-
-  final int tableEnd = 8 + width * 4;
-  if (tableEnd > length) {
-    throw DoomFormatFailure(
-      '$label: column table needs $tableEnd bytes but the lump is $length',
-    );
-  }
-
-  final Uint8List indices = Uint8List(width * height);
-  final Uint8List coverage = Uint8List(width * height);
-
-  for (var x = 0; x < width; x++) {
-    final int columnStart = data.getInt32(8 + x * 4, Endian.little);
-    if (columnStart < 0 || columnStart >= length) {
-      throw DoomFormatFailure(
-        '$label: column $x points to $columnStart, outside the $length byte lump',
-      );
-    }
-    var cursor = columnStart;
-    var top = -1;
-    while (true) {
-      if (cursor >= length) {
-        throw DoomFormatFailure(
-          '$label: column $x runs past the end of the lump',
-        );
-      }
-      final int topDelta = lump[cursor];
-      if (topDelta == kPatchPostEnd) {
-        break;
-      }
-      if (cursor + 3 > length) {
-        throw DoomFormatFailure('$label: truncated post header in column $x');
-      }
-      final int postLength = lump[cursor + 1];
-      // Tall-patch rule: a non-increasing topdelta continues the previous post.
-      top = topDelta <= top ? top + topDelta : topDelta;
-      final int pixels = cursor + 3;
-      final int postEnd = pixels + postLength + 1;
-      if (postEnd > length) {
-        throw DoomFormatFailure(
-          '$label: post in column $x ends at $postEnd, past the $length byte lump',
-        );
-      }
-      // Clip to the declared height instead of rejecting overlong posts.
-      var first = 0;
-      if (top < 0) {
-        first = -top;
-      }
-      var last = postLength;
-      if (top + last > height) {
-        last = height - top;
-      }
-      for (var i = first; i < last; i++) {
-        final int target = (top + i) * width + x;
-        indices[target] = lump[pixels + i];
-        coverage[target] = 255;
-      }
-      cursor = postEnd;
-    }
-  }
-
-  return PatchImage(
-    width: width,
-    height: height,
-    leftOffset: leftOffset,
-    topOffset: topOffset,
-    indices: indices,
-    coverage: coverage,
-  );
-}
 
 /// Every decoded graphic in a [WadSet]: palettes, textures, flats and sprites.
 ///
@@ -293,13 +105,16 @@ class WadResources {
     WadSet set, {
     DoomLimits limits = DoomLimits.defaults,
   }) {
-    final Playpal playpal = _decodePlaypal(set.require('PLAYPAL'));
-    final Colormap colormap = _decodeColormap(set.require('COLORMAP'));
-    final List<String> patchNames = _decodePnames(set.read('PNAMES'), limits);
+    final Playpal playpal = decodePlaypal(set.require('PLAYPAL'));
+    final Colormap colormap = decodeColormap(set.require('COLORMAP'));
+    final List<String> patchNames = decodePatchNames(
+      set.read('PNAMES'),
+      limits,
+    );
 
     final Map<String, TextureDef> textures = <String, TextureDef>{};
     final List<String> order = <String>[];
-    _decodeTextureLump(
+    readTextureDefinitions(
       set.read('TEXTURE1'),
       'TEXTURE1',
       patchNames.length,
@@ -307,7 +122,7 @@ class WadResources {
       order,
       limits,
     );
-    _decodeTextureLump(
+    readTextureDefinitions(
       set.read('TEXTURE2'),
       'TEXTURE2',
       patchNames.length,
@@ -317,11 +132,7 @@ class WadResources {
     );
     DoomLimits.check(textures.length, limits.maxTextures, 'maxTextures');
 
-    final Map<String, int> flats = _collectNamespace(
-      set,
-      kFlatStartMarkers,
-      kFlatEndMarkers,
-    );
+    final flats = _collectNamespace(set, kFlatStartMarkers, kFlatEndMarkers);
     return WadResources._(
       wadSet: set,
       budgets: limits,
@@ -330,13 +141,13 @@ class WadResources {
       names: patchNames,
       textureMap: textures,
       order: order,
-      flats: flats,
-      flatOrder: _collectNamespaceOrder(
+      flats: flats.indices,
+      flatOrder: flats.order,
+      sprites: _collectNamespace(
         set,
-        kFlatStartMarkers,
-        kFlatEndMarkers,
-      ),
-      sprites: _collectNamespace(set, kSpriteStartMarkers, kSpriteEndMarkers),
+        kSpriteStartMarkers,
+        kSpriteEndMarkers,
+      ).indices,
     );
   }
 
@@ -592,214 +403,28 @@ class WadResources {
     }
   }
 
-  static Playpal _decodePlaypal(Uint8List lump) {
-    final int available = lump.lengthInBytes ~/ kPaletteBytes;
-    if (available < 1) {
-      throw DoomFormatFailure(
-        'PLAYPAL: ${lump.lengthInBytes} bytes holds no complete $kPaletteBytes byte palette',
-      );
-    }
-    final List<Uint8List> palettes = <Uint8List>[];
-    for (var i = 0; i < available; i++) {
-      final Uint8List palette = Uint8List(kPaletteBytes);
-      palette.setRange(0, kPaletteBytes, lump, i * kPaletteBytes);
-      palettes.add(palette);
-    }
-    return Playpal(List<Uint8List>.unmodifiable(palettes));
-  }
-
-  static Colormap _decodeColormap(Uint8List lump) {
-    final int available = lump.lengthInBytes ~/ kColormapBytes;
-    if (available < 1) {
-      throw DoomFormatFailure(
-        'COLORMAP: ${lump.lengthInBytes} bytes holds no complete $kColormapBytes byte map',
-      );
-    }
-    final List<Uint8List> maps = <Uint8List>[];
-    for (var i = 0; i < available; i++) {
-      final Uint8List map = Uint8List(kColormapBytes);
-      map.setRange(0, kColormapBytes, lump, i * kColormapBytes);
-      maps.add(map);
-    }
-    return Colormap(List<Uint8List>.unmodifiable(maps));
-  }
-
-  static List<String> _decodePnames(Uint8List? lump, DoomLimits limits) {
-    if (lump == null) {
-      return const <String>[];
-    }
-    if (lump.lengthInBytes < 4) {
-      throw const DoomFormatFailure(
-        'PNAMES: shorter than its 4 byte count field',
-      );
-    }
-    final int count = ByteData.sublistView(lump).getInt32(0, Endian.little);
-    if (count < 0) {
-      throw DoomFormatFailure('PNAMES: negative count $count');
-    }
-    DoomLimits.check(count, limits.maxPatchNames, 'maxPatchNames');
-    final int needed = 4 + count * kPatchNameBytes;
-    if (needed > lump.lengthInBytes) {
-      throw DoomFormatFailure(
-        'PNAMES: $count names need $needed bytes but the lump is ${lump.lengthInBytes}',
-      );
-    }
-    final List<String> names = <String>[];
-    for (var i = 0; i < count; i++) {
-      names.add(decodeLumpName(lump, 4 + i * kPatchNameBytes));
-    }
-    return names;
-  }
-
-  static void _decodeTextureLump(
-    Uint8List? lump,
-    String lumpName,
-    int patchNameCount,
-    Map<String, TextureDef> out,
-    List<String> order,
-    DoomLimits limits,
-  ) {
-    if (lump == null) {
-      return;
-    }
-    final int length = lump.lengthInBytes;
-    if (length < 4) {
-      throw DoomFormatFailure('$lumpName: shorter than its 4 byte count field');
-    }
-    final ByteData data = ByteData.sublistView(lump);
-    final int count = data.getInt32(0, Endian.little);
-    if (count < 0) {
-      throw DoomFormatFailure('$lumpName: negative texture count $count');
-    }
-    DoomLimits.check(count, limits.maxTextures, 'maxTextures');
-    final int tableEnd = 4 + count * 4;
-    if (tableEnd > length) {
-      throw DoomFormatFailure(
-        '$lumpName: offset table needs $tableEnd bytes but the lump is $length',
-      );
-    }
-
-    for (var i = 0; i < count; i++) {
-      final int start = data.getInt32(4 + i * 4, Endian.little);
-      if (start < 0 || start + kTextureHeaderBytes > length) {
-        throw DoomFormatFailure(
-          '$lumpName: texture $i header at $start is outside the $length byte lump',
-        );
-      }
-      final String name = decodeLumpName(lump, start);
-      final int width = data.getInt16(start + 12, Endian.little);
-      final int height = data.getInt16(start + 14, Endian.little);
-      if (width <= 0 || height <= 0) {
-        throw DoomFormatFailure(
-          '$lumpName: texture $name has size ${width}x$height',
-        );
-      }
-      DoomLimits.check(
-        width * height,
-        limits.maxCompositePixels,
-        'maxCompositePixels',
-      );
-
-      final int patchCount = data.getInt16(start + 20, Endian.little);
-      if (patchCount < 0) {
-        throw DoomFormatFailure(
-          '$lumpName: texture $name has $patchCount patches',
-        );
-      }
-      DoomLimits.check(
-        patchCount,
-        limits.maxPatchesPerTexture,
-        'maxPatchesPerTexture',
-      );
-      final int patchesEnd =
-          start + kTextureHeaderBytes + patchCount * kTexturePatchBytes;
-      if (patchesEnd > length) {
-        throw DoomFormatFailure(
-          '$lumpName: texture $name patch list ends at $patchesEnd, past the $length byte lump',
-        );
-      }
-
-      final List<TexturePatch> patches = <TexturePatch>[];
-      for (var p = 0; p < patchCount; p++) {
-        final int record = start + kTextureHeaderBytes + p * kTexturePatchBytes;
-        final int patchIndex = data.getInt16(record + 4, Endian.little);
-        if (patchIndex < 0 || patchIndex >= patchNameCount) {
-          throw DoomFormatFailure(
-            '$lumpName: texture $name references patch $patchIndex, outside PNAMES (0..${patchNameCount - 1})',
-          );
-        }
-        patches.add(
-          TexturePatch(
-            originX: data.getInt16(record, Endian.little),
-            originY: data.getInt16(record + 2, Endian.little),
-            patchIndex: patchIndex,
-          ),
-        );
-      }
-
-      // R_InitTextures concatenates TEXTURE1 followed by TEXTURE2, and the
-      // vanilla name lookup returns the first matching entry. The WAD-set
-      // lookup above has already selected a later PWAD's whole TEXTUREx lump;
-      // this only preserves first-wins *within* that effective pair.
-      if (out.containsKey(name)) {
-        continue;
-      }
-      order.add(name);
-      out[name] = TextureDef(
-        name: name,
-        width: width,
-        height: height,
-        patches: List<TexturePatch>.unmodifiable(patches),
-      );
-    }
-  }
-
   /// Maps lump name to flat index for every payload lump between a start and an
   /// end marker. Later entries overwrite earlier ones, so a PWAD appended after
   /// an IWAD replaces the IWAD's flats and sprites.
-  static Map<String, int> _collectNamespace(
+  static ({Map<String, int> indices, List<String> order}) _collectNamespace(
     WadSet set,
     List<String> startMarkers,
     List<String> endMarkers,
   ) {
-    final Map<String, int> found = <String, int>{};
+    final indices = <String, int>{};
+    final order = <String>[];
     var depth = 0;
     for (var i = 0; i < set.length; i++) {
-      final String name = set.nameAt(i);
-      if (startMarkers.contains(name)) {
-        depth++;
-        continue;
-      }
-      if (endMarkers.contains(name)) {
-        if (depth > 0) {
-          depth--;
-        }
-        continue;
-      }
-      if (depth > 0 && set.entryAt(i).size > 0) {
-        found[name] = i;
-      }
-    }
-    return found;
-  }
-
-  static List<String> _collectNamespaceOrder(
-    WadSet set,
-    List<String> startMarkers,
-    List<String> endMarkers,
-  ) {
-    final List<String> found = <String>[];
-    var depth = 0;
-    for (var i = 0; i < set.length; i++) {
-      final String name = set.nameAt(i);
+      final name = set.nameAt(i);
       if (startMarkers.contains(name)) {
         depth++;
       } else if (endMarkers.contains(name)) {
         if (depth > 0) depth--;
       } else if (depth > 0 && set.entryAt(i).size > 0) {
-        found.add(name);
+        indices[name] = i;
+        order.add(name);
       }
     }
-    return found;
+    return (indices: indices, order: order);
   }
 }

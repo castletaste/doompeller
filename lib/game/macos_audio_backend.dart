@@ -6,7 +6,9 @@ import 'sound_playback.dart';
 final class MacOsAudioBackend implements AudioBackend {
   MacOsAudioBackend({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel(channelName) {
+    final owners = _owners[_channel.binaryMessenger] ??= {};
     final WeakReference<MacOsAudioBackend> backend = WeakReference(this);
+    owners[_channel.name] = backend;
     _channel.setMethodCallHandler((MethodCall call) async {
       await backend.target?._handleNativeCall(call);
     });
@@ -14,41 +16,53 @@ final class MacOsAudioBackend implements AudioBackend {
 
   static const String channelName = 'dev.castletaste.doompeller/audio';
 
+  // A native engine belongs to a messenger/channel pair, not a Dart wrapper.
+  // Weak keys and values avoid retaining retired engines or runtime callbacks.
+  static final _owners =
+      Expando<Map<String, WeakReference<MacOsAudioBackend>>>();
+  static int _nextTransportPlaybackId = 0;
+
   final MethodChannel _channel;
   final Map<int, int> _playbackByChannel = <int, int>{};
   final Map<int, void Function()> _completionByPlayback =
       <int, void Function()>{};
   bool _disposed = false;
 
+  bool get _ownsTransport =>
+      !_disposed &&
+      identical(
+        _owners[_channel.binaryMessenger]?[_channel.name]?.target,
+        this,
+      );
+
   @override
   Future<void> play(
     AudioPlayRequest request, {
     void Function()? onComplete,
   }) async {
-    if (_disposed) {
-      throw StateError('The macOS audio backend is disposed.');
-    }
+    if (!_ownsTransport) return;
+    final int transportId = _nextTransportPlaybackId++;
     final int? replaced = _playbackByChannel[request.channelId];
     if (replaced != null) {
       _completionByPlayback.remove(replaced);
     }
-    _playbackByChannel[request.channelId] = request.playbackId;
+    _playbackByChannel[request.channelId] = transportId;
     if (onComplete != null) {
-      _completionByPlayback[request.playbackId] = onComplete;
+      _completionByPlayback[transportId] = onComplete;
     }
     try {
       await _channel.invokeMethod<void>('play', <String, Object>{
         'channelId': request.channelId,
-        'playbackId': request.playbackId,
+        'playbackId': transportId,
         'wavBytes': request.wavBytes,
         'volume': request.volume,
         'pan': request.pan,
       });
     } on Object {
-      if (_playbackByChannel[request.channelId] == request.playbackId) {
+      if (_playbackByChannel[request.channelId] == transportId) {
         _playbackByChannel.remove(request.channelId);
       }
-      _completionByPlayback.remove(request.playbackId);
+      _completionByPlayback.remove(transportId);
       rethrow;
     }
   }
@@ -59,7 +73,7 @@ final class MacOsAudioBackend implements AudioBackend {
     if (playbackId != null) {
       _completionByPlayback.remove(playbackId);
     }
-    if (!_disposed) {
+    if (_ownsTransport) {
       await _channel.invokeMethod<void>('stop', <String, Object>{
         'channelId': channelId,
       });
@@ -69,13 +83,21 @@ final class MacOsAudioBackend implements AudioBackend {
   @override
   Future<void> dispose() async {
     if (_disposed) return;
+    final ownsTransport = _ownsTransport;
     _disposed = true;
     _playbackByChannel.clear();
     _completionByPlayback.clear();
-    await _channel.invokeMethod<void>('dispose');
+    if (ownsTransport) {
+      _owners[_channel.binaryMessenger]?.remove(_channel.name);
+      _channel.setMethodCallHandler(null);
+      // No await precedes dispatch. Flutter's MethodChannel FIFO ordering keeps
+      // this teardown ahead of commands issued by a subsequently created owner.
+      await _channel.invokeMethod<void>('dispose');
+    }
   }
 
   Future<void> _handleNativeCall(MethodCall call) async {
+    if (!_ownsTransport) return;
     if (call.method != 'playbackComplete') {
       throw MissingPluginException('Unknown audio callback ${call.method}');
     }

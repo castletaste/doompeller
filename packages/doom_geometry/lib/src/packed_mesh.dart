@@ -129,6 +129,16 @@ class PackedMesh {
 
   int get triangleCount => indexCount ~/ 3;
 
+  /// Copies vertex state; topology is read-only for every runtime.
+  PackedMesh copyForRuntime() => PackedMesh(
+    vertices: Float32List.fromList(vertices),
+    indices: indices.asUnmodifiableView(),
+    vertexCount: vertexCount,
+    indexCount: indexCount,
+    atlasPage: atlasPage,
+    kind: kind,
+  );
+
   /// Rewrites the height (world Y) of one vertex. Used by the plane and band
   /// update paths; no mesh rebuild, no reallocation.
   void setVertexHeight(int vertex, double height) {
@@ -228,6 +238,14 @@ class SectorPlaneRef {
 
   /// Height currently written into the buffers.
   double get height => _height;
+
+  SectorPlaneRef copyForRuntime() => SectorPlaneRef(
+    sector: sector,
+    isCeiling: isCeiling,
+    textureName: textureName,
+    ranges: List.unmodifiable(ranges),
+    baseHeight: baseHeight,
+  ).._height = _height;
 
   int get vertexCount {
     var total = 0;
@@ -376,6 +394,34 @@ class WallBandRef {
   double get bottom => _bottom;
   double get top => _top;
 
+  WallBandRef copyForRuntime() =>
+      WallBandRef(
+          linedef: linedef,
+          sidedef: sidedef,
+          textureName: textureName,
+          band: band,
+          frontSector: frontSector,
+          backSector: backSector,
+          meshIndex: meshIndex,
+          firstVertex: firstVertex,
+          lowerUnpegged: lowerUnpegged,
+          upperUnpegged: upperUnpegged,
+          textureHeight: textureHeight,
+          textureWidth: textureWidth,
+          baseULeft: baseULeft,
+          baseURight: baseURight,
+          scrollsHorizontally: scrollsHorizontally,
+          yOffset: yOffset,
+          rawYOffset: rawYOffset,
+          nearCeilingAnchor: nearCeilingAnchor,
+          atlasV0: atlasV0,
+          atlasV1: atlasV1,
+          baseBottom: baseBottom,
+          baseTop: baseTop,
+        )
+        .._bottom = _bottom
+        .._top = _top;
+
   static const int verticesPerQuad = 4;
 
   /// Applies the visual-only horizontal wall scroll for [levelTime].
@@ -397,6 +443,52 @@ class WallBandRef {
     mesh.setVertexU(firstVertex + 2, right);
     mesh.setVertexU(firstVertex + 3, left);
     return true;
+  }
+
+  /// Re-derives this wall from the adjacent sector heights, then re-pegs it.
+  void applySectorHeights(
+    List<PackedMesh> meshes,
+    int sector,
+    double floorHeight,
+    double ceilingHeight,
+    List<double> sectorFloors,
+    List<double> sectorCeilings,
+  ) {
+    final double nearFloor = frontSector == sector
+        ? floorHeight
+        : sectorFloors[frontSector];
+    final double nearCeil = frontSector == sector
+        ? ceilingHeight
+        : sectorCeilings[frontSector];
+    double bottom;
+    double top;
+    switch (band) {
+      case WallBandKind.solid:
+        bottom = nearFloor;
+        top = nearCeil;
+      case WallBandKind.lower:
+        final double farFloor = backSector == sector
+            ? floorHeight
+            : sectorFloors[backSector];
+        bottom = nearFloor;
+        top = farFloor;
+      case WallBandKind.upper:
+        final double farCeil = backSector == sector
+            ? ceilingHeight
+            : sectorCeilings[backSector];
+        bottom = farCeil;
+        top = nearCeil;
+      case WallBandKind.middle:
+        final double farFloor = backSector == sector
+            ? floorHeight
+            : sectorFloors[backSector];
+        final double farCeil = backSector == sector
+            ? ceilingHeight
+            : sectorCeilings[backSector];
+        bottom = nearFloor > farFloor ? nearFloor : farFloor;
+        top = nearCeil < farCeil ? nearCeil : farCeil;
+    }
+    applyHeights(meshes, bottom, top, nearCeiling: nearCeil);
   }
 
   /// Moves the quad to span [bottom]..[top] and re-pegs its texture.

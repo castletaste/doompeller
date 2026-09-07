@@ -1,3 +1,56 @@
+# Architecture refactor verification — 2026-09-07
+
+Refactor of baseline `d12073a`; see [runtime boundaries](ARCHITECTURE.md).
+The results in this section were rerun on the refactored worktree. Existing
+per-map recordings were reused as inputs; their original capture evidence is
+retained below.
+
+- App: `dart run tool/test.dart` **237 PASS** without an IWAD;
+  `dart run tool/test.dart --include-content` **265 PASS**, using the ignored
+  local original DOOM1.WAD. Content is read directly and is not copied into the
+  temporary Flutter test asset bundle.
+- Packages: `doom_core` **190 PASS**, `doom_geometry` **129 PASS / 3 opt-in stress
+  skips**, `doom_wad` **139 PASS**. **723 tests pass** across packages and the
+  content-inclusive app suite; synthetic tests are a subset, not additional.
+- Root Flutter analyzer and all three package analyzers: no issues. Formatter
+  dry run: 206 files unchanged. Project contract audit and `git diff --check` pass.
+- Production E1M1 and FakeGPU adapter replay: **2,160 tics, `0x9c565b42`**.
+  Keyboard route: **2,155 tics, `0x55608565`**. Both match the baseline.
+  Native preparation also covered every episode successor and secret-map branch.
+- All nine existing original E1 recordings were replayed against the refactored
+  core twice, first forward and then in reverse map order. Every hash, first-exit
+  tic, health and inventory result matched the pinned recording. All six negative
+  verifier cases were rejected. The disposable verifier was run with this
+  worktree's `.dart_tool/package_config.json`, ensuring imports used the changed
+  packages. This is simulation replay evidence, not native rendering evidence.
+- Admission regression: 1,000 successive requests execute only the active and
+  final pending job, with peak concurrency one; 999 stale requests cannot publish.
+- Geometry tests reproduce two runtimes sharing a prepared template and verify
+  independent vertices, plane/wall state, texture updates and restart. Repeated
+  restart plateau remains 9 surfaces, 9 buffers, 13 components, 5 actors,
+  9 actor registry entries, 1 HUD listener and 1 automap listener after 30 cycles.
+- Audio tests cover separate messengers/channels, replacement owners, stale
+  dispose/stop/play and completion IDs, delayed replies, bounded overflow with
+  critical cues retained, failure recovery and disposal after stop failure.
+- macOS Release: `flutter build macos --release --no-pub` passes (45.2 MB).
+  Exact worktree executable (PID 84021) was launched directly; its log confirmed
+  Impeller Metal. Fresh GUI observations showed E1M1, pause/resume, automap and a
+  primary-click shot (ammo 50 to 49). The test process exited cleanly. This is a
+  targeted smoke, not a fresh native full-episode replay or audible-output test.
+- Wasm/WebGPU: `tool/build_web_release.sh` passes, including shader verification,
+  bootstrap finalization, pins and local IWAD checksum. `main.dart.wasm` is
+  1,994,330 bytes; packaged IWAD is 4,196,020 bytes. The build retains the existing
+  Flutter warning about the optional Cupertino icon font; no new Cupertino icon
+  usage was introduced. No browser runtime/performance claim is made here.
+
+Pinned toolchain: Flutter 3.44.4, Dart 3.12.2, naga 30.0.1. No dependency versions,
+renderer pins, native audio protocol, gameplay rules or replay schemas changed.
+Web CPU-stage blocking, synchronous sprite packing and the renderer's lack of
+explicit GPU disposal remain documented limitations. No app was installed,
+deployed or published by this refactor.
+
+---
+
 # Episode verification — 2026-09-07
 
 Production continuation from `7bc0245`, `85fe080`, `3106b9c`, `89063ed`, then `f3bd4d1`. Original local DOOM1.WAD, 4,196,020

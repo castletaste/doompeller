@@ -14,8 +14,8 @@ import 'dart:typed_data';
 /// instead of one per partition plane.
 class PolyBuffer {
   PolyBuffer([int capacity = 16])
-      : _xy = Float64List(capacity < 4 ? 8 : capacity * 2),
-        _length = 0;
+    : _xy = Float64List(capacity < 4 ? 8 : capacity * 2),
+      _length = 0;
 
   Float64List _xy;
   int _length;
@@ -113,8 +113,7 @@ double sideOf(
   double ay,
   double dx,
   double dy,
-) =>
-    (px - ax) * dy - (py - ay) * dx;
+) => (px - ax) * dy - (py - ay) * dx;
 
 /// Clips [input] to the half-plane on one side of a line, Sutherland-Hodgman.
 ///
@@ -242,7 +241,7 @@ void cleanPolygon(PolyBuffer poly, double epsilon, [PolyBuffer? scratch]) {
     final double cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
     final double scale =
         math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay)) +
-            math.sqrt((cx - bx) * (cx - bx) + (cy - by) * (cy - by));
+        math.sqrt((cx - bx) * (cx - bx) + (cy - by) * (cy - by));
     if (cross.abs() <= epsilon * (scale + epsilon)) {
       continue;
     }

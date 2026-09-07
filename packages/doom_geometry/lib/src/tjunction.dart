@@ -81,8 +81,7 @@ TJunctionRepairResult repairTJunctions(
   var totalRepaired = 0;
   var exhausted = false;
   for (var pass = 0; pass < maxPasses; pass++) {
-    final TJunctionRepairResult result =
-        _repairOnce(current, options, budget);
+    final TJunctionRepairResult result = _repairOnce(current, options, budget);
     current = result.regions;
     totalInserted += result.insertedVertices;
     if (result.repairedRegions > totalRepaired) {
@@ -203,8 +202,15 @@ TJunctionRepairResult _repairOnce(
             if ((vx - bx).abs() <= eps && (vy - by).abs() <= eps) {
               continue;
             }
-            final double distSq =
-                distanceToSegmentSquared(vx, vy, ax, ay, bx, by, tSlot);
+            final double distSq = distanceToSegmentSquared(
+              vx,
+              vy,
+              ax,
+              ay,
+              bx,
+              by,
+              tSlot,
+            );
             final double t = tSlot[0];
             if (distSq <= epsSq && t > 0 && t < 1) {
               hits.add(p);

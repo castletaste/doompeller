@@ -28,66 +28,113 @@ void main() {
 
     test('reads an IWAD and distinguishes it from a PWAD', () {
       final WadFile parsed = WadFile.parse(
-        tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[0]))], kind: WadKind.iwad),
+        tinyWad(<LumpSource>[
+          LumpSource('X', bytesOf(<int>[0])),
+        ], kind: WadKind.iwad),
       );
       expect(parsed.kind, WadKind.iwad);
     });
 
     test('rejects bad magic', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[0]))]);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[0])),
+      ]);
       wad[0] = 0x58; // 'X'
       expect(
         () => WadFile.parse(wad),
-        throwsA(isA<DoomFormatFailure>().having((DoomFormatFailure f) => f.message, 'message', contains('magic'))),
+        throwsA(
+          isA<DoomFormatFailure>().having(
+            (DoomFormatFailure f) => f.message,
+            'message',
+            contains('magic'),
+          ),
+        ),
       );
     });
 
     test('rejects a truncated header', () {
       expect(
         () => WadFile.parse(bytesOf(<int>[0x50, 0x57, 0x41, 0x44, 0, 0])),
-        throwsA(isA<DoomFormatFailure>().having((DoomFormatFailure f) => f.message, 'message', contains('header'))),
+        throwsA(
+          isA<DoomFormatFailure>().having(
+            (DoomFormatFailure f) => f.message,
+            'message',
+            contains('header'),
+          ),
+        ),
       );
     });
 
     test('rejects an empty buffer', () {
-      expect(() => WadFile.parse(Uint8List(0)), throwsA(isA<DoomFormatFailure>()));
+      expect(
+        () => WadFile.parse(Uint8List(0)),
+        throwsA(isA<DoomFormatFailure>()),
+      );
     });
 
     test('rejects a directory offset past the end of the file', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[0]))]);
-      ByteData.sublistView(wad).setInt32(8, wad.lengthInBytes + 64, Endian.little);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[0])),
+      ]);
+      ByteData.sublistView(
+        wad,
+      ).setInt32(8, wad.lengthInBytes + 64, Endian.little);
       expect(
         () => WadFile.parse(wad),
-        throwsA(isA<DoomFormatFailure>().having((DoomFormatFailure f) => f.message, 'message', contains('directory'))),
+        throwsA(
+          isA<DoomFormatFailure>().having(
+            (DoomFormatFailure f) => f.message,
+            'message',
+            contains('directory'),
+          ),
+        ),
       );
     });
 
     test('rejects a negative directory offset', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[0]))]);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[0])),
+      ]);
       ByteData.sublistView(wad).setInt32(8, -16, Endian.little);
       expect(() => WadFile.parse(wad), throwsA(isA<DoomFormatFailure>()));
     });
 
     test('rejects a negative lump count', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[0]))]);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[0])),
+      ]);
       ByteData.sublistView(wad).setInt32(4, -1, Endian.little);
       expect(() => WadFile.parse(wad), throwsA(isA<DoomFormatFailure>()));
     });
 
     test('rejects a lump that overflows the end of the file', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[1, 2, 3, 4]))]);
-      final int directory = ByteData.sublistView(wad).getInt32(8, Endian.little);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[1, 2, 3, 4])),
+      ]);
+      final int directory = ByteData.sublistView(
+        wad,
+      ).getInt32(8, Endian.little);
       // Grow the lump so its range runs past the file.
       ByteData.sublistView(wad).setInt32(directory + 4, 4096, Endian.little);
       expect(
         () => WadFile.parse(wad),
-        throwsA(isA<DoomFormatFailure>().having((DoomFormatFailure f) => f.message, 'message', contains('beyond'))),
+        throwsA(
+          isA<DoomFormatFailure>().having(
+            (DoomFormatFailure f) => f.message,
+            'message',
+            contains('beyond'),
+          ),
+        ),
       );
     });
 
     test('rejects a negative lump size', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('X', bytesOf(<int>[1]))]);
-      final int directory = ByteData.sublistView(wad).getInt32(8, Endian.little);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('X', bytesOf(<int>[1])),
+      ]);
+      final int directory = ByteData.sublistView(
+        wad,
+      ).getInt32(8, Endian.little);
       ByteData.sublistView(wad).setInt32(directory + 4, -8, Endian.little);
       expect(() => WadFile.parse(wad), throwsA(isA<DoomFormatFailure>()));
     });
@@ -97,7 +144,9 @@ void main() {
         LumpSource.marker('F_START'),
         LumpSource('FLAT', bytesOf(<int>[7])),
       ]);
-      final int directory = ByteData.sublistView(wad).getInt32(8, Endian.little);
+      final int directory = ByteData.sublistView(
+        wad,
+      ).getInt32(8, Endian.little);
       // Real WADs frequently store nonsense here; it must not be treated as a
       // range, because markers have no payload.
       ByteData.sublistView(wad).setInt32(directory, 0x7FFFFF00, Endian.little);
@@ -119,8 +168,12 @@ void main() {
     });
 
     test('folds non-printable name bytes instead of throwing', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('AB', bytesOf(<int>[1]))]);
-      final int directory = ByteData.sublistView(wad).getInt32(8, Endian.little);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('AB', bytesOf(<int>[1])),
+      ]);
+      final int directory = ByteData.sublistView(
+        wad,
+      ).getInt32(8, Endian.little);
       wad[directory + 8] = 0x01;
       wad[directory + 9] = 0xFE;
       final WadFile parsed = WadFile.parse(wad);
@@ -142,7 +195,11 @@ void main() {
     });
 
     test('lumpBytes rejects an out of range index', () {
-      final WadFile parsed = WadFile.parse(tinyWad(<LumpSource>[LumpSource('A', bytesOf(<int>[1]))]));
+      final WadFile parsed = WadFile.parse(
+        tinyWad(<LumpSource>[
+          LumpSource('A', bytesOf(<int>[1])),
+        ]),
+      );
       expect(() => parsed.lumpBytes(5), throwsA(isA<DoomFormatFailure>()));
       expect(() => parsed.lumpBytes(-1), throwsA(isA<DoomFormatFailure>()));
     });
@@ -156,27 +213,47 @@ void main() {
       ]);
       expect(
         () => WadFile.parse(wad, limits: const DoomLimits(maxLumpCount: 1)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxLumpCount')
-            .having((DoomLimitFailure f) => f.limit, 'limit', 1)),
+        throwsA(
+          isA<DoomLimitFailure>()
+              .having(
+                (DoomLimitFailure f) => f.limitName,
+                'limitName',
+                'maxLumpCount',
+              )
+              .having((DoomLimitFailure f) => f.limit, 'limit', 1),
+        ),
       );
     });
 
     test('maxLumpBytes produces a typed limit failure', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('A', Uint8List(64))]);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('A', Uint8List(64)),
+      ]);
       expect(
         () => WadFile.parse(wad, limits: const DoomLimits(maxLumpBytes: 16)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxLumpBytes')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxLumpBytes',
+          ),
+        ),
       );
     });
 
     test('maxWadBytes produces a typed limit failure', () {
-      final Uint8List wad = tinyWad(<LumpSource>[LumpSource('A', Uint8List(64))]);
+      final Uint8List wad = tinyWad(<LumpSource>[
+        LumpSource('A', Uint8List(64)),
+      ]);
       expect(
         () => WadFile.parse(wad, limits: const DoomLimits(maxWadBytes: 32)),
-        throwsA(isA<DoomLimitFailure>()
-            .having((DoomLimitFailure f) => f.limitName, 'limitName', 'maxWadBytes')),
+        throwsA(
+          isA<DoomLimitFailure>().having(
+            (DoomLimitFailure f) => f.limitName,
+            'limitName',
+            'maxWadBytes',
+          ),
+        ),
       );
     });
   });
@@ -205,18 +282,28 @@ void main() {
     });
 
     test('reversing the order reverses which lump wins', () {
-      final WadFile a = WadFile.parse(tinyWad(<LumpSource>[LumpSource('SHARED', bytesOf(<int>[1]))]));
-      final WadFile b = WadFile.parse(tinyWad(<LumpSource>[LumpSource('SHARED', bytesOf(<int>[2]))]));
+      final WadFile a = WadFile.parse(
+        tinyWad(<LumpSource>[
+          LumpSource('SHARED', bytesOf(<int>[1])),
+        ]),
+      );
+      final WadFile b = WadFile.parse(
+        tinyWad(<LumpSource>[
+          LumpSource('SHARED', bytesOf(<int>[2])),
+        ]),
+      );
       expect(WadSet(<WadFile>[a, b]).read('SHARED'), <int>[2]);
       expect(WadSet(<WadFile>[b, a]).read('SHARED'), <int>[1]);
     });
 
     test('indexOf, bytesAt and entryAt agree', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(tinyWad(<LumpSource>[
-          LumpSource('A', bytesOf(<int>[1, 1])),
-          LumpSource('B', bytesOf(<int>[2])),
-        ])),
+        WadFile.parse(
+          tinyWad(<LumpSource>[
+            LumpSource('A', bytesOf(<int>[1, 1])),
+            LumpSource('B', bytesOf(<int>[2])),
+          ]),
+        ),
       ]);
       final int index = set.indexOf('B')!;
       expect(set.nameAt(index), 'B');
@@ -228,33 +315,49 @@ void main() {
 
     test('require throws a missing lump failure', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(tinyWad(<LumpSource>[LumpSource('A', bytesOf(<int>[1]))])),
+        WadFile.parse(
+          tinyWad(<LumpSource>[
+            LumpSource('A', bytesOf(<int>[1])),
+          ]),
+        ),
       ]);
       expect(set.require('A'), <int>[1]);
       expect(
         () => set.require('GONE'),
-        throwsA(isA<DoomMissingLumpFailure>().having((DoomMissingLumpFailure f) => f.lumpName, 'lumpName', 'GONE')),
+        throwsA(
+          isA<DoomMissingLumpFailure>().having(
+            (DoomMissingLumpFailure f) => f.lumpName,
+            'lumpName',
+            'GONE',
+          ),
+        ),
       );
     });
 
     test('mapNames finds ExMy and MAPxx markers only', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(tinyWad(<LumpSource>[
-          LumpSource.marker('MAP01'),
-          LumpSource.marker('E1M1'),
-          LumpSource.marker('MAP32'),
-          LumpSource.marker('NOTAMAP'),
-          LumpSource.marker('MAPXX'),
-          LumpSource.marker('E1MX'),
-          LumpSource('THINGS', bytesOf(<int>[0])),
-        ])),
+        WadFile.parse(
+          tinyWad(<LumpSource>[
+            LumpSource.marker('MAP01'),
+            LumpSource.marker('E1M1'),
+            LumpSource.marker('MAP32'),
+            LumpSource.marker('NOTAMAP'),
+            LumpSource.marker('MAPXX'),
+            LumpSource.marker('E1MX'),
+            LumpSource('THINGS', bytesOf(<int>[0])),
+          ]),
+        ),
       ]);
       expect(set.mapNames(), <String>['E1M1', 'MAP01', 'MAP32']);
     });
 
     test('lookups are case insensitive', () {
       final WadSet set = WadSet(<WadFile>[
-        WadFile.parse(tinyWad(<LumpSource>[LumpSource('PLAYPAL', bytesOf(<int>[1]))])),
+        WadFile.parse(
+          tinyWad(<LumpSource>[
+            LumpSource('PLAYPAL', bytesOf(<int>[1])),
+          ]),
+        ),
       ]);
       expect(set.read('playpal'), <int>[1]);
       expect(set.read('PlayPal'), <int>[1]);

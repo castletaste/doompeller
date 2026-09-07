@@ -70,7 +70,9 @@ String decodeLumpName(Uint8List bytes, int offset) {
 void encodeLumpName(Uint8List target, int offset, String name) {
   final String normalised = normaliseLumpName(name);
   for (var i = 0; i < kLumpNameBytes; i++) {
-    target[offset + i] = i < normalised.length ? normalised.codeUnitAt(i) & 0x7F : 0;
+    target[offset + i] = i < normalised.length
+        ? normalised.codeUnitAt(i) & 0x7F
+        : 0;
   }
 }
 
@@ -197,7 +199,12 @@ class WadFile {
       lastByName[name] = i;
     }
 
-    return WadFile._(bytes, kind, List<LumpEntry>.unmodifiable(lumps), lastByName);
+    return WadFile._(
+      bytes,
+      kind,
+      List<LumpEntry>.unmodifiable(lumps),
+      lastByName,
+    );
   }
 
   static WadKind _readKind(Uint8List bytes) {
@@ -213,7 +220,8 @@ class WadFile {
       return WadKind.pwad;
     }
     final String magic = String.fromCharCodes(<int>[
-      for (var i = 0; i < 4; i++) (bytes[i] >= 0x20 && bytes[i] <= 0x7E) ? bytes[i] : 0x3F,
+      for (var i = 0; i < 4; i++)
+        (bytes[i] >= 0x20 && bytes[i] <= 0x7E) ? bytes[i] : 0x3F,
     ]);
     throw DoomFormatFailure('bad magic "$magic", expected IWAD or PWAD');
   }
@@ -221,13 +229,19 @@ class WadFile {
   /// Zero-copy view of lump [index].
   Uint8List lumpBytes(int index) {
     if (index < 0 || index >= lumps.length) {
-      throw DoomFormatFailure('lump index $index out of range (0..${lumps.length - 1})');
+      throw DoomFormatFailure(
+        'lump index $index out of range (0..${lumps.length - 1})',
+      );
     }
     final LumpEntry entry = lumps[index];
     if (entry.size == 0) {
       return Uint8List(0);
     }
-    return Uint8List.sublistView(_bytes, entry.offset, entry.offset + entry.size);
+    return Uint8List.sublistView(
+      _bytes,
+      entry.offset,
+      entry.offset + entry.size,
+    );
   }
 
   /// First lump named [name] at or after [from], or null.
@@ -252,11 +266,11 @@ class WadFile {
 /// PWAD appended after an IWAD transparently patches it.
 class WadSet {
   WadSet(List<WadFile> wads)
-      : wads = List<WadFile>.unmodifiable(wads),
-        _wadIndex = Int32List(_countLumps(wads)),
-        _localIndex = Int32List(_countLumps(wads)),
-        _names = List<String>.filled(_countLumps(wads), '', growable: false),
-        _lastByName = <String, int>{} {
+    : wads = List<WadFile>.unmodifiable(wads),
+      _wadIndex = Int32List(_countLumps(wads)),
+      _localIndex = Int32List(_countLumps(wads)),
+      _names = List<String>.filled(_countLumps(wads), '', growable: false),
+      _lastByName = <String, int>{} {
     var global = 0;
     for (var w = 0; w < this.wads.length; w++) {
       final List<LumpEntry> lumps = this.wads[w].lumps;
@@ -363,7 +377,9 @@ class WadSet {
 
   void _checkIndex(int index) {
     if (index < 0 || index >= _names.length) {
-      throw DoomFormatFailure('lump index $index out of range (0..${_names.length - 1})');
+      throw DoomFormatFailure(
+        'lump index $index out of range (0..${_names.length - 1})',
+      );
     }
   }
 }

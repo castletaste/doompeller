@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'dart:math' as math;
 
 import 'package:doom_core/doom_core.dart';
@@ -6,6 +9,8 @@ import 'package:doom_core/src/map_runtime.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const List<int> _expectedLongWallChallenges = <int>[
@@ -49,7 +54,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('original E1M1 long one-sided walls contain a running player', () async {
-    final ByteData asset = await rootBundle.load(_defaultWadPath);
+    final ByteData asset = await loadLocalIwad(_defaultWadPath);
     final Uint8List bytes = asset.buffer.asUint8List(
       asset.offsetInBytes,
       asset.lengthInBytes,
@@ -236,7 +241,7 @@ void main() {
   });
 
   test('original E1M1 tangent player can advance parallel to a wall', () async {
-    final ByteData asset = await rootBundle.load(_defaultWadPath);
+    final ByteData asset = await loadLocalIwad(_defaultWadPath);
     final Uint8List bytes = asset.buffer.asUint8List(
       asset.offsetInBytes,
       asset.lengthInBytes,
@@ -312,90 +317,94 @@ void main() {
     );
   });
 
-  test('original E1M1 true spawn strafe remains contained at diagonal cap', () async {
-    final ByteData asset = await rootBundle.load(_defaultWadPath);
-    final Uint8List bytes = asset.buffer.asUint8List(
-      asset.offsetInBytes,
-      asset.lengthInBytes,
-    );
-    final MapData original = MapData.load(
-      WadSet(<WadFile>[WadFile.parse(bytes)]),
-      'E1M1',
-    );
-    final GameState game = GameState.start(
-      _withPlayer(original, x: 1056, y: -3616, angle: 90),
-      const GameConfig(monsters: false),
-    );
-    final Linedef wall = original.linedefs[6];
-    final MapVertex a = original.vertices[wall.v1];
-    final MapVertex b = original.vertices[wall.v2];
-    expect((a.x, a.y, b.x, b.y), (960, -3648, 832, -3552));
-    expect(wall.isTwoSided, isFalse);
-
-    final int startX = game.player.x;
-    final int startY = game.player.y;
-    var crossedWall = false;
-    var penetratedWall = false;
-    void tick(TicCmd command) {
-      final int beforeX = game.player.x;
-      final int beforeY = game.player.y;
-      game.runTic(command);
-      crossedWall = crossedWall ||
-          _properlyIntersects(
-            beforeX,
-            beforeY,
-            game.player.x,
-            game.player.y,
-            toFixed(a.x),
-            toFixed(a.y),
-            toFixed(b.x),
-            toFixed(b.y),
-          );
-      final double distance = _distanceToSegmentMapUnits(
-        fixedToDouble(game.player.x),
-        fixedToDouble(game.player.y),
-        a.x.toDouble(),
-        a.y.toDouble(),
-        b.x.toDouble(),
-        b.y.toDouble(),
+  test(
+    'original E1M1 true spawn strafe remains contained at diagonal cap',
+    () async {
+      final ByteData asset = await loadLocalIwad(_defaultWadPath);
+      final Uint8List bytes = asset.buffer.asUint8List(
+        asset.offsetInBytes,
+        asset.lengthInBytes,
       );
-      penetratedWall = penetratedWall || distance < 16 - 1 / 256;
-    }
+      final MapData original = MapData.load(
+        WadSet(<WadFile>[WadFile.parse(bytes)]),
+        'E1M1',
+      );
+      final GameState game = GameState.start(
+        _withPlayer(original, x: 1056, y: -3616, angle: 90),
+        const GameConfig(monsters: false),
+      );
+      final Linedef wall = original.linedefs[6];
+      final MapVertex a = original.vertices[wall.v1];
+      final MapVertex b = original.vertices[wall.v2];
+      expect((a.x, a.y, b.x, b.y), (960, -3648, 832, -3552));
+      expect(wall.isTwoSided, isFalse);
 
-    // Reach the diagonal cap with the real keyboard strafe command, let the
-    // residual momentum settle, then walk north along the wall.
-    for (var tic = 0; tic < 22; tic++) {
-      tick(const TicCmd(sideMove: -24));
-    }
-    for (var tic = 0; tic < 30; tic++) {
-      tick(TicCmd.empty);
-    }
-    for (var tic = 0; tic < 30; tic++) {
-      tick(const TicCmd(forwardMove: 25));
-    }
+      final int startX = game.player.x;
+      final int startY = game.player.y;
+      var crossedWall = false;
+      var penetratedWall = false;
+      void tick(TicCmd command) {
+        final int beforeX = game.player.x;
+        final int beforeY = game.player.y;
+        game.runTic(command);
+        crossedWall =
+            crossedWall ||
+            _properlyIntersects(
+              beforeX,
+              beforeY,
+              game.player.x,
+              game.player.y,
+              toFixed(a.x),
+              toFixed(a.y),
+              toFixed(b.x),
+              toFixed(b.y),
+            );
+        final double distance = _distanceToSegmentMapUnits(
+          fixedToDouble(game.player.x),
+          fixedToDouble(game.player.y),
+          a.x.toDouble(),
+          a.y.toDouble(),
+          b.x.toDouble(),
+          b.y.toDouble(),
+        );
+        penetratedWall = penetratedWall || distance < 16 - 1 / 256;
+      }
 
-    expect(crossedWall, isFalse, reason: 'crossed original E1M1 linedef 6');
-    expect(
-      penetratedWall,
-      isFalse,
-      reason: 'entered the radius of original E1M1 linedef 6',
-    );
-    expect(
-      game.player.y,
-      greaterThan(startY + toFixed(128)),
-      reason: 'the true-spawn route must continue past the diagonal cap',
-    );
-    expect(
-      game.player.x,
-      lessThan(startX - toFixed(64)),
-      reason: 'the player must make progress while skimming the cap',
-    );
-    expect(
-      _side(a, b, fixedToInt(game.player.x), fixedToInt(game.player.y)),
-      lessThan(0),
-      reason: 'the player must remain on linedef 6 front side',
-    );
-  });
+      // Reach the diagonal cap with the real keyboard strafe command, let the
+      // residual momentum settle, then walk north along the wall.
+      for (var tic = 0; tic < 22; tic++) {
+        tick(const TicCmd(sideMove: -24));
+      }
+      for (var tic = 0; tic < 30; tic++) {
+        tick(TicCmd.empty);
+      }
+      for (var tic = 0; tic < 30; tic++) {
+        tick(const TicCmd(forwardMove: 25));
+      }
+
+      expect(crossedWall, isFalse, reason: 'crossed original E1M1 linedef 6');
+      expect(
+        penetratedWall,
+        isFalse,
+        reason: 'entered the radius of original E1M1 linedef 6',
+      );
+      expect(
+        game.player.y,
+        greaterThan(startY + toFixed(128)),
+        reason: 'the true-spawn route must continue past the diagonal cap',
+      );
+      expect(
+        game.player.x,
+        lessThan(startX - toFixed(64)),
+        reason: 'the player must make progress while skimming the cap',
+      );
+      expect(
+        _side(a, b, fixedToInt(game.player.x), fixedToInt(game.player.y)),
+        lessThan(0),
+        reason: 'the player must remain on linedef 6 front side',
+      );
+    },
+  );
 }
 
 MapData _withPlayer(

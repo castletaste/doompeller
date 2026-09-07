@@ -138,10 +138,17 @@ abstract interface class SoundJournal {
 }
 
 class SoundDefinition {
-  const SoundDefinition({required this.sound, this.priority = 0});
+  const SoundDefinition({
+    required this.sound,
+    this.priority = 0,
+    this.wavBytes,
+  });
 
   final PcmSound sound;
   final int priority;
+
+  /// Optional immutable encoding owned by a catalog with stable PCM samples.
+  final Uint8List? wavBytes;
 }
 
 abstract interface class SoundCatalog {
@@ -166,13 +173,27 @@ class WadSoundCatalog implements SoundCatalog {
 
   final wad.WadResources resources;
   final int Function(String soundId)? priorityFor;
+  final _encoded = <String, ({PcmSound sound, Uint8List wav})>{};
 
   @override
   SoundDefinition? definitionFor(String soundId) {
-    final wad.DoomSound? sound = resources.sound(soundId);
-    if (sound == null) return null;
+    final key = soundId.toUpperCase();
+    var encoded = _encoded[key];
+    if (encoded == null) {
+      final sound = resources.sound(key);
+      if (sound == null) return null;
+      encoded = (
+        sound: pcmSoundFromDoom(sound),
+        wav: encodeDoomPcmAsWav(
+          sampleRate: sound.sampleRate,
+          pcm: sound.pcm,
+        ).asUnmodifiableView(),
+      );
+      _encoded[key] = encoded;
+    }
     return SoundDefinition(
-      sound: pcmSoundFromDoom(sound),
+      sound: encoded.sound,
+      wavBytes: encoded.wav,
       priority: priorityFor?.call(soundId) ?? 0,
     );
   }
@@ -313,9 +334,15 @@ class SoundPlaybackManager {
   final List<_ActiveChannel?> _channels;
   final double maxDistance;
   int _sequence = 0;
+  int _generation = 0;
+  bool _disposed = false;
 
   int get maxChannels => _channels.length;
   int get activeChannelCount => _channels.whereType<_ActiveChannel>().length;
+
+  /// Stops an in-flight batch at its next async boundary without losing the
+  /// active channel IDs needed by the subsequent stop/dispose operation.
+  void cancelPendingEvents() => _generation++;
 
   /// Advances the deterministic mixer clock even when this tic emitted no
   /// events, allowing completed channels to become observable immediately.
@@ -338,12 +365,15 @@ class SoundPlaybackManager {
     required AudioListener listener,
     required int gameTic,
   }) async {
+    if (_disposed) return;
+    final generation = _generation;
     advanceToTic(gameTic);
     final List<core.SoundEvent> pending = List<core.SoundEvent>.of(events);
     if (pending.isEmpty) return;
     final Set<String> batchKeys = <String>{};
 
     for (final core.SoundEvent event in pending) {
+      if (_disposed || generation != _generation) return;
       final String duplicateKey =
           '${event.soundId}:${event.sourceId}:${event.tic}';
       if (!batchKeys.add(duplicateKey)) continue;
@@ -368,6 +398,7 @@ class SoundPlaybackManager {
       final _ActiveChannel? victim = _channels[channel];
       if (victim != null) {
         await _backend.stop(channel);
+        if (_disposed || generation != _generation) return;
         _channels[channel] = null;
       }
       final int playbackId = _sequence++;
@@ -375,10 +406,12 @@ class SoundPlaybackManager {
         channelId: channel,
         playbackId: playbackId,
         soundId: event.soundId,
-        wavBytes: encodeDoomPcmAsWav(
-          sampleRate: definition.sound.sampleRate,
-          pcm: definition.sound.pcm,
-        ),
+        wavBytes:
+            definition.wavBytes ??
+            encodeDoomPcmAsWav(
+              sampleRate: definition.sound.sampleRate,
+              pcm: definition.sound.pcm,
+            ),
         volume: spatial.volume,
         pan: spatial.pan,
         sourceId: event.sourceId,
@@ -445,16 +478,30 @@ class SoundPlaybackManager {
   }
 
   Future<void> stopAll() async {
+    cancelPendingEvents();
+    Object? firstError;
+    StackTrace? firstStack;
     for (int i = 0; i < _channels.length; i++) {
       if (_channels[i] != null) {
-        await _backend.stop(i);
         _channels[i] = null;
+        try {
+          await _backend.stop(i);
+        } catch (error, stackTrace) {
+          firstError ??= error;
+          firstStack ??= stackTrace;
+        }
       }
     }
+    if (firstError != null) Error.throwWithStackTrace(firstError, firstStack!);
   }
 
   Future<void> dispose() async {
-    await stopAll();
-    await _backend.dispose();
+    if (_disposed) return;
+    _disposed = true;
+    try {
+      await stopAll();
+    } finally {
+      await _backend.dispose();
+    }
   }
 }

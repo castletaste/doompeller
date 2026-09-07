@@ -16,6 +16,15 @@ final class DoomFrameDiagnosticsSnapshot {
   final int droppedTics;
   final int surfaces;
   final int dynamicUploads;
+  @override
+  bool operator ==(Object other) =>
+      other is DoomFrameDiagnosticsSnapshot &&
+      tics == other.tics &&
+      droppedTics == other.droppedTics &&
+      surfaces == other.surfaces &&
+      dynamicUploads == other.dynamicUploads;
+  @override
+  int get hashCode => Object.hash(tics, droppedTics, surfaces, dynamicUploads);
 }
 
 @immutable
@@ -76,6 +85,46 @@ final class DoomHudSnapshot {
   final bool paused;
   final bool levelComplete;
   final DoomFrameDiagnosticsSnapshot diagnostics;
+  @override
+  bool operator ==(Object other) =>
+      other is DoomHudSnapshot &&
+      health == other.health &&
+      armor == other.armor &&
+      bullets == other.bullets &&
+      shells == other.shells &&
+      rockets == other.rockets &&
+      weapon == other.weapon &&
+      kills == other.kills &&
+      totalKills == other.totalKills &&
+      items == other.items &&
+      totalItems == other.totalItems &&
+      secrets == other.secrets &&
+      totalSecrets == other.totalSecrets &&
+      levelTime == other.levelTime &&
+      paused == other.paused &&
+      levelComplete == other.levelComplete &&
+      diagnostics == other.diagnostics &&
+      setEquals(keys, other.keys);
+  @override
+  int get hashCode => Object.hashAll([
+    health,
+    armor,
+    bullets,
+    shells,
+    rockets,
+    weapon,
+    kills,
+    totalKills,
+    items,
+    totalItems,
+    secrets,
+    totalSecrets,
+    levelTime,
+    paused,
+    levelComplete,
+    diagnostics,
+    Object.hashAllUnordered(keys),
+  ]);
 }
 
 abstract interface class DoomRuntimeView {
@@ -98,4 +147,10 @@ abstract interface class DoomRuntimeView {
   void clearInput();
 
   void restartLevel();
+}
+
+/// Optional lifecycle contract for runtimes created by a UI runtime factory.
+/// The host calls this once; implementations also tolerate adapter teardown.
+abstract interface class DoomRuntimeLifecycle {
+  void dispose();
 }

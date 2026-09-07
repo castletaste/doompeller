@@ -33,9 +33,9 @@ MapTextureSource testTextures() {
 }
 
 FlatImage _flat(String name, int fill) => FlatImage(
-      name: name,
-      indices: Uint8List(kFlatBytes)..fillRange(0, kFlatBytes, fill),
-    );
+  name: name,
+  indices: Uint8List(kFlatBytes)..fillRange(0, kFlatBytes, fill),
+);
 
 PatchImage _patch(
   int width,

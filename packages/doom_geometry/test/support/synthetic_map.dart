@@ -90,8 +90,9 @@ class MapBuilder {
     int special = 0,
     int tag = 0,
   }) {
-    final int resolved =
-        left == kNoSidedef ? flags : flags | LinedefFlags.twoSided;
+    final int resolved = left == kNoSidedef
+        ? flags
+        : flags | LinedefFlags.twoSided;
     linedefs.add(
       Linedef(
         v1: v1,
@@ -185,8 +186,8 @@ class MapBuilder {
     var twiceArea = 0;
     for (var i = 0; i < count; i++) {
       final int j = (i + 1) % count;
-      twiceArea += points[i * 2] * points[j * 2 + 1] -
-          points[j * 2] * points[i * 2 + 1];
+      twiceArea +=
+          points[i * 2] * points[j * 2 + 1] - points[j * 2] * points[i * 2 + 1];
     }
     final bool isClockwise = twiceArea < 0;
     if (isClockwise == clockwise) {
@@ -446,8 +447,9 @@ class NodeBuilder {
       final double t = d1 / (d1 - d2);
       final double ix = seg.x1 + (seg.x2 - seg.x1) * t;
       final double iy = seg.y1 + (seg.y2 - seg.y1) * t;
-      final double firstLen =
-          math.sqrt((ix - seg.x1) * (ix - seg.x1) + (iy - seg.y1) * (iy - seg.y1));
+      final double firstLen = math.sqrt(
+        (ix - seg.x1) * (ix - seg.x1) + (iy - seg.y1) * (iy - seg.y1),
+      );
       final _WorkSeg tail = _WorkSeg(
         x1: ix,
         y1: iy,
@@ -556,8 +558,7 @@ class NodeBuilder {
     double py,
     double pdx,
     double pdy,
-  ) =>
-      (x - px) * pdy - (y - py) * pdx;
+  ) => (x - px) * pdy - (y - py) * pdx;
 
   static const double _eps = 0.01;
 }

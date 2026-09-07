@@ -32,6 +32,30 @@ core.SoundEvent event({
 );
 
 void main() {
+  test(
+    'WAD catalog reuses immutable WAV bytes while preserving priority policy',
+    () {
+      var priority = 1;
+      final catalog = WadSoundCatalog(
+        WadResources.load(DoomFixtures.wadSet()),
+        priorityFor: (_) => priority,
+      );
+      final first = catalog.definitionFor('DSPISTOL')!;
+      priority = 3;
+      final next = catalog.definitionFor('dspistol')!;
+      expect(next.wavBytes, same(first.wavBytes));
+      expect(next.priority, 3);
+      expect(() => next.wavBytes![0] = 0, throwsUnsupportedError);
+      expect(
+        next.wavBytes,
+        encodeDoomPcmAsWav(
+          sampleRate: next.sound.sampleRate,
+          pcm: next.sound.pcm,
+        ),
+      );
+    },
+  );
+
   test('WAV header is canonical little-endian mono unsigned PCM', () {
     final Uint8List wav = encodeDoomPcmAsWav(
       sampleRate: 11025,

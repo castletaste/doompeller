@@ -10,9 +10,11 @@ import 'support/synthetic_map.dart';
 void main() {
   group('loop classification', () {
     test('a simple room is one outer loop and no holes', () {
-      final SectorLoopResult r = _loops(_room(<int>[
-        0, 0, 256, 0, 256, 256, 0, 256, //
-      ]))[0];
+      final SectorLoopResult r = _loops(
+        _room(<int>[
+          0, 0, 256, 0, 256, 256, 0, 256, //
+        ]),
+      )[0];
       expect(r.outers.length, 1);
       expect(r.holes.single, isEmpty);
       expect(r.area, 256 * 256);
@@ -32,8 +34,11 @@ void main() {
       final List<SectorLoopResult> loops = _loops(b.build(buildNodes: false));
 
       expect(loops[room].outers.length, 1);
-      expect(loops[room].holes.single.length, 1,
-          reason: 'the island must be subtracted, not added');
+      expect(
+        loops[room].holes.single.length,
+        1,
+        reason: 'the island must be subtracted, not added',
+      );
       expect(loops[room].area, 512 * 512 - 128 * 128);
 
       expect(loops[island].outers.length, 1);
@@ -79,71 +84,101 @@ void main() {
 
     test('winding of the source loop does not change the result', () {
       // solidLoop reorients internally, so both orders must agree.
-      final double clockwise =
-          _loops(_room(<int>[0, 0, 256, 0, 256, 256, 0, 256]))[0].area;
-      final double counter =
-          _loops(_room(<int>[0, 256, 256, 256, 256, 0, 0, 0]))[0].area;
+      final double clockwise = _loops(
+        _room(<int>[0, 0, 256, 0, 256, 256, 0, 256]),
+      )[0].area;
+      final double counter = _loops(
+        _room(<int>[0, 256, 256, 256, 256, 0, 0, 0]),
+      )[0].area;
       expect(clockwise, counter);
     });
   });
 
   group('triangulation', () {
     test('a convex polygon triangulates to n - 2 triangles', () {
-      final Loop hexagon = Loop(Float64List.fromList(<double>[
-        0, 0, 100, 0, 150, 87, 100, 174, 0, 174, -50, 87, //
-      ]));
-      final TriangulationResult r =
-          EarClipper().triangulate(hexagon, const <Loop>[], CheckBudget(10000));
+      final Loop hexagon = Loop(
+        Float64List.fromList(<double>[
+          0, 0, 100, 0, 150, 87, 100, 174, 0, 174, -50, 87, //
+        ]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(
+        hexagon,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
       expect(r.triangleCount, 4);
       expect(r.isComplete, isTrue);
       expect(r.area, closeTo(hexagon.area, 1e-9));
     });
 
     test('a concave polygon preserves its area', () {
-      final Loop l = Loop(Float64List.fromList(<double>[
-        0, 0, 256, 0, 256, 128, 128, 128, 128, 256, 0, 256, //
-      ]));
-      final TriangulationResult r =
-          EarClipper().triangulate(l, const <Loop>[], CheckBudget(10000));
+      final Loop l = Loop(
+        Float64List.fromList(<double>[
+          0, 0, 256, 0, 256, 128, 128, 128, 128, 256, 0, 256, //
+        ]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(
+        l,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
       expect(r.area, closeTo(256 * 256 - 128 * 128, 1e-9));
     });
 
     test('a hole is subtracted, not covered over', () {
-      final Loop outer = Loop(Float64List.fromList(<double>[
-        0, 0, 400, 0, 400, 400, 0, 400, //
-      ]));
-      final Loop hole = Loop(Float64List.fromList(<double>[
-        100, 100, 100, 300, 300, 300, 300, 100, //
-      ]));
-      final TriangulationResult r = EarClipper()
-          .triangulate(outer, <Loop>[hole], CheckBudget(100000));
+      final Loop outer = Loop(
+        Float64List.fromList(<double>[
+          0, 0, 400, 0, 400, 400, 0, 400, //
+        ]),
+      );
+      final Loop hole = Loop(
+        Float64List.fromList(<double>[
+          100, 100, 100, 300, 300, 300, 300, 100, //
+        ]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(outer, <Loop>[
+        hole,
+      ], CheckBudget(100000));
       expect(r.area, closeTo(400 * 400 - 200 * 200, 1e-6));
       expect(r.isComplete, isTrue);
     });
 
     test('two holes are both subtracted', () {
-      final Loop outer = Loop(Float64List.fromList(<double>[
-        0, 0, 600, 0, 600, 400, 0, 400, //
-      ]));
-      final Loop a = Loop(Float64List.fromList(<double>[
-        50, 50, 50, 150, 150, 150, 150, 50, //
-      ]));
-      final Loop b = Loop(Float64List.fromList(<double>[
-        400, 200, 400, 300, 500, 300, 500, 200, //
-      ]));
-      final TriangulationResult r = EarClipper()
-          .triangulate(outer, <Loop>[a, b], CheckBudget(200000));
+      final Loop outer = Loop(
+        Float64List.fromList(<double>[
+          0, 0, 600, 0, 600, 400, 0, 400, //
+        ]),
+      );
+      final Loop a = Loop(
+        Float64List.fromList(<double>[
+          50, 50, 50, 150, 150, 150, 150, 50, //
+        ]),
+      );
+      final Loop b = Loop(
+        Float64List.fromList(<double>[
+          400, 200, 400, 300, 500, 300, 500, 200, //
+        ]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(outer, <Loop>[
+        a,
+        b,
+      ], CheckBudget(200000));
       expect(r.area, closeTo(600 * 400 - 100 * 100 - 100 * 100, 1e-6));
     });
 
     test('a collinear-heavy polygon does not emit zero-area triangles', () {
       // A square whose bottom edge is subdivided five times, the shape
       // T-junction repair produces.
-      final Loop l = Loop(Float64List.fromList(<double>[
-        0, 0, 20, 0, 40, 0, 60, 0, 80, 0, 100, 0, 100, 100, 0, 100, //
-      ]));
-      final TriangulationResult r =
-          EarClipper().triangulate(l, const <Loop>[], CheckBudget(10000));
+      final Loop l = Loop(
+        Float64List.fromList(<double>[
+          0, 0, 20, 0, 40, 0, 60, 0, 80, 0, 100, 0, 100, 100, 0, 100, //
+        ]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(
+        l,
+        const <Loop>[],
+        CheckBudget(10000),
+      );
       expect(r.area, closeTo(100 * 100, 1e-9));
       // Every emitted triangle must have real area.
       for (var t = 0; t < r.indices.length; t += 3) {
@@ -152,31 +187,51 @@ void main() {
         final int ic = r.indices[t + 2] * 2;
         final double cross =
             (r.vertices[ib] - r.vertices[ia]) *
-                    (r.vertices[ic + 1] - r.vertices[ia + 1]) -
-                (r.vertices[ic] - r.vertices[ia]) *
-                    (r.vertices[ib + 1] - r.vertices[ia + 1]);
+                (r.vertices[ic + 1] - r.vertices[ia + 1]) -
+            (r.vertices[ic] - r.vertices[ia]) *
+                (r.vertices[ib + 1] - r.vertices[ia + 1]);
         expect(cross.abs(), greaterThan(1e-9));
       }
     });
 
     test('a two-vertex loop triangulates to nothing rather than throwing', () {
-      final Loop degenerate =
-          Loop(Float64List.fromList(<double>[0, 0, 100, 100]));
-      final TriangulationResult r = EarClipper()
-          .triangulate(degenerate, const <Loop>[], CheckBudget(1000));
+      final Loop degenerate = Loop(
+        Float64List.fromList(<double>[0, 0, 100, 100]),
+      );
+      final TriangulationResult r = EarClipper().triangulate(
+        degenerate,
+        const <Loop>[],
+        CheckBudget(1000),
+      );
       expect(r.triangleCount, 0);
     });
   });
 
   group('polygon primitives', () {
     test('signed area is positive for counter-clockwise winding', () {
-      final Float64List ccw =
-          Float64List.fromList(<double>[0, 0, 100, 0, 100, 100, 0, 100]);
+      final Float64List ccw = Float64List.fromList(<double>[
+        0,
+        0,
+        100,
+        0,
+        100,
+        100,
+        0,
+        100,
+      ]);
       expect(signedArea2(ccw, 4), greaterThan(0));
       expect(polygonArea(ccw, 4), 100 * 100);
 
-      final Float64List cw =
-          Float64List.fromList(<double>[0, 0, 0, 100, 100, 100, 100, 0]);
+      final Float64List cw = Float64List.fromList(<double>[
+        0,
+        0,
+        0,
+        100,
+        100,
+        100,
+        100,
+        0,
+      ]);
       expect(signedArea2(cw, 4), lessThan(0));
       expect(polygonArea(cw, 4), 100 * 100);
     });
@@ -201,15 +256,19 @@ void main() {
         ..clear()
         ..add(99, 99);
       expect(snapshot[0], 1);
-      expect(snapshot[4], 5,
-          reason: 'pooled buffers are reused, so a view would be corrupted');
+      expect(
+        snapshot[4],
+        5,
+        reason: 'pooled buffers are reused, so a view would be corrupted',
+      );
     });
   });
 }
 
-List<SectorLoopResult> _loops(MapData map) =>
-    SectorLoopBuilder(map, GeometryOptions.defaults)
-        .buildAll(CheckBudget(1000000));
+List<SectorLoopResult> _loops(MapData map) => SectorLoopBuilder(
+  map,
+  GeometryOptions.defaults,
+).buildAll(CheckBudget(1000000));
 
 MapData _room(List<int> points) {
   final MapBuilder b = MapBuilder('ROOM');

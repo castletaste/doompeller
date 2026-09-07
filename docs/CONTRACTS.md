@@ -11,7 +11,8 @@ packages/doom_wad       pure Dart, zero Flutter deps  -> WAD bytes to typed data
 packages/doom_geometry  pure Dart, depends on doom_wad -> map data to packed meshes
 packages/doom_core      pure Dart, depends on doom_wad -> 35 Hz gameplay simulation
 lib/adapter             the ONLY place that touches flame_3d / flutter_gpu
-lib/game                Flame game wiring, input, HUD, camera
+lib/game                app state, CPU preparation, input, HUD, audio
+lib/ui                  runtime host, focus/lifecycle, HUD and overlays
 ```
 
 Hard rules:
@@ -122,6 +123,7 @@ class PackedMesh {
 }
 
 class CompiledLevel {
+  CompiledLevel copyForRuntime();    // independent vertices and mutable handles
   List<PackedMesh> meshes;
   IndexedAtlas atlas;                 // index+coverage planes, page size
   List<SectorPlaneRef> floorPlanes;   // for dynamic height updates
@@ -135,6 +137,10 @@ class DoomGeometryCompiler {
   static CompiledLevel compile(MapData map, WadResources res, {GeometryOptions options});
 }
 ```
+
+Runtime ownership, async admission and additive lifecycle/audio APIs are
+documented in [ARCHITECTURE.md](ARCHITECTURE.md). Prepared geometry is a reusable
+template; direct scene callers still supply their own mutable buffers.
 
 ## doom_core public API
 

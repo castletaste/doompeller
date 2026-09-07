@@ -1,7 +1,12 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -9,7 +14,7 @@ void main() {
   test(
     'original E1M3 yellow-key return door stays open after switch 535',
     () async {
-      final ByteData asset = await rootBundle.load('.local/doom/DOOM1.WAD');
+      final ByteData asset = await loadLocalIwad('.local/doom/DOOM1.WAD');
       final MapData source = MapData.load(
         WadSet(<WadFile>[
           WadFile.parse(
@@ -43,7 +48,7 @@ void main() {
         things: <Thing>[
           const Thing(
             x: -1936,
-          y: -2104,
+            y: -2104,
             angle: 90,
             type: 1,
             flags: ThingFlags.easy | ThingFlags.medium | ThingFlags.hard,

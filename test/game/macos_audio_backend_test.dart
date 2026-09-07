@@ -85,23 +85,35 @@ void main() {
 
       await backend.play(first, onComplete: () => completions++);
       expect(calls.single.method, 'play');
+      final firstTransportId = _transportId(calls.last);
       expect(calls.single.arguments, <String, Object>{
         'channelId': 2,
-        'playbackId': 7,
+        'playbackId': firstTransportId,
         'wavBytes': first.wavBytes,
         'volume': 0.75,
         'pan': -0.25,
       });
 
-      await _nativeCallback(messenger, channel, channelId: 2, playbackId: 7);
+      await _nativeCallback(
+        messenger,
+        channel,
+        channelId: 2,
+        playbackId: firstTransportId,
+      );
       expect(completions, 1);
 
       await backend.play(
         _request(playbackId: 8),
         onComplete: () => completions++,
       );
+      final secondTransportId = _transportId(calls.last);
       await backend.stop(2);
-      await _nativeCallback(messenger, channel, channelId: 2, playbackId: 8);
+      await _nativeCallback(
+        messenger,
+        channel,
+        channelId: 2,
+        playbackId: secondTransportId,
+      );
       expect(completions, 1, reason: 'stopped playback must not complete');
       expect(calls[calls.length - 1], isA<MethodCall>());
       expect(calls[calls.length - 1].method, 'stop');
@@ -123,12 +135,24 @@ void main() {
       _request(playbackId: 20),
       onComplete: () => oldCompletions++,
     );
+    final oldTransportId = _transportId(calls.last);
     await backend.play(
       _request(playbackId: 21),
       onComplete: () => currentCompletions++,
     );
-    await _nativeCallback(messenger, channel, channelId: 2, playbackId: 20);
-    await _nativeCallback(messenger, channel, channelId: 2, playbackId: 21);
+    final currentTransportId = _transportId(calls.last);
+    await _nativeCallback(
+      messenger,
+      channel,
+      channelId: 2,
+      playbackId: oldTransportId,
+    );
+    await _nativeCallback(
+      messenger,
+      channel,
+      channelId: 2,
+      playbackId: currentTransportId,
+    );
 
     expect(oldCompletions, 0);
     expect(currentCompletions, 1);
@@ -147,7 +171,12 @@ void main() {
         _request(playbackId: 30),
         onComplete: () => completions++,
       );
-      await _nativeCallback(messenger, channel, channelId: 2, playbackId: 30);
+      await _nativeCallback(
+        messenger,
+        channel,
+        channelId: 2,
+        playbackId: _transportId(calls.last),
+      );
 
       expect(completions, 1);
       await newer.dispose();
@@ -202,3 +231,6 @@ Future<void> _nativeCallback(
   );
   await handled.future;
 }
+
+int _transportId(MethodCall call) =>
+    (call.arguments as Map<Object?, Object?>)['playbackId'] as int;

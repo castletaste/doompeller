@@ -1,8 +1,11 @@
 # Episode verification — 2026-09-07
 
 Production continuation from `7bc0245`, `85fe080`, `3106b9c`, `89063ed`, then `f3bd4d1`. Original local DOOM1.WAD, 4,196,020
-bytes, MD5 `f0cefca49926d00903cf57551d901abe`. This report is not a claim that
-every level has been completed. The current combat correction after `cb84aa6`
+bytes, MD5 `f0cefca49926d00903cf57551d901abe`. All nine E1 maps now have
+independently repeated, input-only normal-exit recordings. The user narrowed
+the replay task to E1; no E2/E3 download or verification is required for it.
+This is not continuous episode traversal or full-game/native-render completion.
+The current combat correction after `cb84aa6`
 supersedes the earlier replay identities; those results remain historical.
 
 ## Current monster spread and portal sight correction
@@ -38,6 +41,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
 | E1M3 input-only, independently repeated strict replay | 5,927 | 42 / 1 | 53/74 | `0x07246777` |
 | E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
+| E1M5 input-only, independently repeated strict replay | 7,819 | 44 / 116 | 80/91 | `0xd32974c7` |
 | E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
 | E1M7 input-only, independently repeated strict replay | 14,565 | 40 / 75 | 76/84 | `0x14d19d2d` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
@@ -98,6 +102,34 @@ fresh forward and reverse-order replays with identical pinned results and all
 six negative cases rejected. It excludes unfinished M5 and the unproven M3
 secret exit. Log:
 `.local/qa/episode-2026-09-06/current-eight-map-strict-suite.txt`.
+
+E1M5 subsequently completed on the same unchanged core. The route collects
+the yellow key, takes the real blue-armor detour, activates switch 189, follows
+the outer stair/ring route to the blue key, then passes the final doors and
+normal exit 409. All state changes come from ordinary input. The independent
+fail-closed verifier replayed all 7,819 commands twice from fresh default state:
+minimum 11 HP, final 44 HP / 116 armor, 80 kills, matching hash, survival
+throughout, and first normal exit exactly last. All six negative cases were
+rejected. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m5_exit_rush/e1m5_commands.json`,
+SHA-256 `2f886666781397cb42e4e0c9347eedff38d0932a4fd632e7d739684479f9416f`,
+unchanged before and after verification. Independent log:
+`.local/qa/episode-2026-09-06/m5-full-current-independent.txt`.
+Preflight is `READY WITH FALLBACKS`: 5,121 triangles, 7,611/65,535 vertices,
+one mesh/atlas page, three fallback sectors with area delta 107.76868818015828,
+zero unmatched edges or degenerate triangles, and one T-junction diagnostic.
+BSP work is 150,116/1,000,000; no missing expected resources were reported.
+Local log: `.local/qa/episode-2026-09-06/m5-current-wad-report.txt`.
+This does not establish pixel-perfect geometry or a rendered E1M5 playthrough.
+
+The final combined suite includes every E1 map (M1 through M9), each from
+default pistol inventory with monsters enabled. All nine pass fresh forward
+and reverse-order replays with identical pinned results; all six invalid
+variants are rejected. Log:
+`.local/qa/episode-2026-09-06/current-nine-map-strict-suite.txt`.
+This completes the user-narrowed per-map E1 replay coverage. It does not prove
+continuous inventory-carrying traversal, the M3 secret exit into M9, or a fresh
+native rendered playthrough of the entire episode.
 
 E1M8 was regenerated on the unchanged `82a9bd5` gameplay core. Both Barons
 are dead, the tag-666 floor lowered, the line-233 staircase reached its full
@@ -244,11 +276,10 @@ Local ignored evidence under `.local/qa/episode-2026-09-06/`:
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.
 Their former native-success evidence cannot be reused for this core revision.
-E1M2, E1M4 and E1M8 have now been regenerated, and E1M6 completed for the first
-time. New current-core partial recordings
-exist for the other episode-one maps, but do not count as full exits. The
-checkpoint details near the end of this document remain historical unless
-explicitly marked otherwise.
+Current-core input-only completion is now independently verified for all nine
+E1 maps as listed above. Failed and partial route recordings remain diagnostic
+evidence, not additional full exits. The checkpoint details near the end of
+this document remain historical unless explicitly marked otherwise.
 
 The disposable planner's new canonical-linedef candidate index passed two
 differential suites over all nine original maps: 83,850 swept queries per
@@ -649,13 +680,15 @@ also opened. That control-run window was closed as well. Logs:
 `.local/qa/episode-2026-09-06/native-after-e1m8-default-build.log` and
 `.local/qa/episode-2026-09-06/native-after-e1m8-default.log`.
 
-## Still required
+## Remaining product verification beyond the per-map replay task
 
-Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M5; separate E1M3 secret-exit traversal;
-and fresh native-render verification beyond E1M1. Only episode one is present in
-the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
-The Codex goal must remain active until that evidence exists.
+All nine E1 normal exits now have current-core start-to-exit command streams
+and independent repeat/reorder verification. Separate E1M3 secret-exit traversal,
+continuous episode traversal and fresh native-render verification beyond E1M1
+remain unproven. The user explicitly stopped the replay scope at E1 after
+confirming that no full DOOM.WAD was available; E2/E3 are outside that task,
+not failed or passed maps. Completing this replay task does not close the
+broader product-quality gaps or the timing defect below.
 
 ### Confirmed lift-timing divergence
 
@@ -667,7 +700,7 @@ and [constants](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p
 This is a confirmed timing mismatch, not proof that E1M3's secret exit is
 unreachable. The attempted secret-route timing and alternative activators
 still require causal verification. No production timing change or secret-exit
-completion is claimed here; the seven completed recordings above retain their
+completion is claimed here; the nine completed recordings above retain their
 original current-core identities.
 
 ## Historical checkpoints (superseded)

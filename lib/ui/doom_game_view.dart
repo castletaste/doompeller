@@ -15,6 +15,8 @@ import 'doom_intermission.dart';
 
 /// Creates a runtime owned by the level host. Custom runtimes can implement
 /// [DoomRuntimeLifecycle] to release their resources when the host unmounts.
+/// Used when a level is mounted or replaced. Changing the factory alone does
+/// not reset gameplay; use a new host key to explicitly replace a live runtime.
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
     Widget Function(BuildContext context, DoomRuntimeView runtime);
@@ -52,9 +54,9 @@ final class DoomGameView extends StatefulWidget {
 
 final class _DoomGameViewState extends State<DoomGameView>
     with WidgetsBindingObserver {
-  late final DoomRuntimeView _runtime;
+  late DoomRuntimeView _runtime;
   late final FocusNode _gameFocusNode;
-  late final Widget _surface;
+  late Widget _surface;
   bool _showControls = true;
   bool _advancing = false;
   DoomFrameProbe? _frameProbe;
@@ -62,13 +64,37 @@ final class _DoomGameViewState extends State<DoomGameView>
   @override
   void initState() {
     super.initState();
-    _runtime = (widget.runtimeFactory ?? createProductionDoomRuntime)(
-      widget.level,
-    );
     _gameFocusNode = FocusNode(debugLabel: 'Doom game input')
       ..addListener(_handleFocusChange);
     WidgetsBinding.instance.addObserver(this);
     _frameProbe = DoomFrameProbe.startIfEnabled();
+    _createRuntime();
+  }
+
+  @override
+  void didUpdateWidget(covariant DoomGameView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.level, widget.level)) {
+      if (_runtime case final DoomRuntimeLifecycle owned) owned.dispose();
+      _createRuntime();
+      _showControls = true;
+      _advancing = false;
+    } else if (!identical(
+      oldWidget.gameSurfaceBuilder,
+      widget.gameSurfaceBuilder,
+    )) {
+      _createSurface();
+    }
+  }
+
+  void _createRuntime() {
+    _runtime = (widget.runtimeFactory ?? createProductionDoomRuntime)(
+      widget.level,
+    );
+    _createSurface();
+  }
+
+  void _createSurface() {
     _surface = _DoomInputSurface(
       runtime: _runtime,
       focusNode: _gameFocusNode,
@@ -106,14 +132,17 @@ final class _DoomGameViewState extends State<DoomGameView>
   }
 
   Future<void> _continueEpisode() async {
-    final core.LevelExit? exit = _runtime.levelExit;
+    final runtime = _runtime;
+    final core.LevelExit? exit = runtime.levelExit;
     if (_advancing || exit == null) return;
     setState(() => _advancing = true);
-    _runtime.clearInput();
+    runtime.clearInput();
     try {
       await widget.onContinue(exit);
     } finally {
-      if (mounted) setState(() => _advancing = false);
+      if (mounted && identical(_runtime, runtime)) {
+        setState(() => _advancing = false);
+      }
     }
   }
 
@@ -221,8 +250,9 @@ final class _DoomGameViewState extends State<DoomGameView>
   }
 }
 
-/// This widget has stable identity for the entire level lifetime. Inherited
-/// dependencies of custom surfaces still rebuild normally within this subtree.
+/// Stable across gameplay publications. A host rebuild may update an injected
+/// surface builder without replacing the runtime. Inherited dependencies of
+/// custom surfaces still rebuild normally within this subtree.
 final class _DoomInputSurface extends StatelessWidget {
   const _DoomInputSurface({
     required this.runtime,

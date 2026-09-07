@@ -10,12 +10,16 @@ simulation output; they do not decide or hash gameplay state.
 `DoomApp` owns its default controller and a level preparer for the lifetime of
 the app widget. An injected controller belongs to its caller. Replacing it
 detaches the old subscription and disposes only a controller created by the app.
-Internally created replacements reuse the preparer, so retiring a controller
+Ownership is initialized before the first build. Internally created replacements
+reuse the preparer, so retiring a controller
 cannot bypass its CPU admission limit. Separately injected preparers/controllers
 have independent lifetimes by design.
 
 The controller fences content reads, file-picker results and episode transitions
-by request generation. `LevelLoadCoordinator` separately fences CPU preparation
+by request generation. Choosers have their own generation, so dismissing one
+does not invalidate an existing load. A displaced pending preparation that is
+still current for another controller reports a retryable failure.
+`LevelLoadCoordinator` separately fences CPU preparation
 and synchronous assembly. Both fences tolerate disposal and synchronous listener
 reentrancy. A failed episode transition keeps the completed map available for a
 retry; an obsolete result cannot replace the current level.
@@ -60,7 +64,12 @@ probe. Disposal is explicit and idempotent through `DoomRuntimeLifecycle`, also
 used by Flame removal. Legacy injected `DoomRuntimeView` implementations remain
 valid without that optional interface.
 
-The game surface has stable widget identity. HUD, overlays and automap listen
+The game surface has stable widget identity across gameplay publications.
+Factories create runtimes when a level is mounted or replaced; changing a
+callback closure does not restart gameplay. A new host key explicitly replaces
+a live runtime. Surface builder changes update the existing runtime's view, and
+a directly embedded game view handles level replacement itself.
+HUD, overlays and automap listen
 within their own subtrees. Equal HUD snapshots suppress redundant notification.
 The three StatefulWidgets have actual ownership duties: the app controller,
 the runtime/focus, and the intermission animation. Loading, failure and ready

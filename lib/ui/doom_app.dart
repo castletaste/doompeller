@@ -36,9 +36,8 @@ final class DoomApp extends StatefulWidget {
 final class _DoomAppState extends State<DoomApp> {
   // Reused when an injected controller is removed and the app resumes ownership.
   final DoomLevelPreparer _preparer = DoomLevelPreparer();
-  late DoomAppController _controller =
-      widget.controller ?? DoomAppController(preparer: _preparer);
-  late bool _ownsController = widget.controller == null;
+  late DoomAppController _controller;
+  late bool _ownsController;
 
   @override
   void didUpdateWidget(covariant DoomApp oldWidget) {
@@ -65,6 +64,8 @@ final class _DoomAppState extends State<DoomApp> {
   @override
   void initState() {
     super.initState();
+    _ownsController = widget.controller == null;
+    _controller = widget.controller ?? DoomAppController(preparer: _preparer);
     if (widget.autoStart) _controller.start();
   }
 
@@ -132,7 +133,7 @@ final class _DoomAppBody extends StatelessWidget {
                 'A custom Doom runtime requires a custom game surface builder.',
           ),
         DoomAppReady(:final level) => DoomGameView(
-          key: ValueKey((level, runtimeFactory, gameSurfaceBuilder)),
+          key: ValueKey(level),
           level: level,
           synthetic: state.isFixture,
           setupMessage: state.setupMessage,

@@ -61,6 +61,7 @@ final class DoomAppController extends ChangeNotifier {
 
   DoomAppState _state;
   int _requestGeneration = 0;
+  int _pickerGeneration = 0;
   bool _disposed = false;
   int? _transitionRequest;
 
@@ -216,9 +217,15 @@ final class DoomAppController extends ChangeNotifier {
     required bool Function() isOwnerActive,
   }) async {
     if (_disposed || !isOwnerActive()) return;
-    final request = ++_requestGeneration;
-    _coordinator.cancel();
-    bool current() => _isCurrent(request) && isOwnerActive();
+    // Opening or cancelling a chooser does not cancel an existing level load.
+    // A later chooser still supersedes an earlier chooser, while any explicit
+    // load invalidates both through the main request generation.
+    final request = _requestGeneration;
+    final pickerRequest = ++_pickerGeneration;
+    bool current() =>
+        _isCurrent(request) &&
+        _pickerGeneration == pickerRequest &&
+        isOwnerActive();
     try {
       final selection = await picker();
       if (selection == null || !current()) return;
@@ -278,7 +285,13 @@ final class DoomAppController extends ChangeNotifier {
           _publishSelectionFailure(retainOnFailure, message);
         }
       case LevelLoadStale<PreparedDoomLevel>():
-        break;
+        // This controller's request is still current. A shared preparer may
+        // nevertheless displace its pending job on behalf of another owner.
+        // Give this owner a retryable terminal state instead of a stuck spinner.
+        _publishSelectionFailure(
+          retainOnFailure ?? _state,
+          'Level preparation was superseded by another load. Try again.',
+        );
     }
   }
 

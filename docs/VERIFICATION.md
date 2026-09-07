@@ -41,6 +41,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
 | E1M7 input-only, independently repeated strict replay | 14,565 | 40 / 75 | 76/84 | `0x14d19d2d` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
+| E1M9 input-only, independently repeated strict replay | 8,006 | 43 / 48 | 67 | `0x8e3dca7b` |
 
 All use default medium skill, monsters enabled, seed 0, and default starting
 inventory. E1M1 still proves ARM1 pickup, door, lift, damaging floor and normal
@@ -71,6 +72,32 @@ Recording: `/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay
 SHA-256 `81fd592223dd5418de9d9ccdee18b0695a36e121d4c0dc84d8038e24094c2c13`.
 Combined log: `.local/qa/episode-2026-09-06/current-seven-map-strict-suite.txt`.
 M5 and M9 are not counted in that suite.
+
+E1M9 subsequently completed on the same unchanged gameplay core. Its route
+uses the real tag-4 resource lift, all three keys, switch 362 opening the
+tag-1 passages, blue door 533, switch 567 raising the final bridge, and the
+low-side lift 587 / door 586 return. A perimeter route reaches the last
+medikit and normal exit 551 on command 8,006. No sector planes or gameplay
+snapshots were injected. The independent fail-closed verifier replayed the
+entire stream twice from fresh default state: minimum 18 HP, final 43 HP /
+48 armor, identical hash, and first normal exit exactly last. All six negative
+cases were rejected. Recording:
+`/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_m9_finish/lift_resource_attempt64.json`,
+SHA-256 `4cbf1ccf50d0865436abe84b9523f8c1ae9af1194648c390468c9a42b0b91e5b`,
+unchanged before and after verification. Independent log:
+`.local/qa/episode-2026-09-06/m9-full-current-independent.txt`.
+Current preflight is `READY WITH FALLBACKS`: 3,725 triangles, two meshes,
+one atlas page, 5,651 total vertices, one fallback sector with area delta
+0.0023374954271275783, and zero unmatched edges, degenerate triangles or
+T-junctions. No missing expected resources were reported. Local log:
+`.local/qa/episode-2026-09-06/m9-current-wad-report.txt`.
+This is original-map input-only completion, not a new native-render or frame
+performance claim. M9 normal exit does not prove the separate M3 secret exit.
+The subsequent combined eight-map suite (M1/M2/M3/M4/M6/M7/M8/M9) also passes
+fresh forward and reverse-order replays with identical pinned results and all
+six negative cases rejected. It excludes unfinished M5 and the unproven M3
+secret exit. Log:
+`.local/qa/episode-2026-09-06/current-eight-map-strict-suite.txt`.
 
 E1M8 was regenerated on the unchanged `82a9bd5` gameplay core. Both Barons
 are dead, the tag-666 floor lowered, the line-233 staircase reached its full
@@ -625,7 +652,7 @@ also opened. That control-run window was closed as well. Logs:
 ## Still required
 
 Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M5 and E1M9; separate E1M3 secret-exit traversal;
+replay verification for E1M5; separate E1M3 secret-exit traversal;
 and fresh native-render verification beyond E1M1. Only episode one is present in
 the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.

@@ -2,6 +2,7 @@ import 'package:doom_core/doom_core.dart' as core;
 import 'package:flutter/foundation.dart';
 
 import 'doom_automap.dart';
+import 'doom_input.dart';
 
 @immutable
 final class DoomFrameDiagnosticsSnapshot {
@@ -85,9 +86,21 @@ abstract interface class DoomRuntimeView {
 
   ValueListenable<DoomAutomapSnapshot> get automap;
 
-  void setPointerAttack(bool pressed);
+  void setPointerAttack(bool pressed, {bool cancelled = false});
 
   void addPointerYaw(double deltaX);
+
+  void setTouchMovement(int pointer, {required int forward, required int side});
+
+  void pressTouchControl(int pointer, DoomControl control);
+
+  void releaseTouchPointer(int pointer, {bool cancelled = false});
+
+  void clearTouchInput();
+
+  void triggerUse();
+
+  void selectWeapon(int slot);
 
   void togglePause();
 

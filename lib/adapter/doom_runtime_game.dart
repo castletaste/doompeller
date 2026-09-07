@@ -225,6 +225,7 @@ final class DoomRuntimeGame extends FlameGame3D
   final Map<int, ActorSpriteComponent> _actors = <int, ActorSpriteComponent>{};
   final Map<PhysicalKeyboardKey, DoomControl> _keyboardControls =
       <PhysicalKeyboardKey, DoomControl>{};
+  final Map<int, Set<DoomControl>> _touchControls = <int, Set<DoomControl>>{};
   final Set<String> _reportedMissingSprites = <String>{};
   final _CountingValueNotifier<DoomHudSnapshot> _hud =
       _CountingValueNotifier<DoomHudSnapshot>(const DoomHudSnapshot.initial());
@@ -244,7 +245,7 @@ final class DoomRuntimeGame extends FlameGame3D
   ViewLockedWeaponSpriteComponent? _weaponFlashSprite;
   bool _paused = false;
   bool _completionReported = false;
-  bool _pointerAttackPressed = false;
+  int? _touchMovementPointer;
   int _replayCommandCount = 0;
   DoomReplayResult? _replayResult;
   _ReplayTerminalDelivery? _pendingReplayTerminal;
@@ -846,29 +847,128 @@ final class DoomRuntimeGame extends FlameGame3D
     }
     if (input.takePauseToggle()) {
       _paused = !_paused;
+      if (_paused) clearInput();
     }
   }
 
   @override
-  void setPointerAttack(bool pressed) {
-    if (hasReplayInput) return;
+  void setPointerAttack(bool pressed, {bool cancelled = false}) {
+    if (!pressed) {
+      input.releaseOwned(
+        _mouseAttackOwner,
+        DoomControl.attack,
+        cancelled: cancelled,
+      );
+      return;
+    }
+    if (!_acceptsGameplayInput) return;
     if (pressed && gameState.player.health <= 0) {
       restartLevel();
       return;
     }
-    _pointerAttackPressed = pressed;
-    _syncDeviceControl(DoomControl.attack);
+    input.pressOwned(_mouseAttackOwner, DoomControl.attack);
   }
 
   @override
   void addPointerYaw(double deltaX) {
-    if (hasReplayInput) return;
+    if (!_acceptsGameplayInput) return;
     input.addPointerTurn((-deltaX * 24).round());
   }
 
   @override
+  void setTouchMovement(
+    int pointer, {
+    required int forward,
+    required int side,
+  }) {
+    _validatePointer(pointer);
+    if (forward < -DoomInputState.axisScale ||
+        forward > DoomInputState.axisScale) {
+      throw RangeError.range(
+        forward,
+        -DoomInputState.axisScale,
+        DoomInputState.axisScale,
+        'forward',
+      );
+    }
+    if (side < -DoomInputState.axisScale || side > DoomInputState.axisScale) {
+      throw RangeError.range(
+        side,
+        -DoomInputState.axisScale,
+        DoomInputState.axisScale,
+        'side',
+      );
+    }
+    if (!_acceptsGameplayInput) return;
+    final int? owner = _touchMovementPointer;
+    if (owner != null && owner != pointer) return;
+    _touchMovementPointer = pointer;
+    input.setAnalogAxes(forward: forward, side: side);
+  }
+
+  @override
+  void pressTouchControl(int pointer, DoomControl control) {
+    _validatePointer(pointer);
+    if (!_acceptsGameplayInput) return;
+    if (control == DoomControl.attack && gameState.player.health <= 0) {
+      restartLevel();
+      return;
+    }
+    final Set<DoomControl> controls = _touchControls.putIfAbsent(
+      pointer,
+      () => <DoomControl>{},
+    );
+    if (controls.add(control)) {
+      input.pressOwned(_touchOwner(pointer), control);
+    }
+  }
+
+  @override
+  void releaseTouchPointer(int pointer, {bool cancelled = false}) {
+    _validatePointer(pointer);
+    final Set<DoomControl>? controls = _touchControls.remove(pointer);
+    if (controls != null) {
+      final Object owner = _touchOwner(pointer);
+      for (final DoomControl control in controls) {
+        input.releaseOwned(owner, control, cancelled: cancelled);
+      }
+    }
+    if (_touchMovementPointer == pointer) {
+      _touchMovementPointer = null;
+      input.setAnalogAxes(forward: 0, side: 0);
+    }
+  }
+
+  @override
+  void clearTouchInput() {
+    for (final int pointer in _touchControls.keys.toList(growable: false)) {
+      releaseTouchPointer(pointer, cancelled: true);
+    }
+    final int? movementPointer = _touchMovementPointer;
+    if (movementPointer != null) {
+      releaseTouchPointer(movementPointer, cancelled: true);
+    }
+  }
+
+  @override
+  void triggerUse() {
+    if (!_acceptsGameplayInput) return;
+    if (gameState.player.health <= 0) {
+      restartLevel();
+      return;
+    }
+    input.triggerUse();
+  }
+
+  @override
+  void selectWeapon(int slot) {
+    if (!_acceptsGameplayInput) return;
+    input.selectWeapon(slot);
+  }
+
+  @override
   void togglePause() {
-    if (!hasReplayInput) input.triggerPause();
+    if (!hasReplayInput && !gameState.levelComplete) input.triggerPause();
   }
 
   @override
@@ -881,7 +981,8 @@ final class DoomRuntimeGame extends FlameGame3D
   @override
   void clearInput() {
     _keyboardControls.clear();
-    _pointerAttackPressed = false;
+    _touchControls.clear();
+    _touchMovementPointer = null;
     input.clear();
     _enqueueSoundPlayback(() => _soundPlayback.stopAll());
   }
@@ -894,7 +995,8 @@ final class DoomRuntimeGame extends FlameGame3D
     scene.setPaletteIndex(_paletteIndex);
     scene.materials.setFixedColorMap(-1);
     _keyboardControls.clear();
-    _pointerAttackPressed = false;
+    _touchControls.clear();
+    _touchMovementPointer = null;
     input.clear();
     _enqueueSoundPlayback(() => _soundPlayback.stopAll());
     gameState = level.createGame();
@@ -928,7 +1030,8 @@ final class DoomRuntimeGame extends FlameGame3D
   @override
   void onRemove() {
     _keyboardControls.clear();
-    _pointerAttackPressed = false;
+    _touchControls.clear();
+    _touchMovementPointer = null;
     input.clear();
     _enqueueSoundPlayback(() => _soundPlayback.dispose());
     unawaited(_soundPlaybackTail);
@@ -947,26 +1050,34 @@ final class DoomRuntimeGame extends FlameGame3D
     final bool up = event is KeyUpEvent;
     final key = event.logicalKey;
     final physicalKey = event.physicalKey;
-    if (down &&
-        event is! KeyRepeatEvent &&
-        gameState.player.health <= 0 &&
-        (key == LogicalKeyboardKey.controlLeft ||
-            key == LogicalKeyboardKey.controlRight ||
-            key == LogicalKeyboardKey.space ||
-            key == LogicalKeyboardKey.keyE ||
-            physicalKey == PhysicalKeyboardKey.keyE)) {
-      restartLevel();
-      return KeyEventResult.handled;
-    }
+    final Object owner = _keyboardOwner(physicalKey);
     if (up) {
       // The logical key may change with the active keyboard layout between
       // down and up. The physical-key mapping captured on key-down therefore
       // takes precedence over resolving the release event again.
       final DoomControl? mapped = _keyboardControls.remove(physicalKey);
       if (mapped != null) {
-        _syncDeviceControl(mapped);
+        input.releaseOwned(owner, mapped);
         return KeyEventResult.handled;
       }
+    }
+    if (down &&
+        event is! KeyRepeatEvent &&
+        key == LogicalKeyboardKey.escape &&
+        !gameState.levelComplete) {
+      input.triggerPause();
+      return KeyEventResult.handled;
+    }
+    if (_paused || gameState.levelComplete) return KeyEventResult.handled;
+    if (down &&
+        event is! KeyRepeatEvent &&
+        gameState.player.health <= 0 &&
+        (_isAttackKey(key, physicalKey) ||
+            key == LogicalKeyboardKey.space ||
+            key == LogicalKeyboardKey.keyE ||
+            physicalKey == PhysicalKeyboardKey.keyE)) {
+      restartLevel();
+      return KeyEventResult.handled;
     }
     final DoomControl? control = _resolveKeyboardControl(key, physicalKey);
     if (control != null) {
@@ -974,11 +1085,10 @@ final class DoomRuntimeGame extends FlameGame3D
         final DoomControl? previous = _keyboardControls[physicalKey];
         _keyboardControls[physicalKey] = control;
         if (previous != null && previous != control) {
-          _syncDeviceControl(previous);
+          input.releaseOwned(owner, previous, cancelled: true);
         }
-        _syncDeviceControl(control);
+        input.pressOwned(owner, control);
       }
-      if (up) _syncDeviceControl(control);
       return KeyEventResult.handled;
     }
     if (down && event is! KeyRepeatEvent) {
@@ -986,10 +1096,6 @@ final class DoomRuntimeGame extends FlameGame3D
           key == LogicalKeyboardKey.keyE ||
           physicalKey == PhysicalKeyboardKey.keyE) {
         input.triggerUse();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.escape) {
-        input.triggerPause();
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.tab) {
@@ -1055,22 +1161,37 @@ final class DoomRuntimeGame extends FlameGame3D
     if (key == LogicalKeyboardKey.shiftLeft) return DoomControl.runLeft;
     if (key == LogicalKeyboardKey.shiftRight) return DoomControl.runRight;
     if (key == LogicalKeyboardKey.controlLeft ||
-        key == LogicalKeyboardKey.controlRight) {
+        key == LogicalKeyboardKey.controlRight ||
+        _isAttackKey(key, physicalKey)) {
       return DoomControl.attack;
     }
     return null;
   }
 
-  void _syncDeviceControl(DoomControl control) {
-    final bool pressed =
-        _keyboardControls.containsValue(control) ||
-        (control == DoomControl.attack && _pointerAttackPressed);
-    if (pressed) {
-      input.press(control);
-    } else {
-      input.release(control);
-    }
+  bool get _acceptsGameplayInput =>
+      !hasReplayInput && !_paused && !gameState.levelComplete;
+
+  static bool _isAttackKey(
+    LogicalKeyboardKey key,
+    PhysicalKeyboardKey physicalKey,
+  ) =>
+      key == LogicalKeyboardKey.controlLeft ||
+      key == LogicalKeyboardKey.controlRight ||
+      key == LogicalKeyboardKey.enter ||
+      key == LogicalKeyboardKey.numpadEnter ||
+      physicalKey == PhysicalKeyboardKey.enter ||
+      physicalKey == PhysicalKeyboardKey.numpadEnter;
+
+  static void _validatePointer(int pointer) {
+    if (pointer < 0) throw RangeError.value(pointer, 'pointer');
   }
+
+  static Object _keyboardOwner(PhysicalKeyboardKey key) =>
+      (_DeviceInputKind.keyboard, key);
+
+  static Object _touchOwner(int pointer) => (_DeviceInputKind.touch, pointer);
+
+  static const Object _mouseAttackOwner = (_DeviceInputKind.mouse, 0);
 
   static CameraComponent3D _cameraFor(PlayerView player) {
     final double x = fixedToDouble(player.x);
@@ -1092,6 +1213,8 @@ final class DoomRuntimeGame extends FlameGame3D
   static double worldActorYawForBam(int angle) =>
       _bamRadians(angle) + math.pi / 2;
 }
+
+enum _DeviceInputKind { keyboard, mouse, touch }
 
 final class _CountingValueNotifier<T> extends ValueNotifier<T> {
   _CountingValueNotifier(super.value);

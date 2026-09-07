@@ -15,6 +15,7 @@ import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
 import '../game/level_preparer.dart';
 import 'doom_automap.dart';
+import 'doom_touch_controls.dart';
 
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
@@ -52,6 +53,12 @@ final class _DoomAppState extends State<DoomApp> {
   late final DoomAppController _controller =
       widget.controller ?? DoomAppController();
   late final bool _ownsController = widget.controller == null;
+  bool _touchDetected = false;
+  bool? _touchControlsOverride;
+
+  void _detectTouch() {
+    if (!_touchDetected) setState(() => _touchDetected = true);
+  }
 
   @override
   void initState() {
@@ -84,6 +91,10 @@ final class _DoomAppState extends State<DoomApp> {
         controller: _controller,
         runtimeFactory: widget.runtimeFactory,
         gameSurfaceBuilder: widget.gameSurfaceBuilder,
+        touchControlsEnabled: _touchControlsOverride ?? _touchDetected,
+        onTouchDetected: _detectTouch,
+        onTouchControlsChanged: (enabled) =>
+            setState(() => _touchControlsOverride = enabled),
         wadPicker:
             widget.wadPicker ??
             (browserWadPickerAvailable ? pickBrowserWad : null),
@@ -95,12 +106,18 @@ final class _DoomAppState extends State<DoomApp> {
 final class _DoomAppBody extends StatelessWidget {
   const _DoomAppBody({
     required this.controller,
+    required this.touchControlsEnabled,
+    required this.onTouchDetected,
+    required this.onTouchControlsChanged,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
     this.wadPicker,
   });
 
   final DoomAppController controller;
+  final bool touchControlsEnabled;
+  final VoidCallback onTouchDetected;
+  final ValueChanged<bool> onTouchControlsChanged;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
   final DoomWadPicker? wadPicker;
@@ -144,6 +161,9 @@ final class _DoomAppBody extends StatelessWidget {
           onContinue: (exit) => controller.advanceLevel(state.level!, exit),
           runtimeFactory: runtimeFactory,
           gameSurfaceBuilder: gameSurfaceBuilder,
+          touchControlsEnabled: touchControlsEnabled,
+          onTouchDetected: onTouchDetected,
+          onTouchControlsChanged: onTouchControlsChanged,
         ),
       },
     );
@@ -223,6 +243,9 @@ final class _DoomReadyView extends StatefulWidget {
     required this.selectionErrorMessage,
     required this.onLoadIwad,
     required this.onContinue,
+    required this.touchControlsEnabled,
+    required this.onTouchDetected,
+    required this.onTouchControlsChanged,
     this.runtimeFactory,
     this.gameSurfaceBuilder,
   });
@@ -233,6 +256,9 @@ final class _DoomReadyView extends StatefulWidget {
   final String? selectionErrorMessage;
   final VoidCallback? onLoadIwad;
   final Future<void> Function(core.LevelExit) onContinue;
+  final bool touchControlsEnabled;
+  final VoidCallback onTouchDetected;
+  final ValueChanged<bool> onTouchControlsChanged;
   final DoomRuntimeFactory? runtimeFactory;
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
 
@@ -247,6 +273,9 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
   String? _configurationError;
   bool _showControls = true;
   bool _advancing = false;
+  int _touchResetGeneration = 0;
+  int? _mousePointer;
+  late bool _hudInputBlocked;
   FrameHistogram? _frameProbe;
   Timer? _frameProbeWarmup;
   Timer? _frameProbeReporter;
@@ -259,6 +288,8 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     );
     _gameFocusNode = FocusNode(debugLabel: 'Doom game input')
       ..addListener(_handleFocusChange);
+    _hudInputBlocked = _blocksInput(_runtime.hud.value);
+    _runtime.hud.addListener(_handleHudInputState);
     WidgetsBinding.instance.addObserver(this);
     if (_frameProbeEnabled) {
       _frameProbe = FrameHistogram();
@@ -295,6 +326,8 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
       _frameProbeReporter?.cancel();
     }
     WidgetsBinding.instance.removeObserver(this);
+    _runtime.hud.removeListener(_handleHudInputState);
+    _clearDeviceInput(rebuild: false);
     _gameFocusNode
       ..removeListener(_handleFocusChange)
       ..dispose();
@@ -308,17 +341,39 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
-      _runtime.clearInput();
+      _clearDeviceInput();
     }
   }
 
   void _handleFocusChange() {
     if (!_gameFocusNode.hasFocus) {
-      _runtime.clearInput();
+      _clearDeviceInput();
     }
   }
 
+  static bool _blocksInput(DoomHudSnapshot hud) =>
+      hud.paused || hud.levelComplete || hud.health <= 0;
+
+  void _handleHudInputState() {
+    final bool blocked = _blocksInput(_runtime.hud.value);
+    if (blocked && !_hudInputBlocked) _clearDeviceInput();
+    _hudInputBlocked = blocked;
+  }
+
+  void _clearDeviceInput({bool rebuild = true}) {
+    _mousePointer = null;
+    _runtime.clearInput();
+    _touchResetGeneration++;
+    if (rebuild && mounted) setState(() {});
+  }
+
+  void _setTouchControls(bool enabled) {
+    _clearDeviceInput();
+    widget.onTouchControlsChanged(enabled);
+  }
+
   void _restartLevel() {
+    _clearDeviceInput();
     _runtime.restartLevel();
     _gameFocusNode.requestFocus();
   }
@@ -327,7 +382,7 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
     final core.LevelExit? exit = _runtime.levelExit;
     if (_advancing || exit == null) return;
     setState(() => _advancing = true);
-    _runtime.clearInput();
+    _clearDeviceInput();
     try {
       await widget.onContinue(exit);
     } finally {
@@ -373,7 +428,7 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
         valueListenable: _runtime.automap,
         builder: (context, automap, _) => LayoutBuilder(
           builder: (context, constraints) {
-            final bool narrow = constraints.maxWidth < 620;
+            final bool narrow = constraints.maxWidth < 1100;
             return ColoredBox(
               color: Colors.black,
               child: Stack(
@@ -384,17 +439,32 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                     behavior: HitTestBehavior.opaque,
                     onPointerDown: (event) {
                       _gameFocusNode.requestFocus();
-                      if ((event.buttons & kPrimaryMouseButton) != 0) {
+                      if (event.kind == PointerDeviceKind.touch) {
+                        widget.onTouchDetected();
+                      } else if (event.kind == PointerDeviceKind.mouse &&
+                          (event.buttons & kPrimaryMouseButton) != 0 &&
+                          _mousePointer == null) {
+                        _mousePointer = event.pointer;
                         _runtime.setPointerAttack(true);
                       }
                     },
                     onPointerMove: (event) {
-                      if ((event.buttons & kPrimaryMouseButton) != 0) {
+                      if (event.kind == PointerDeviceKind.mouse &&
+                          event.pointer == _mousePointer &&
+                          (event.buttons & kPrimaryMouseButton) != 0) {
                         _runtime.addPointerYaw(event.delta.dx);
                       }
                     },
-                    onPointerUp: (_) => _runtime.setPointerAttack(false),
-                    onPointerCancel: (_) => _runtime.setPointerAttack(false),
+                    onPointerUp: (event) {
+                      if (event.pointer != _mousePointer) return;
+                      _mousePointer = null;
+                      _runtime.setPointerAttack(false);
+                    },
+                    onPointerCancel: (event) {
+                      if (event.pointer != _mousePointer) return;
+                      _mousePointer = null;
+                      _runtime.setPointerAttack(false, cancelled: true);
+                    },
                     child: _buildGameSurface(context),
                   ),
                   if (automap.isOpen)
@@ -402,56 +472,101 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                       map: widget.level.map,
                       snapshot: automap,
                     ),
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: _ContentBadge(
-                      synthetic: widget.synthetic,
-                      mapName: widget.level.map.name,
-                      setupMessage: widget.setupMessage,
-                    ),
-                  ),
-                  if (_showControls)
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          _ControlsHint(
-                            narrow: narrow,
-                            onHide: () => setState(() => _showControls = false),
+                  SafeArea(
+                    child: Column(
+                      children: <Widget>[
+                        Expanded(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: <Widget>[
+                              if (widget.touchControlsEnabled)
+                                Positioned.fill(
+                                  top: 44,
+                                  child: DoomTouchControls(
+                                    enabled: !_blocksInput(hud) && !_advancing,
+                                    resetGeneration: _touchResetGeneration,
+                                    mapOpen: automap.isOpen,
+                                    onMove: (pointer, forward, side) {
+                                      // Zero axes also arrive while cancelling
+                                      // captures after blur/dispose. Do not
+                                      // steal focus back during that cleanup.
+                                      if (forward != 0 || side != 0) {
+                                        _gameFocusNode.requestFocus();
+                                      }
+                                      _runtime.setTouchMovement(
+                                        pointer,
+                                        forward: forward,
+                                        side: side,
+                                      );
+                                    },
+                                    onLook: _runtime.addPointerYaw,
+                                    onControlDown: (pointer, control) {
+                                      _gameFocusNode.requestFocus();
+                                      _runtime.pressTouchControl(
+                                        pointer,
+                                        control,
+                                      );
+                                    },
+                                    onPointerUp: (pointer, cancelled) =>
+                                        _runtime.releaseTouchPointer(
+                                          pointer,
+                                          cancelled: cancelled,
+                                        ),
+                                    onUse: _runtime.triggerUse,
+                                    onSelectWeapon: _runtime.selectWeapon,
+                                    onToggleMap: _runtime.toggleAutomap,
+                                    onZoomMap: (inwards) =>
+                                        _runtime.zoomAutomap(inwards: inwards),
+                                    onPause: _runtime.togglePause,
+                                  ),
+                                ),
+                              Positioned(
+                                top: 10,
+                                left: 10,
+                                child: _ContentBadge(
+                                  synthetic: widget.synthetic,
+                                  mapName: widget.level.map.name,
+                                  setupMessage: widget.setupMessage,
+                                ),
+                              ),
+                              if (!widget.touchControlsEnabled)
+                                Positioned(
+                                  top: narrow && _showControls ? 44 : 10,
+                                  right: 10,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      if (_showControls)
+                                        _ControlsHint(
+                                          narrow: narrow,
+                                          onHide: () => setState(
+                                            () => _showControls = false,
+                                          ),
+                                        )
+                                      else
+                                        IconButton(
+                                          key: const Key('show-controls'),
+                                          tooltip: 'Show controls',
+                                          onPressed: () => setState(
+                                            () => _showControls = true,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.keyboard_alt_outlined,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      _PauseButton(
+                                        onPressed: _runtime.togglePause,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
                           ),
-                          _PauseButton(onPressed: _runtime.togglePause),
-                        ],
-                      ),
-                    )
-                  else
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          IconButton(
-                            key: const Key('show-controls'),
-                            tooltip: 'Show controls',
-                            onPressed: () =>
-                                setState(() => _showControls = true),
-                            icon: const Icon(
-                              Icons.keyboard_alt_outlined,
-                              size: 18,
-                            ),
-                          ),
-                          _PauseButton(onPressed: _runtime.togglePause),
-                        ],
-                      ),
+                        ),
+                        DoomStatusBar(hud: hud, synthetic: widget.synthetic),
+                      ],
                     ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: DoomStatusBar(hud: hud, synthetic: widget.synthetic),
                   ),
                   if (hud.paused && hud.health > 0)
                     _PauseOverlay(
@@ -459,6 +574,8 @@ final class _DoomReadyViewState extends State<_DoomReadyView>
                       onResume: _runtime.togglePause,
                       onLoadIwad: widget.onLoadIwad,
                       errorMessage: widget.selectionErrorMessage,
+                      touchControlsEnabled: widget.touchControlsEnabled,
+                      onTouchControlsChanged: _setTouchControls,
                     ),
                   if (hud.levelComplete)
                     _IntermissionOverlay(
@@ -577,61 +694,83 @@ final class _PauseOverlay extends StatelessWidget {
   const _PauseOverlay({
     super.key,
     required this.onResume,
+    required this.touchControlsEnabled,
+    required this.onTouchControlsChanged,
     this.onLoadIwad,
     this.errorMessage,
   });
 
   final VoidCallback onResume;
+  final bool touchControlsEnabled;
+  final ValueChanged<bool> onTouchControlsChanged;
   final VoidCallback? onLoadIwad;
   final String? errorMessage;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Colors.black.withValues(alpha: 0.78),
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          const Text(
-            'PAUSED',
-            style: TextStyle(
-              color: Color(0xFFC8B45A),
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
+    child: SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Text(
+                  'PAUSED',
+                  style: TextStyle(
+                    color: Color(0xFFC8B45A),
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Press Esc to resume',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.tonal(
+                  key: const Key('overlay-action'),
+                  onPressed: onResume,
+                  child: const Text('RESUME'),
+                ),
+                const SizedBox(height: 8),
+                Material(
+                  type: MaterialType.transparency,
+                  child: SwitchListTile.adaptive(
+                    key: const Key('pause-touch-controls'),
+                    title: const Text('TOUCH CONTROLS'),
+                    value: touchControlsEnabled,
+                    onChanged: onTouchControlsChanged,
+                  ),
+                ),
+                if (onLoadIwad != null) ...<Widget>[
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    key: const Key('pause-load-iwad'),
+                    onPressed: onLoadIwad,
+                    child: const Text('SELECT LOCAL IWAD'),
+                  ),
+                ],
+                if (errorMessage != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Text(
+                      errorMessage!,
+                      key: const Key('pause-iwad-error'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFFFF6B5F)),
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Press Esc to resume',
-            style: TextStyle(color: Colors.white70),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.tonal(
-            key: const Key('overlay-action'),
-            onPressed: onResume,
-            child: const Text('RESUME'),
-          ),
-          if (onLoadIwad != null) ...<Widget>[
-            const SizedBox(height: 10),
-            OutlinedButton(
-              key: const Key('pause-load-iwad'),
-              onPressed: onLoadIwad,
-              child: const Text('SELECT LOCAL IWAD'),
-            ),
-          ],
-          if (errorMessage != null) ...<Widget>[
-            const SizedBox(height: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: Text(
-                errorMessage!,
-                key: const Key('pause-iwad-error'),
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFFF6B5F)),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     ),
   );
@@ -653,8 +792,8 @@ final class _ControlsHint extends StatelessWidget {
       children: <Widget>[
         Text(
           narrow
-              ? 'WASD · SHIFT run · ←→ · CTRL · E'
-              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
+              ? 'WASD · Shift run · ←→ · Enter fire · E use'
+              : 'W/S move · A/D strafe · Shift run · ←/→ turn · Enter/Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
           style: const TextStyle(color: Colors.white70, fontSize: 10),
         ),
         IconButton(

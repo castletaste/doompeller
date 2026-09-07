@@ -39,6 +39,46 @@ void main() {
     expect(input.consume().command.attacking, isFalse);
   });
 
+  test('owned holds release independently and cancelled taps do not leak', () {
+    final input = DoomInputState();
+    final keyboard = Object();
+    final mouse = Object();
+    final touch = Object();
+
+    input
+      ..pressOwned(keyboard, DoomControl.attack)
+      ..pressOwned(mouse, DoomControl.attack)
+      ..releaseOwned(mouse, DoomControl.attack, cancelled: true)
+      ..releaseOwned(keyboard, DoomControl.attack);
+    expect(input.consume().command.attacking, isTrue);
+    expect(input.consume().command.attacking, isFalse);
+
+    input
+      ..pressOwned(touch, DoomControl.attack)
+      ..releaseOwned(touch, DoomControl.attack, cancelled: true);
+    expect(input.consume().command.attacking, isFalse);
+
+    input
+      ..pressOwned(mouse, DoomControl.attack)
+      ..releaseOwned(mouse, DoomControl.attack)
+      ..pressOwned(mouse, DoomControl.attack)
+      ..releaseOwned(mouse, DoomControl.attack, cancelled: true);
+    expect(
+      input.consume().command.attacking,
+      isTrue,
+      reason: 'cancelling a later press cannot erase an earlier normal tap',
+    );
+    expect(input.consume().command.attacking, isFalse);
+
+    input
+      ..pressOwned(keyboard, DoomControl.forward)
+      ..pressOwned(touch, DoomControl.forward)
+      ..releaseOwned(touch, DoomControl.forward);
+    expect(input.consume().command.forwardMove, DoomInputState.moveSpeed);
+    input.releaseOwned(keyboard, DoomControl.forward);
+    expect(input.consume().command.forwardMove, 0);
+  });
+
   test('use, weapon, pointer turn and pause are one-shot', () {
     final input = DoomInputState()
       ..triggerUse()
@@ -90,6 +130,47 @@ void main() {
     final walking = input.consume().command;
     expect(walking.forwardMove, DoomInputState.moveSpeed);
     expect(walking.sideMove, DoomInputState.strafeSpeed);
+  });
+
+  test('integer analog axes combine, oppose, clamp, and scale with run', () {
+    final input = DoomInputState()..setAnalogAxes(forward: 500, side: -250);
+    final analog = input.consume().command;
+    expect((analog.forwardMove, analog.sideMove), (12, -6));
+
+    input
+      ..press(DoomControl.backward)
+      ..setAnalogAxes(forward: 1000, side: 0);
+    expect(input.consume().command.forwardMove, 0);
+    input
+      ..release(DoomControl.backward)
+      ..press(DoomControl.forward)
+      ..setAnalogAxes(forward: 1000, side: 1000);
+    final clamped = input.consume().command;
+    expect(clamped.forwardMove, DoomInputState.moveSpeed);
+    expect(clamped.sideMove, DoomInputState.strafeSpeed);
+
+    input.press(DoomControl.runLeft);
+    final running = input.consume().command;
+    expect(running.forwardMove, DoomInputState.runMoveSpeed);
+    expect(running.sideMove, DoomInputState.runStrafeSpeed);
+  });
+
+  test('analog axes reject invalid values and clear with device state', () {
+    final input = DoomInputState();
+    expect(
+      () => input.setAnalogAxes(forward: DoomInputState.axisScale + 1, side: 0),
+      throwsRangeError,
+    );
+    expect(
+      () =>
+          input.setAnalogAxes(forward: 0, side: -DoomInputState.axisScale - 1),
+      throwsRangeError,
+    );
+
+    input
+      ..setAnalogAxes(forward: -1000, side: 1000)
+      ..clear();
+    expect(input.consume().command, TicCmd.empty);
   });
 
   test('focus loss clears held and queued input before the next tic', () {

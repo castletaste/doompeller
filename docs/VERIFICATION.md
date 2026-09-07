@@ -62,6 +62,16 @@ Local log: `.local/qa/episode-2026-09-06/current-reordered-strict-suite.txt`.
 The verifier remains disposable at `tool/replay_perf/strict_suite.dart` in
 the replay worktree, with no production source change.
 
+The subsequent combined suite includes all seven completed maps
+(M1/M2/M3/M4/M6/M7/M8). It passes forward and reverse-order fresh replays,
+including the same six rejection cases. E1M1's unchanged production runner
+was exported as ordinary commands before independent verification; its ARM1
+pickup occurs at tic 346 and its final hash remains `0x9c565b42`.
+Recording: `/Users/savva/.cache/doompeller-replay-20260906.WFKcX4/wt/tool/replay_perf/e1m1_commands.json`,
+SHA-256 `81fd592223dd5418de9d9ccdee18b0695a36e121d4c0dc84d8038e24094c2c13`.
+Combined log: `.local/qa/episode-2026-09-06/current-seven-map-strict-suite.txt`.
+M5 and M9 are not counted in that suite.
+
 E1M8 was regenerated on the unchanged `82a9bd5` gameplay core. Both Barons
 are dead, the tag-666 floor lowered, the line-233 staircase reached its full
 13-step profile, and the final teleport/damaging-floor exit completed on the

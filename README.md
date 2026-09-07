@@ -89,7 +89,7 @@ final verdicts; `PROBLEMS` exits non-zero.
 - `A`/`D`: strafe
 - hold either `Shift`: run
 - left/right: turn
-- `Ctrl` or primary click: attack
+- `Enter`, numpad `Enter`, `Ctrl` or primary click: attack
 - `Space` or `E`: use
 - `1`–`6`: fist, pistol, shotgun, chaingun, rocket launcher, chainsaw
 - `Esc`: pause/resume
@@ -97,6 +97,13 @@ final verdicts; `PROBLEMS` exits non-zero.
 
 All simulation input is sampled into `TicCmd`. Rendering interpolates the
 camera between completed 35 Hz tics and never advances game state.
+
+Touching the game enables smartphone controls; the pause menu also has a
+`TOUCH CONTROLS` toggle. Drag the left stick to move/strafe, swipe the right
+side to turn, and hold `FIRE` to shoot (dragging it also turns). Hold `RUN`
+for the existing run speed. `USE`, weapon selection, map/zoom, and pause have
+dedicated buttons. Controls fit portrait and landscape layouts and release
+held input when paused, cancelled, or the app loses focus.
 
 ## Verify
 

@@ -596,6 +596,210 @@ void main() {
   });
 
   test(
+    'Enter aliases are held attacks and preserve a quick pre-tic tap',
+    () async {
+      for (final keys in <(PhysicalKeyboardKey, LogicalKeyboardKey)>[
+        (PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter),
+        (PhysicalKeyboardKey.numpadEnter, LogicalKeyboardKey.numpadEnter),
+      ]) {
+        final runtime = DoomRuntimeGame(await fixturePlayerSoundLevel());
+        runtime.onKeyEvent(
+          KeyDownEvent(
+            physicalKey: keys.$1,
+            logicalKey: keys.$2,
+            timeStamp: Duration.zero,
+          ),
+          <LogicalKeyboardKey>{keys.$2},
+        );
+        expect(runtime.input.consume().command.attacking, isTrue);
+        runtime.onKeyEvent(
+          KeyRepeatEvent(
+            physicalKey: keys.$1,
+            logicalKey: keys.$2,
+            timeStamp: Duration.zero,
+          ),
+          <LogicalKeyboardKey>{keys.$2},
+        );
+        expect(runtime.input.consume().command.attacking, isTrue);
+        runtime.onKeyEvent(
+          KeyUpEvent(
+            physicalKey: keys.$1,
+            logicalKey: keys.$2,
+            timeStamp: Duration.zero,
+          ),
+          const <LogicalKeyboardKey>{},
+        );
+        expect(runtime.input.consume().command.attacking, isFalse);
+
+        runtime.onKeyEvent(
+          KeyDownEvent(
+            physicalKey: keys.$1,
+            logicalKey: keys.$2,
+            timeStamp: Duration.zero,
+          ),
+          <LogicalKeyboardKey>{keys.$2},
+        );
+        runtime.onKeyEvent(
+          KeyUpEvent(
+            physicalKey: keys.$1,
+            logicalKey: keys.$2,
+            timeStamp: Duration.zero,
+          ),
+          const <LogicalKeyboardKey>{},
+        );
+        expect(runtime.input.consume().command.attacking, isTrue);
+        expect(runtime.input.consume().command.attacking, isFalse);
+      }
+    },
+  );
+
+  test(
+    'keyboard, mouse, and touch attack owners release independently',
+    () async {
+      final runtime = DoomRuntimeGame(await fixturePlayerSoundLevel());
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.enter,
+          logicalKey: LogicalKeyboardKey.enter,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.enter},
+      );
+      runtime
+        ..setPointerAttack(true)
+        ..pressTouchControl(17, DoomControl.attack)
+        ..pressTouchControl(23, DoomControl.attack);
+
+      runtime.onKeyEvent(
+        const KeyUpEvent(
+          physicalKey: PhysicalKeyboardKey.enter,
+          logicalKey: LogicalKeyboardKey.enter,
+          timeStamp: Duration.zero,
+        ),
+        const <LogicalKeyboardKey>{},
+      );
+      expect(runtime.input.consume().command.attacking, isTrue);
+      runtime.setPointerAttack(false);
+      expect(runtime.input.consume().command.attacking, isTrue);
+      runtime.releaseTouchPointer(17);
+      expect(runtime.input.consume().command.attacking, isTrue);
+      runtime.releaseTouchPointer(23);
+      expect(runtime.input.consume().command.attacking, isFalse);
+    },
+  );
+
+  test(
+    'normal touch taps survive but cancelled mouse and touch taps do not',
+    () async {
+      final runtime = DoomRuntimeGame(await fixturePlayerSoundLevel());
+
+      runtime
+        ..pressTouchControl(1, DoomControl.attack)
+        ..releaseTouchPointer(1);
+      expect(runtime.input.consume().command.attacking, isTrue);
+      expect(runtime.input.consume().command.attacking, isFalse);
+
+      runtime
+        ..pressTouchControl(2, DoomControl.attack)
+        ..releaseTouchPointer(2, cancelled: true)
+        ..setPointerAttack(true)
+        ..setPointerAttack(false, cancelled: true);
+      expect(runtime.input.consume().command.attacking, isFalse);
+    },
+  );
+
+  test(
+    'one touch stick combines with keyboard and clears independently',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      runtime.setTouchMovement(7, forward: 500, side: -500);
+      var command = runtime.input.consume().command;
+      expect((command.forwardMove, command.sideMove), (12, -12));
+
+      runtime.setTouchMovement(8, forward: -1000, side: 1000);
+      command = runtime.input.consume().command;
+      expect((command.forwardMove, command.sideMove), (12, -12));
+
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.keyW,
+          logicalKey: LogicalKeyboardKey.keyW,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
+      );
+      runtime.pressTouchControl(9, DoomControl.runLeft);
+      command = runtime.input.consume().command;
+      expect(command.forwardMove, DoomInputState.runMoveSpeed);
+      expect(command.sideMove, -20);
+
+      runtime.clearTouchInput();
+      command = runtime.input.consume().command;
+      expect(command.forwardMove, DoomInputState.moveSpeed);
+      expect(command.sideMove, 0);
+    },
+  );
+
+  test(
+    'pausing clears every source and ignores gameplay intent until resume',
+    () async {
+      final runtime = DoomRuntimeGame(await fixtureLevel());
+      runtime.onKeyEvent(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.keyW,
+          logicalKey: LogicalKeyboardKey.keyW,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{LogicalKeyboardKey.keyW},
+      );
+      runtime
+        ..setPointerAttack(true)
+        ..setTouchMovement(3, forward: 500, side: 1000)
+        ..pressTouchControl(4, DoomControl.runLeft)
+        ..triggerUse()
+        ..togglePause();
+      runtime.advanceMicrosForTest(0);
+
+      expect(runtime.isPaused, isTrue);
+      expect(runtime.input.consume().command, TicCmd.empty);
+      runtime
+        ..setPointerAttack(true)
+        ..setTouchMovement(5, forward: 1000, side: 1000)
+        ..pressTouchControl(6, DoomControl.attack)
+        ..addPointerYaw(10)
+        ..triggerUse()
+        ..selectWeapon(2);
+      expect(runtime.input.consume().command, TicCmd.empty);
+
+      runtime.togglePause();
+      runtime.advanceMicrosForTest(0);
+      expect(runtime.isPaused, isFalse);
+      expect(runtime.input.consume().command, TicCmd.empty);
+    },
+  );
+
+  test('main and numpad Enter restart a dead runtime', () async {
+    for (final keys in <(PhysicalKeyboardKey, LogicalKeyboardKey)>[
+      (PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter),
+      (PhysicalKeyboardKey.numpadEnter, LogicalKeyboardKey.numpadEnter),
+    ]) {
+      final runtime = DoomRuntimeGame(await fixtureDeathLevel());
+      advanceUntilDead(runtime);
+      runtime.onKeyEvent(
+        KeyDownEvent(
+          physicalKey: keys.$1,
+          logicalKey: keys.$2,
+          timeStamp: Duration.zero,
+        ),
+        <LogicalKeyboardKey>{keys.$2},
+      );
+      expect(runtime.gameState.player.health, 100);
+      expect(runtime.gameState.tic, 0);
+      expect(runtime.input.consume().command, TicCmd.empty);
+    }
+  });
+
+  test(
     'audio failure is contained and later play, restart, and dispose run',
     () async {
       final _FailFirstRuntimeAudioBackend backend =

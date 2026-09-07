@@ -13,6 +13,15 @@ There is no server-side Doom engine or Pages Function. The pinned game stack
 remains Flutter 3.44.4, Flame 1.38.0, flame_3d 0.3.0 and naga-cli 30.0.1.
 The published bootstrap has only `dart2wasm` / `skwasm`, no dart2js fallback.
 
+CI downloads the exact Flutter 3.44.4 Linux x64 archive directly from the
+official Flutter release bucket, using the pin from the
+[Linux release manifest](https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json).
+Its SHA-256 is pinned in `deploy-web.yml`
+and checked before extraction; the extracted Git revision is checked before
+the SDK enters `PATH`. No moving release metadata is fetched during setup.
+This avoids composite actions with unpinned nested actions while keeping
+the repository's full-commit-SHA requirement enabled.
+
 ## Content input
 
 The approved CI source is the Doom Shareware 1.9 archive:

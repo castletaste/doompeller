@@ -29,12 +29,27 @@ jobs:
           persist-credentials: false
 
       - name: Set up Flutter 3.44.4
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: 3.44.4
-          cache: false
-          pub-cache: false
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          # Pinned from the official releases_linux.json manifest. Do not
+          # resolve a moving channel or trust a downloaded checksum at runtime.
+          flutter_setup_dir="$(mktemp -d "${RUNNER_TEMP}/doompeller-flutter.XXXXXX")"
+          curl --fail --location --silent --show-error --retry 3 \
+            --connect-timeout 30 --proto '=https' --proto-redir '=https' \
+            --output "$flutter_setup_dir/flutter.tar.xz" \
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.4-stable.tar.xz
+          printf '%s  %s\n' \
+            c853cda0312a162854c481fe6a1bc286d84fbb74bfab7037c39750061dc9b466 \
+            "$flutter_setup_dir/flutter.tar.xz" | sha256sum --check --strict
+          tar --extract --xz --no-same-owner \
+            --file "$flutter_setup_dir/flutter.tar.xz" --directory "$flutter_setup_dir"
+          test "$(git -C "$flutter_setup_dir/flutter" rev-parse HEAD)" = \
+            ad70ec4617166f1c38e5d2bfd388af71fda14f06
+          printf '%s\n' "$flutter_setup_dir/flutter/bin" >> "$GITHUB_PATH"
+          printf 'FLUTTER_ROOT=%s\n' "$flutter_setup_dir/flutter" >> "$GITHUB_ENV"
 
       - name: Report toolchain
         run: |

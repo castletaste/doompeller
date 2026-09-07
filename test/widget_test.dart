@@ -73,7 +73,29 @@ final class FakeRuntime implements DoomRuntimeView {
   }
 
   @override
-  void setPointerAttack(bool pressed) {}
+  void setPointerAttack(bool pressed, {bool cancelled = false}) {}
+
+  @override
+  void setTouchMovement(
+    int pointer, {
+    required int forward,
+    required int side,
+  }) {}
+
+  @override
+  void pressTouchControl(int pointer, DoomControl control) {}
+
+  @override
+  void releaseTouchPointer(int pointer, {bool cancelled = false}) {}
+
+  @override
+  void clearTouchInput() {}
+
+  @override
+  void triggerUse() => input.triggerUse();
+
+  @override
+  void selectWeapon(int slot) => input.selectWeapon(slot);
 
   @override
   void togglePause() {

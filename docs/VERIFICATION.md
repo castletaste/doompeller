@@ -625,12 +625,28 @@ also opened. That control-run window was closed as well. Logs:
 ## Still required
 
 Current-core normal-gameplay start-to-exit command streams and independent
-replay verification for E1M3, E1M5, E1M7 and E1M9, including secret-exit traversal;
-fresh native-render verification beyond E1M1. Only episode one is present in
+replay verification for E1M5 and E1M9; separate E1M3 secret-exit traversal;
+and fresh native-render verification beyond E1M1. Only episode one is present in
 the supplied DOOM1.WAD, so the wider original-Doom goal also lacks E2/E3 input.
 The Codex goal must remain active until that evidence exists.
 
-The remaining checkpoint details below describe the prior core revision.
+### Confirmed lift-timing divergence
+
+The frozen current core initializes `_LiftMover._wait` to 35; its bottom
+countdown uses a post-decrement. Original Doom's `downWaitUpStay` initializes
+the wait to `35 * PLATWAIT`, where `PLATWAIT` is 3:
+[platform implementation](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_plats.c)
+and [constants](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_spec.h).
+This is a confirmed timing mismatch, not proof that E1M3's secret exit is
+unreachable. The attempted secret-route timing and alternative activators
+still require causal verification. No production timing change or secret-exit
+completion is claimed here; the seven completed recordings above retain their
+original current-core identities.
+
+## Historical checkpoints (superseded)
+
+The checkpoint details below describe the prior core revision. They are not
+the current completion checklist; the current results are listed above.
 
 With switch 103 corrected, E1M3 reaches its yellow key alive at tic 1,408,
 31 HP, hash `0x639a728b`, with an exact fresh replay. It returns through the

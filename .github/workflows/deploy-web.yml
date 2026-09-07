@@ -97,6 +97,11 @@ jobs:
       - name: Resolve locked app dependencies
         run: flutter pub get --enforce-lockfile
 
+      - name: Generate declared shader assets for the clean checkout
+        run: |
+          flutter pub run flame_3d:build_shaders --with-web-gpu
+          dart run tool/verify_web_shader_bundle.dart assets/shaders/doom_palette.wgslbundle
+
       - name: Analyze app
         run: flutter analyze
 

@@ -48,6 +48,19 @@ verifier additionally checks legal button bits, command ranges, default inventor
 and survival throughout. Its new recording and planner remain in the disposable
 `replay_m2_spread` directory, not production code.
 
+A separate fail-closed verifier replayed the complete M2/M3/M4/M6/M8
+recordings from freshly parsed maps, then repeated them in reverse map order.
+All five retained their pinned hashes and survived every command; the first
+normal exit was exactly the last command. Six deliberately invalid variants
+were rejected: disabled monsters, out-of-range movement, invalid weapon slot,
+stale hash, truncated stream, and an extra post-exit command. This validates
+the verifier's rejection paths as well as these five recordings; it does not
+count unfinished maps as passes. The gameplay package tree remains
+`dde4417dda5d0988ceab0b9b5934959958b6a624`, identical to `82a9bd5`.
+Local log: `.local/qa/episode-2026-09-06/current-reordered-strict-suite.txt`.
+The verifier remains disposable at `tool/replay_perf/strict_suite.dart` in
+the replay worktree, with no production source change.
+
 E1M8 was regenerated on the unchanged `82a9bd5` gameplay core. Both Barons
 are dead, the tag-666 floor lowered, the line-233 staircase reached its full
 13-step profile, and the final teleport/damaging-floor exit completed on the

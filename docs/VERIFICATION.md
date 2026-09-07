@@ -36,7 +36,7 @@ six fallback sectors with area delta 51.40640861486281. No geometry changed.
 | E1M1 input-only and native Metal replay | 2,160 | 84 / 97 | 6/6 | `0x9c565b42` |
 | E1M1 keyboard-input route | 2,155 | 80 / nonzero | 6/6 | `0x55608565` |
 | E1M2 input-only, two fresh strict replays | 3,880 | 19 / 0 | 23/41 | `0x4105ae29` |
-| E1M3 input-only, independently repeated strict replay | 5,927 | 42 / 1 | 53 | `0x07246777` |
+| E1M3 input-only, independently repeated strict replay | 5,927 | 42 / 1 | 53/74 | `0x07246777` |
 | E1M4 input-only, independently repeated strict replay | 10,064 | 80 / 0 | 35/54 | `0xdd47f342` |
 | E1M6 input-only, independently repeated strict replay | 7,933 | 39 / 43 | 93 | `0xd28054b8` |
 | E1M8 input-only, independently repeated strict replay | 7,328 | 7 / 57 | 12 | `0x37b5e98c` |
@@ -97,6 +97,12 @@ replays. Recording:
 SHA-256 `5bfb0c5d2df2b15288d8ac9df1981dffe5367060880fc9a7825f38f8516b4faa`.
 Log: `.local/qa/episode-2026-09-06/m3-full-current-independent.txt`.
 This is input-only evidence, not a new rendered or manual playthrough.
+Fresh E1M3 preflight is `READY WITH FALLBACKS`: no missing textures, flats,
+sprites or expected sounds; 6,249 triangles in two meshes on one atlas page,
+zero unmatched edges, degenerate triangles or T-junctions. Three fallback
+sectors have total area delta 96.20179168632603. The largest surface uses
+9,174/65,535 vertices and BSP work is 175,723/1,000,000. Local log:
+`.local/qa/episode-2026-09-06/m3-current-wad-report.txt`.
 
 The focused original-E1M1 regression rerun passed all 11 tests covering armor
 pickup, effect lifecycle, collision, large-move tunneling, full input route,
@@ -115,15 +121,58 @@ These are Flutter timings, not GPU or presented-frame measurements. The worst
 warmup span was 48.622 s total, including 48.596 s vsync overhead; foreground
 focus throughout was not verified. This is not an all-foreground 60 FPS claim.
 Log: `.local/qa/episode-2026-09-06/native-e1m1-spread.log`.
-Current GUI inspection is unverified: agent-device 0.20.3 timed out on both
+The first GUI inspection was unverified: agent-device 0.20.3 timed out on both
 accessibility capture and the screenshot retry. Opening by bundle ID also
 launched the separately registered Debug build; that process is not release
 evidence. Both identified test processes were closed. No screenshot or manual
 playthrough is claimed for this correction.
-The follow-up agent-device doctor check also reports `APP_NOT_INSTALLED` for
-both the display name and the exact project bundle ID
-`dev.castletaste.doompeller`; installed-app discovery does not list it. No new
-test window was launched in this follow-up and no GUI success is inferred.
+The initial follow-up doctor check reported `APP_NOT_INSTALLED`; this was
+subsequently resolved by the user-approved local installation described below.
+
+### Installed Release GUI smoke
+
+The user approved installation at `/Applications/Doompeller.app`. The installed
+main executable and underlying `App.framework/Versions/A/App` are byte-identical
+to the current Release build; both bundle signatures verify. The AOT binary
+SHA-256 is `31997cdd67b5e3f8f9fd31b90fa1ec04844390a6b2c4a1d408a2a710b67f6177`.
+Bundled DOOM1.WAD matches the approved local input byte-for-byte. Generated
+build metadata names `lib/main.dart` without replay defines; this is provenance
+support, not a cryptographically bound entrypoint assertion.
+
+Opening by shared bundle ID initially selected the old Debug build again.
+That process was identified and closed. Launching the installed executable
+directly, then attaching agent-device, selected PID 60243 at the exact installed
+path. Its log confirms Impeller Metal. The first Debug screenshot
+`installed-release-start.png` is **not Release evidence**, despite its filename.
+
+Actual Release observations: original E1M1 starts without a picker, pause and
+resume respond, W/A/D move the player, primary-button drag turns the camera,
+and held fire reduces pistol ammo from 50 to 45. The later idle screenshot
+shows the normal weapon frame without a persistent muzzle flash. This does
+not prove every explosion lifetime, enemy facing, or collision edge case.
+ARM1 pickup and full start-to-exit traversal were not reached in this GUI
+attempt; their prior automated evidence is not relabelled as manual proof.
+Native pause intentionally shows Resume only: the approved local-file picker
+is browser-only, while desktop import UI remains outside scope.
+
+Agent-device's delayed 96-character W sequence exceeded its main-thread
+timeout; runner diagnostics show the abandoned input work drained after
+37.066 seconds. A subsequent screenshot succeeded and the game log had no
+new exception. This is an automation timeout, not evidence of an app crash.
+Shorter zero-delay input sequences succeeded. Recording and both identified
+test processes were closed; the installed application remains available.
+No new frame-percentile or presented-60-FPS claim accompanies this smoke test.
+
+Local ignored evidence under `.local/qa/episode-2026-09-06/`:
+
+- `installed-release.log`: correct installed process and Impeller Metal.
+- `installed-release-e1m1.png`: original default startup.
+- `installed-release-pause-verified.png`: pause overlay.
+- `installed-release-after-input.png`: moved viewpoint, 45 ammo, idle weapon.
+- `installed-release-stairs-approach.png`: final partial traversal state.
+- `installed-release-input.mp4`: 407.067-second encoded app-only recording
+  (439.475 seconds of wall-clock session time), not a complete playthrough or
+  performance benchmark.
 
 The old E1M2/M4/M8 input recordings diverge under corrected RNG/sight and die
 at tics 2,072/1,322/1,379 respectively, identically on two fresh attempts.

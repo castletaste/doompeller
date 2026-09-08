@@ -37,11 +37,15 @@ retained below.
   Native ownership takeover also covers voices on channels the new owner does
   not reuse, delayed cleanup replies and observable cleanup failure.
 - macOS Release: `flutter build macos --release --no-pub` passes (45.7 MB).
-  Exact merged worktree executable at `67f82ef` (PID 29119) was launched directly; its log confirmed
-  Impeller Metal. Fresh GUI observations showed E1M1, Enter firing (ammo 50 to
-  49), pause/resume, the touch-controls switch, touch automap open/close and touch
-  firing (ammo 49 to 48). The test process exited with code 0. This is a targeted
-  smoke, not a fresh native full-episode replay or audible-output test.
+  The exact `719f61c` worktree app was opened through macOS Launch Services
+  (PID 60316, executable path verified). Fresh GUI observations showed E1M1,
+  Enter firing (ammo 50 to 49), pause/resume, the touch-controls switch, touch
+  automap open/close and touch firing (ammo 49 to 48). Cmd+Q closed the app and
+  the PID disappeared. The same build's startup log confirms Impeller Metal.
+  This is a targeted smoke, not a native full-episode replay or audible-output
+  test. Automation must target the worktree bundle explicitly; its bundle ID
+  also identifies the separately installed app, and direct executable launches
+  are not reliably recognized by XCTest.
 - Wasm/WebGPU: `tool/build_web_release.sh` passes with the pinned Flutter SDK,
   including shader verification, bootstrap finalization, pins and local IWAD
   checksum. `main.dart.wasm` is 2,061,337 bytes; packaged IWAD is 4,196,020 bytes.
@@ -51,14 +55,15 @@ retained below.
   not a browser gameplay performance measurement.
 - CI-policy checks: **35 Node tests**, **8 Python shareware-fetch tests** and
   **4 Python artifact tests** pass. GitHub Actions run
-  [34108419272](https://github.com/castletaste/doompeller/actions/runs/34108419272)
-  passed Verify and build Wasm for `67f82ef`; deployment was skipped.
+  [34111409455](https://github.com/castletaste/doompeller/actions/runs/34111409455)
+  passed Verify and build Wasm for `719f61c`; deployment was skipped.
 
 Pinned toolchain: Flutter 3.44.4, Dart 3.12.2, naga 30.0.1. No dependency versions,
 renderer pins, native audio protocol, gameplay rules or replay schemas changed.
 Web CPU-stage blocking, synchronous sprite packing and the renderer's lack of
-explicit GPU disposal remain documented limitations. No app was installed,
-deployed or published by this refactor.
+explicit GPU disposal remain documented limitations. No native app was installed.
+The production deploy job was skipped; the repository's existing PR automation
+publishes a separate preview of the verified bundle.
 
 ---
 

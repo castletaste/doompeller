@@ -124,6 +124,16 @@ Original-rate A/B clips for every track's opening and first loop transition
 are available locally for the outstanding listening check; no perceptual pass
 is claimed from the numeric results or browser counters.
 
+The subsequent CI integration fix aligns the trusted preview headers and exact
+audio-file allowlist with the production bundle. All 35 trusted-policy tests
+and five artifact tests pass. Worker compilation now stages its auxiliary
+files outside the web bundle and omits source maps. The resulting worker
+SHA-256 is `929983c10a87721185a8c8a63f573199535e47340612a6dec4ee6d0b056922ce`;
+all non-custom Wasm sections are byte-identical to the browser-tested worker
+above. The real release archive passes packing and the updated preview
+sanitizer. Automatic preview publication still uses the policy from `main`,
+which rejects these new audio assets until that policy is updated there.
+
 ---
 
 # Architecture refactor verification — 2026-09-07

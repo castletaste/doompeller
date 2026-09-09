@@ -89,8 +89,19 @@ done
 
 "$DOOMPELLER_FLUTTER" build web --wasm --release --no-web-resources-cdn
 "$DOOMPELLER_DART" run tool/finalize_wasm_web_build.dart build/web
-"$DOOMPELLER_DART" compile wasm lib/web/doom_music_worker.dart \
-  -o build/web/doom_music_worker.wasm
+# Keep compiler support probes and debug output outside the deployable bundle.
+# The module worker loads only the generated module and its Wasm binary.
+mkdir -p build/web_music
+"$DOOMPELLER_DART" compile wasm --no-source-maps lib/web/doom_music_worker.dart \
+  -o build/web_music/doom_music_worker.wasm
+cp build/web_music/doom_music_worker.wasm build/web/doom_music_worker.wasm
+cp build/web_music/doom_music_worker.mjs build/web/doom_music_worker.mjs
+# Flutter may retain these files from an earlier in-place worker compilation.
+for compiler_auxiliary in doom_music_worker.support.js doom_music_worker.wasm.map; do
+  if [[ -f "build/web/$compiler_auxiliary" ]]; then
+    mv "build/web/$compiler_auxiliary" "build/web_music/$compiler_auxiliary"
+  fi
+done
 
 # Flutter does not guarantee that web dotfiles are copied into build/web.
 cp web/_headers build/web/_headers

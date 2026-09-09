@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doom_wad/doom_wad.dart';
@@ -8,17 +11,17 @@ import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../adapter/fake_gpu_backend.dart';
+import '../support/local_iwad.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late PreparedDoomLevel level;
 
   setUpAll(() async {
-    final asset = await rootBundle.load('.local/doom/DOOM1.WAD');
+    final asset = await loadLocalIwad('.local/doom/DOOM1.WAD');
     final bytes = asset.buffer.asUint8List(
       asset.offsetInBytes,
       asset.lengthInBytes,

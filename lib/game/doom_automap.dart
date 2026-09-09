@@ -4,6 +4,12 @@ import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/foundation.dart';
 
+typedef AutomapSectorHeights = ({
+  int sectorIndex,
+  double floorHeight,
+  double ceilingHeight,
+});
+
 /// Immutable UI-only state consumed by the Flutter automap overlay.
 ///
 /// It deliberately contains no simulation state. In particular, visited lines
@@ -133,7 +139,15 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
 
   void zoomOut() => _setZoom(value.zoom / _zoomStep);
 
-  void updatePlayer(PlayerView player, {required int sectorIndex}) {
+  void updatePlayer(
+    PlayerView player, {
+    required int sectorIndex,
+    Iterable<AutomapSectorHeights> sectorHeights = const [],
+  }) {
+    var heightsChanged = false;
+    for (final heights in sectorHeights) {
+      heightsChanged = _applySectorHeights(heights) || heightsChanged;
+    }
     Set<int>? visitedLines;
     if (player.powers.computerMap && !_hasComputerMap) {
       _hasComputerMap = true;
@@ -164,6 +178,12 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
       playerY: fixedToDouble(player.y),
       playerAngle: player.angle,
       visitedLines: visitedLines,
+      sectorFloors: heightsChanged
+          ? List<double>.unmodifiable(_sectorFloors)
+          : null,
+      sectorCeilings: heightsChanged
+          ? List<double>.unmodifiable(_sectorCeilings)
+          : null,
     );
   }
 
@@ -174,17 +194,29 @@ final class DoomAutomapState extends ValueNotifier<DoomAutomapSnapshot> {
     required double floorHeight,
     required double ceilingHeight,
   }) {
-    if (sectorIndex < 0 || sectorIndex >= _sectorFloors.length) return;
-    if (_sectorFloors[sectorIndex] == floorHeight &&
-        _sectorCeilings[sectorIndex] == ceilingHeight) {
+    if (!_applySectorHeights((
+      sectorIndex: sectorIndex,
+      floorHeight: floorHeight,
+      ceilingHeight: ceilingHeight,
+    ))) {
       return;
     }
-    _sectorFloors[sectorIndex] = floorHeight;
-    _sectorCeilings[sectorIndex] = ceilingHeight;
     _publish(
       sectorFloors: List<double>.unmodifiable(_sectorFloors),
       sectorCeilings: List<double>.unmodifiable(_sectorCeilings),
     );
+  }
+
+  bool _applySectorHeights(AutomapSectorHeights heights) {
+    final (:sectorIndex, :floorHeight, :ceilingHeight) = heights;
+    if (sectorIndex < 0 || sectorIndex >= _sectorFloors.length) return false;
+    if (_sectorFloors[sectorIndex] == floorHeight &&
+        _sectorCeilings[sectorIndex] == ceilingHeight) {
+      return false;
+    }
+    _sectorFloors[sectorIndex] = floorHeight;
+    _sectorCeilings[sectorIndex] = ceilingHeight;
+    return true;
   }
 
   bool _discoverSector(int sectorIndex, double playerX, double playerY) {

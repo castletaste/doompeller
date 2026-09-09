@@ -9,6 +9,56 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
+    'a loading listener may supersede startup before any source I/O',
+    () async {
+      var reads = 0;
+      final controller = DoomAppController(
+        loadDeveloper: () async {
+          reads++;
+          return const DoomContentLoadFailure('obsolete');
+        },
+      );
+      addTearDown(controller.dispose);
+      controller.addListener(() {
+        if (controller.state.phase == DoomAppPhase.loading) {
+          controller.reportSelectedIwadFailure('newer choice');
+        }
+      });
+      await controller.start();
+      expect(reads, 0);
+      expect(controller.state.errorMessage, 'newer choice');
+    },
+  );
+
+  test(
+    'a reentrant content source cannot cancel its replacement preparation',
+    () async {
+      final content = DoomContentSource(environment: {}).loadFixture();
+      final preparer = DoomLevelPreparer();
+      var preparations = 0;
+      late final DoomAppController controller;
+      late final Future<void> replacement;
+      controller = DoomAppController(
+        loadFixture: () {
+          replacement = controller.useSelectedIwad(Uint8List(0));
+          return content;
+        },
+        loadSelected: (_, {mapName = 'E1M1', sourcePath}) =>
+            DoomContentLoaded(content),
+        prepare: (content, token) {
+          preparations++;
+          return preparer.prepare(content, token);
+        },
+      );
+      addTearDown(controller.dispose);
+      await controller.useFixtureFallback();
+      await replacement;
+      expect(controller.state.phase, DoomAppPhase.fixtureReady);
+      expect(preparations, 1);
+    },
+  );
+
+  test(
     'absent bundled default fails instead of silently using fixture',
     () async {
       final controller = DoomAppController(

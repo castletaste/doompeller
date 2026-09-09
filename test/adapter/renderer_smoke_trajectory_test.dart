@@ -4,6 +4,8 @@ import 'package:doompeller/adapter/renderer_smoke_trajectory.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../support/local_iwad.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -62,43 +64,50 @@ void main() {
     expect(sectors.last, greaterThanOrEqualTo(108));
   });
 
-  test('original E1M1 trajectory stays inside compiled room floors', () async {
-    final ByteData asset = await rootBundle.load('.local/doom/DOOM1.WAD');
-    final bytes = asset.buffer.asUint8List(
-      asset.offsetInBytes,
-      asset.lengthInBytes,
-    );
-    expect(bytes.lengthInBytes, 4196020);
-    final set = WadSet(<WadFile>[WadFile.parse(bytes)]);
-    final map = MapData.load(set, 'E1M1');
-    final level = DoomGeometryCompiler.compile(map, WadResources.load(set));
-    final floors = <double>[
-      for (final sector in map.sectors) sector.floorHeight.toDouble(),
-    ];
-    final trajectory = RendererSmokeTrajectory.fromLevel(map, level);
+  test(
+    'original E1M1 trajectory stays inside compiled room floors',
+    () async {
+      final ByteData asset = await loadLocalIwad('.local/doom/DOOM1.WAD');
+      final bytes = asset.buffer.asUint8List(
+        asset.offsetInBytes,
+        asset.lengthInBytes,
+      );
+      expect(bytes.lengthInBytes, 4196020);
+      final set = WadSet(<WadFile>[WadFile.parse(bytes)]);
+      final map = MapData.load(set, 'E1M1');
+      final level = DoomGeometryCompiler.compile(map, WadResources.load(set));
+      final floors = <double>[
+        for (final sector in map.sectors) sector.floorHeight.toDouble(),
+      ];
+      final trajectory = RendererSmokeTrajectory.fromLevel(map, level);
 
-    expect(map.name, 'E1M1');
-    expect(map.subsectors, hasLength(237));
-    expect(trajectory.legs, hasLength(RendererSmokeTrajectory.maxLegs));
-    expect(
-      trajectory.legs.map((leg) => leg.sector).toSet(),
-      hasLength(RendererSmokeTrajectory.maxLegs),
-    );
-    for (var legIndex = 0; legIndex < trajectory.legs.length; legIndex++) {
-      final leg = trajectory.legs[legIndex];
-      for (var step = 0; step < 20; step++) {
-        final pose = trajectory.sample(
-          legIndex * RendererSmokeTrajectory.legSeconds + step / 20,
-          floors,
-        );
-        expect(pose.sector, leg.sector);
-        expect(leg.contains(pose.x, -pose.z), isTrue);
-        expect(pose.y, floors[leg.sector] + RendererSmokeTrajectory.eyeHeight);
-        expect(
-          pose.y + 15,
-          lessThanOrEqualTo(map.sectors[leg.sector].ceilingHeight),
-        );
+      expect(map.name, 'E1M1');
+      expect(map.subsectors, hasLength(237));
+      expect(trajectory.legs, hasLength(RendererSmokeTrajectory.maxLegs));
+      expect(
+        trajectory.legs.map((leg) => leg.sector).toSet(),
+        hasLength(RendererSmokeTrajectory.maxLegs),
+      );
+      for (var legIndex = 0; legIndex < trajectory.legs.length; legIndex++) {
+        final leg = trajectory.legs[legIndex];
+        for (var step = 0; step < 20; step++) {
+          final pose = trajectory.sample(
+            legIndex * RendererSmokeTrajectory.legSeconds + step / 20,
+            floors,
+          );
+          expect(pose.sector, leg.sector);
+          expect(leg.contains(pose.x, -pose.z), isTrue);
+          expect(
+            pose.y,
+            floors[leg.sector] + RendererSmokeTrajectory.eyeHeight,
+          );
+          expect(
+            pose.y + 15,
+            lessThanOrEqualTo(map.sectors[leg.sector].ceilingHeight),
+          );
+        }
       }
-    }
-  });
+    },
+    tags: ['content'],
+  );
 }

@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -5,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../tool/e1m1_playthrough.dart';
+
+import 'support/local_iwad.dart';
 
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
@@ -18,7 +23,7 @@ void main() {
   test(
     'production rules complete original E1M1 from ARM1 through lift to exit',
     () async {
-      final ByteData asset = await rootBundle.load(_defaultWadPath);
+      final ByteData asset = await loadLocalIwad(_defaultWadPath);
       final Uint8List bytes = asset.buffer.asUint8List(
         asset.offsetInBytes,
         asset.lengthInBytes,

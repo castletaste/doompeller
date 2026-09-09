@@ -128,7 +128,7 @@ jobs:
         run: flutter analyze
 
       - name: Test app with original shareware IWAD
-        run: flutter test
+        run: dart run tool/test.dart --include-content
 
       - name: Test original E1M1 Wasm regression in Chrome
         run: >-

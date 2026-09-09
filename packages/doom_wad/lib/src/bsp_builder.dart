@@ -146,9 +146,23 @@ int _build(
     return _emitSubsector(segs, flatSegs, subsectors);
   }
 
-  final int rightChild = _build(front, flatSegs, subsectors, nodes, depth + 1, maxDepth);
+  final int rightChild = _build(
+    front,
+    flatSegs,
+    subsectors,
+    nodes,
+    depth + 1,
+    maxDepth,
+  );
   final List<int> rightBox = _boundingBox(front);
-  final int leftChild = _build(back, flatSegs, subsectors, nodes, depth + 1, maxDepth);
+  final int leftChild = _build(
+    back,
+    flatSegs,
+    subsectors,
+    nodes,
+    depth + 1,
+    maxDepth,
+  );
   final List<int> leftBox = _boundingBox(back);
 
   nodes.add(
@@ -280,10 +294,13 @@ void _partitionSeg(
       // A zero-length half means the split landed on an endpoint; keep only the
       // real piece so no degenerate seg reaches the lump.
       final bool firstDegenerate = first.x1 == first.x2 && first.y1 == first.y2;
-      final bool secondDegenerate = second.x1 == second.x2 && second.y1 == second.y2;
+      final bool secondDegenerate =
+          second.x1 == second.x2 && second.y1 == second.y2;
       if (firstDegenerate || secondDegenerate) {
         final BspSeg whole = firstDegenerate ? second : first;
-        if (_pointSide(seg.x1, seg.y1, divider) + _pointSide(seg.x2, seg.y2, divider) >= 0) {
+        if (_pointSide(seg.x1, seg.y1, divider) +
+                _pointSide(seg.x2, seg.y2, divider) >=
+            0) {
           front.add(whole);
         } else {
           back.add(whole);
@@ -325,10 +342,7 @@ List<int> _intersection(BspSeg seg, BspSeg divider) {
   final int a = _pointSide(seg.x1, seg.y1, divider);
   final int b = _pointSide(seg.x2, seg.y2, divider);
   final double t = a / (a - b);
-  return <int>[
-    (seg.x1 + t * seg.dx).round(),
-    (seg.y1 + t * seg.dy).round(),
-  ];
+  return <int>[(seg.x1 + t * seg.dx).round(), (seg.y1 + t * seg.dy).round()];
 }
 
 /// Bounding box of [segs] as top, bottom, left, right.

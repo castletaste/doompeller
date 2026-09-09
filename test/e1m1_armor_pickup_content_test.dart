@@ -1,7 +1,12 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const int _allSkills = ThingFlags.easy | ThingFlags.medium | ThingFlags.hard;
@@ -60,13 +65,7 @@ void main() {
     );
     final GameState game = GameState.start(
       _withThings(original, <Thing>[
-        Thing(
-          x: armor.x,
-          y: armor.y,
-          angle: 0,
-          type: 1,
-          flags: _allSkills,
-        ),
+        Thing(x: armor.x, y: armor.y, angle: 0, type: 1, flags: _allSkills),
         armor,
         armor,
       ]),
@@ -85,16 +84,13 @@ void main() {
 }
 
 Future<MapData> _loadOriginalE1M1() async {
-  final ByteData asset = await rootBundle.load(_defaultWadPath);
+  final ByteData asset = await loadLocalIwad(_defaultWadPath);
   final Uint8List bytes = asset.buffer.asUint8List(
     asset.offsetInBytes,
     asset.lengthInBytes,
   );
   expect(bytes.lengthInBytes, 4196020);
-  return MapData.load(
-    WadSet(<WadFile>[WadFile.parse(bytes)]),
-    'E1M1',
-  );
+  return MapData.load(WadSet(<WadFile>[WadFile.parse(bytes)]), 'E1M1');
 }
 
 MapData _withThings(MapData source, List<Thing> things) => MapData(

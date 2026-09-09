@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:doompeller/game/doom_input.dart';
@@ -6,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../tool/e1m1_playthrough.dart';
+
+import 'support/local_iwad.dart';
 
 const String _wadPath = '.local/doom/DOOM1.WAD';
 const int _productionSeed = 0;
@@ -19,7 +24,7 @@ void main() {
   test(
     'production keyboard sampling completes original E1M1 with combat',
     () async {
-      final ByteData asset = await rootBundle.load(_wadPath);
+      final ByteData asset = await loadLocalIwad(_wadPath);
       final Uint8List bytes = asset.buffer.asUint8List(
         asset.offsetInBytes,
         asset.lengthInBytes,

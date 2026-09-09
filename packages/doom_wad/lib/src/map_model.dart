@@ -273,10 +273,10 @@ class MapData {
     WadSet set,
     String mapName, {
     DoomLimits limits = DoomLimits.defaults,
-  }) =>
-      loadMapData(set, mapName, limits: limits);
+  }) => loadMapData(set, mapName, limits: limits);
 
-  bool get hasBsp => nodes.isNotEmpty && subsectors.isNotEmpty && segs.isNotEmpty;
+  bool get hasBsp =>
+      nodes.isNotEmpty && subsectors.isNotEmpty && segs.isNotEmpty;
 
   /// Root node index for BSP traversal; vanilla stores the root last.
   int get bspRoot => nodes.length - 1;

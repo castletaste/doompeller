@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_geometry/doom_geometry.dart';
 import 'package:doom_wad/doom_wad.dart';
@@ -11,6 +14,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../tool/e1m1_playthrough.dart';
 import 'fake_gpu_backend.dart';
+
+import '../support/local_iwad.dart';
 
 const int _productionCommandCount = 2160;
 // Independent monster spread and portal sight intentionally change the route.
@@ -97,7 +102,7 @@ void main() {
 }
 
 Future<PreparedDoomLevel> _loadProductionE1m1() async {
-  final ByteData asset = await rootBundle.load(kDocumentedLocalWadPath);
+  final ByteData asset = await loadLocalIwad(kDocumentedLocalWadPath);
   final Uint8List bytes = asset.buffer.asUint8List(
     asset.offsetInBytes,
     asset.lengthInBytes,

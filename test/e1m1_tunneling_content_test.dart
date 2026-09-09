@@ -1,9 +1,14 @@
+@Tags(['content'])
+library;
+
 import 'dart:math' as math;
 
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const int _wallIndex = 6;
@@ -132,7 +137,7 @@ void main() {
 }
 
 Future<MapData> _loadOriginalE1M1() async {
-  final ByteData asset = await rootBundle.load(_defaultWadPath);
+  final ByteData asset = await loadLocalIwad(_defaultWadPath);
   final Uint8List bytes = asset.buffer.asUint8List(
     asset.offsetInBytes,
     asset.lengthInBytes,

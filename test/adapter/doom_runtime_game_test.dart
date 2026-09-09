@@ -19,17 +19,18 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'fake_gpu_backend.dart';
 
 void expectRuntimeAtlasRect(
-  geometry.CompiledLevel level,
+  DoomRuntimeGame runtime,
   geometry.VertexRange range,
   geometry.AtlasEntry entry,
 ) {
+  final level = runtime.level.geometry;
   final List<double> expected = <double>[
     entry.u0(level.atlas.pageSize),
     entry.v0(level.atlas.pageSize),
     entry.u1(level.atlas.pageSize),
     entry.v1(level.atlas.pageSize),
   ];
-  final vertices = level.meshes[range.meshIndex].vertices;
+  final vertices = runtime.scene.surfaceForMesh(range.meshIndex).packedVertices;
   for (
     var vertex = range.firstVertex;
     vertex < range.firstVertex + range.vertexCount;
@@ -485,7 +486,7 @@ void main() {
     final geometry.AtlasEntry expected =
         animation.frames[animation.frameAt(runtime.gameState.levelTime)];
     for (final geometry.VertexRange range in animation.ranges) {
-      expectRuntimeAtlasRect(prepared.geometry, range, expected);
+      expectRuntimeAtlasRect(runtime, range, expected);
     }
   });
 
@@ -512,9 +513,9 @@ void main() {
       runtime.advanceMicrosForTest(28572);
 
       expect(runtime.gameState.sectors.elementAt(1).floorFlat, 'NUKAGE1');
-      expect(target.textureName, 'NUKAGE1');
+      expect(target.textureName, 'FLAT1', reason: 'template remains unchanged');
       for (final geometry.VertexRange range in target.ranges) {
-        expectRuntimeAtlasRect(prepared.geometry, range, replacement);
+        expectRuntimeAtlasRect(runtime, range, replacement);
       }
       expect(runtime.scene.flushPendingUploads(), greaterThan(0));
       for (final geometry.VertexRange range in target.ranges) {
@@ -1885,13 +1886,24 @@ void main() {
         for (final actor in runtime.gameState.mobjs)
           (actor.id, actor.sprite, actor.x, actor.y, actor.health),
       ], orderedEquals(initialActors));
-      expect(floor.height, initialFloor);
+      final floorRange = floor.ranges.first;
+      expect(
+        runtime.scene
+            .surfaceForMesh(floorRange.meshIndex)
+            .packedVertices[DoomVertexAbi.floatOffsetOf(
+              floorRange.firstVertex,
+            ) +
+            1],
+        initialFloor,
+      );
       final rectOffset =
           switchBand.firstVertex * geometry.DoomVertexAbi.floatsPerVertex +
           geometry.DoomVertexAbi.atlasRectOffset;
       final original = prepared.geometry.atlas.entry('SW1COMP')!;
       expect(
-        prepared.geometry.meshes[switchBand.meshIndex].vertices[rectOffset],
+        runtime.scene
+            .surfaceForMesh(switchBand.meshIndex)
+            .packedVertices[rectOffset],
         original.u0(prepared.geometry.atlas.pageSize),
       );
       final input = runtime.input.consume().command;

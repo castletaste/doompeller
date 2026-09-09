@@ -243,9 +243,10 @@ void main() {
     final int a = band.firstVertex;
     final int b = band.firstVertex + 1;
     final int c = band.firstVertex + 2;
-    double p(int vertex, int component) => mesh.vertices[
-        vertex * DoomVertexAbi.floatsPerVertex +
-            DoomVertexAbi.positionOffset + component];
+    double p(int vertex, int component) =>
+        mesh.vertices[vertex * DoomVertexAbi.floatsPerVertex +
+            DoomVertexAbi.positionOffset +
+            component];
     final double abx = p(b, 0) - p(a, 0);
     final double aby = p(b, 1) - p(a, 1);
     final double abz = p(b, 2) - p(a, 2);
@@ -254,8 +255,8 @@ void main() {
     final double acz = p(c, 2) - p(a, 2);
     final double windingX = aby * acz - abz * acy;
     final double windingZ = abx * acy - aby * acx;
-    final int o = a * DoomVertexAbi.floatsPerVertex +
-        DoomVertexAbi.normalOffset;
+    final int o =
+        a * DoomVertexAbi.floatsPerVertex + DoomVertexAbi.normalOffset;
     expect(
       windingX * mesh.vertices[o] + windingZ * mesh.vertices[o + 2],
       greaterThan(0),

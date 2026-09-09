@@ -15,7 +15,9 @@ abstract final class LineSpecial {
   // Switch doors found in classic episode maps.
   static const int switchDoorOpenStayOnce = 103;
   // Compatibility only: the old name misidentified special 103 as a timed door.
-  @Deprecated('Use switchDoorOpenStayOnce; special 103 never closes on a timer.')
+  @Deprecated(
+    'Use switchDoorOpenStayOnce; special 103 never closes on a timer.',
+  )
   static const int switchDoorOpenWaitClose = switchDoorOpenStayOnce;
   static const int switchDoorOpenStay = 61;
   static const int switchBlueDoorOpenWaitClose = 99;

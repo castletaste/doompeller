@@ -1,7 +1,12 @@
+@Tags(['content'])
+library;
+
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/local_iwad.dart';
 
 const String _wadPath = '.local/doom/DOOM1.WAD';
 
@@ -9,7 +14,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('original E1M8 player crosses the lowered line-141 drop', () async {
-    final ByteData asset = await rootBundle.load(_wadPath);
+    final ByteData asset = await loadLocalIwad(_wadPath);
     final Uint8List bytes = asset.buffer.asUint8List(
       asset.offsetInBytes,
       asset.lengthInBytes,

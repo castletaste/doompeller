@@ -20,8 +20,11 @@ void main() {
     final MapData map = b.build();
 
     expect(map.hasBsp, isTrue, reason: 'node builder must produce a tree');
-    expect(map.subsectors.length, greaterThan(1),
-        reason: 'a concave room must split into several subsectors');
+    expect(
+      map.subsectors.length,
+      greaterThan(1),
+      reason: 'a concave room must split into several subsectors',
+    );
 
     final GeometryOptions options = GeometryOptions.defaults;
     final CheckBudget budget = CheckBudget(1000000);
@@ -29,7 +32,11 @@ void main() {
 
     expect(regions.budgetExhausted, isFalse);
     expect(regions.depthExceeded, isFalse);
-    expect(regions.emptyRegions, 0, reason: 'no subsector should clip to empty');
+    expect(
+      regions.emptyRegions,
+      0,
+      reason: 'no subsector should clip to empty',
+    );
 
     var bspArea = 0.0;
     for (final BspRegion r in regions.regions) {
@@ -37,8 +44,10 @@ void main() {
     }
 
     final CheckBudget loopBudget = CheckBudget(1000000);
-    final List<SectorLoopResult> loops =
-        SectorLoopBuilder(map, options).buildAll(loopBudget);
+    final List<SectorLoopResult> loops = SectorLoopBuilder(
+      map,
+      options,
+    ).buildAll(loopBudget);
     expect(loops[s].isWellFormed, isTrue);
 
     // The L is 256x256 minus the 128x128 notch.
@@ -68,8 +77,11 @@ void main() {
         openChains++;
       }
     }
-    expect(openChains, greaterThan(0),
-        reason: 'vanilla-shaped SEGS must leave at least one open chain');
+    expect(
+      openChains,
+      greaterThan(0),
+      reason: 'vanilla-shaped SEGS must leave at least one open chain',
+    );
   });
 
   test('a sector with a hole matches between BSP and oracle', () {
@@ -87,10 +99,14 @@ void main() {
     final MapData map = b.build();
 
     final GeometryOptions options = GeometryOptions.defaults;
-    final BspRegionSet regions =
-        BspRegionBuilder(map, options).build(CheckBudget(2000000));
-    final List<SectorLoopResult> loops =
-        SectorLoopBuilder(map, options).buildAll(CheckBudget(2000000));
+    final BspRegionSet regions = BspRegionBuilder(
+      map,
+      options,
+    ).build(CheckBudget(2000000));
+    final List<SectorLoopResult> loops = SectorLoopBuilder(
+      map,
+      options,
+    ).buildAll(CheckBudget(2000000));
 
     var bspOuter = 0.0;
     for (final BspRegion r in regions.regions) {

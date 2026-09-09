@@ -4,6 +4,9 @@ Doompeller is a native Dart + Flutter + Flame 3D reimplementation with a pure
 Dart WAD parser, geometry compiler, and deterministic 35 Hz gameplay core. It
 does not embed, wrap, download, or extract another Doom engine.
 
+See [runtime architecture](docs/ARCHITECTURE.md) for loading, state ownership,
+rendering and audio boundaries.
+
 Production: [doompeller.castletaste.dev](https://doompeller.castletaste.dev).
 CI and PR previews: [publishing guide](docs/PUBLISHING.md).
 
@@ -111,11 +114,25 @@ Use the pinned Flutter 3.44.4 toolchain:
 
 ```sh
 flutter analyze
-flutter test
+dart run tool/test.dart
 flutter build macos --release
 ```
 
-Root acceptance loads the bundled original E1M1 by default and includes its
-report, collision challenges, effect lifetimes, and deterministic traversal.
-Focused package tests retain generated fixtures where a minimal oracle is
-useful.
+The default app test runner needs no IWAD. It creates a temporary source copy
+with the local-content asset omitted, preserving Flutter's standard test shader
+assets and leaving the production manifest unchanged. Resolve dependencies with
+`flutter pub get` first. Additional arguments are passed to `flutter test`.
+
+Original-content acceptance is explicit and reads your local file directly:
+
+```sh
+DOOM_WAD_PATH=/absolute/path/to/DOOM1.WAD \
+  /Users/savva/fvm/versions/stable/bin/dart run tool/test.dart --include-content
+```
+
+This includes collision challenges, effect lifetimes, episode progression and
+deterministic traversal. The `content` tag distinguishes these tests from the
+synthetic suite. Neither test mode copies the WAD into its temporary project.
+Run `dart analyze --fatal-infos` and `dart test` in each of `packages/doom_wad`,
+`packages/doom_geometry`, and `packages/doom_core` for the pure-Dart suites.
+The macOS build still requires the local WAD described above.

@@ -282,6 +282,36 @@ final class _AutomapKeyGame extends FlameGame with KeyboardEvents {
 }
 
 void main() {
+  test('one tic publishes player and multiple sector heights atomically', () {
+    final state = DoomAutomapState(_map(), _player);
+    addTearDown(state.dispose);
+    var notifications = 0;
+    state.addListener(() => notifications++);
+    final initial = state.value;
+    state.updatePlayer(
+      _player,
+      sectorIndex: 0,
+      sectorHeights: const [
+        (sectorIndex: 0, floorHeight: 8.0, ceilingHeight: 120.0),
+        (sectorIndex: 1, floorHeight: 16.0, ceilingHeight: 112.0),
+      ],
+    );
+    expect(notifications, 1);
+    expect(state.value.sectorFloors.take(2), [8.0, 16.0]);
+    expect(state.value.sectorCeilings.take(2), [120.0, 112.0]);
+    expect(initial.sectorFloors[0], 0);
+    expect(() => state.value.sectorFloors[0] = 99, throwsUnsupportedError);
+    state.updatePlayer(
+      _player,
+      sectorIndex: 0,
+      sectorHeights: const [
+        (sectorIndex: 0, floorHeight: 8.0, ceilingHeight: 120.0),
+        (sectorIndex: 1, floorHeight: 16.0, ceilingHeight: 112.0),
+      ],
+    );
+    expect(notifications, 1);
+  });
+
   test('computer map reveals remote lines once and resets with the level', () {
     final state = DoomAutomapState(_map(), _player);
     addTearDown(state.dispose);

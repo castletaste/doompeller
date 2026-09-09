@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -12,6 +15,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'adapter/fake_gpu_backend.dart';
+
+import 'support/local_iwad.dart';
 
 const String _defaultWadPath = '.local/doom/DOOM1.WAD';
 const int _allSkills = ThingFlags.easy | ThingFlags.medium | ThingFlags.hard;
@@ -214,7 +219,7 @@ int _sectorAt(MapData map, int x, int y) {
 }
 
 Future<PreparedDoomLevel> _loadOriginalE1m1() async {
-  final ByteData asset = await rootBundle.load(_defaultWadPath);
+  final ByteData asset = await loadLocalIwad(_defaultWadPath);
   final Uint8List bytes = asset.buffer.asUint8List(
     asset.offsetInBytes,
     asset.lengthInBytes,

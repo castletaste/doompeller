@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'dart:math' as math;
 
 import 'package:doom_core/doom_core.dart';
@@ -14,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
 
 import 'fake_gpu_backend.dart';
+
+import '../support/local_iwad.dart';
 
 const int _allSkills = ThingFlags.easy | ThingFlags.medium | ThingFlags.hard;
 const int _ticMicros = 28572;
@@ -365,7 +370,7 @@ int _sectorAt(MapData map, int x, int y) {
 }
 
 Future<PreparedDoomLevel> _loadOriginalE1m1() async {
-  final ByteData asset = await rootBundle.load(kDocumentedLocalWadPath);
+  final ByteData asset = await loadLocalIwad(kDocumentedLocalWadPath);
   final Uint8List bytes = asset.buffer.asUint8List(
     asset.offsetInBytes,
     asset.lengthInBytes,

@@ -1,3 +1,72 @@
+# Architecture refactor verification — 2026-09-07
+
+Refactor of baseline `d12073a`, integrated with main `6e8ba73` in `67f82ef`;
+see [runtime boundaries](ARCHITECTURE.md). Main's Enter/touch controls and CI
+policies are retained.
+The results in this section were rerun on the refactored worktree. Existing
+per-map recordings were reused as inputs; their original capture evidence is
+retained below.
+
+- App: `dart run tool/test.dart` **266 PASS** without an IWAD;
+  `dart run tool/test.dart --include-content` **302 PASS**, using the ignored
+  local original DOOM1.WAD. Content is read directly and is not copied into the
+  temporary Flutter test asset bundle.
+- Packages: `doom_core` **190 PASS**, `doom_geometry` **129 PASS / 3 opt-in stress
+  skips**, `doom_wad` **139 PASS**. **760 tests pass** across packages and the
+  content-inclusive app suite; synthetic tests are a subset, not additional.
+- Root Flutter analyzer and all three package analyzers: no issues. Formatter
+  dry run: 209 files unchanged. Project contract audit and `git diff --check` pass.
+- Production E1M1 and FakeGPU adapter replay: **2,160 tics, `0x9c565b42`**.
+  Keyboard route: **2,155 tics, `0x55608565`**. Both match the baseline.
+  Native preparation also covered every episode successor and secret-map branch.
+- All nine existing original E1 recordings were replayed against the refactored
+  core twice, first forward and then in reverse map order. Every hash, first-exit
+  tic, health and inventory result matched the pinned recording. All six negative
+  verifier cases were rejected. The disposable verifier was run with this
+  worktree's `.dart_tool/package_config.json`, ensuring imports used the changed
+  packages. This is simulation replay evidence, not native rendering evidence.
+- Admission regression: 1,000 successive requests execute only the active and
+  final pending job, with peak concurrency one; 999 stale requests cannot publish.
+- Geometry tests reproduce two runtimes sharing a prepared template and verify
+  independent vertices, plane/wall state, texture updates and restart. Repeated
+  restart plateau remains 9 surfaces, 9 buffers, 13 components, 5 actors,
+  9 actor registry entries, 1 HUD listener and 1 automap listener after 30 cycles.
+- Audio tests cover separate messengers/channels, replacement owners, stale
+  dispose/stop/play and completion IDs, delayed replies, bounded overflow with
+  critical cues retained, failure recovery and disposal after stop failure.
+  Native ownership takeover also covers voices on channels the new owner does
+  not reuse, delayed cleanup replies and observable cleanup failure.
+- macOS Release: `flutter build macos --release --no-pub` passes (45.7 MB).
+  The exact `719f61c` worktree app was opened through macOS Launch Services
+  (PID 60316, executable path verified). Fresh GUI observations showed E1M1,
+  Enter firing (ammo 50 to 49), pause/resume, the touch-controls switch, touch
+  automap open/close and touch firing (ammo 49 to 48). Cmd+Q closed the app and
+  the PID disappeared. The same build's startup log confirms Impeller Metal.
+  This is a targeted smoke, not a native full-episode replay or audible-output
+  test. Automation must target the worktree bundle explicitly; its bundle ID
+  also identifies the separately installed app, and direct executable launches
+  are not reliably recognized by XCTest.
+- Wasm/WebGPU: `tool/build_web_release.sh` passes with the pinned Flutter SDK,
+  including shader verification, bootstrap finalization, pins and local IWAD
+  checksum. `main.dart.wasm` is 2,061,337 bytes; packaged IWAD is 4,196,020 bytes.
+  The build retains the existing optional Cupertino icon-font warning.
+  Three actual Chrome Wasm regressions pass: line-37 collision, corner running
+  wall-slide and line-125 puff impact. These are targeted engine regressions,
+  not a browser gameplay performance measurement.
+- CI-policy checks: **35 Node tests**, **8 Python shareware-fetch tests** and
+  **4 Python artifact tests** pass. GitHub Actions run
+  [34111409455](https://github.com/castletaste/doompeller/actions/runs/34111409455)
+  passed Verify and build Wasm for `719f61c`; deployment was skipped.
+
+Pinned toolchain: Flutter 3.44.4, Dart 3.12.2, naga 30.0.1. No dependency versions,
+renderer pins, native audio protocol, gameplay rules or replay schemas changed.
+Web CPU-stage blocking, synchronous sprite packing and the renderer's lack of
+explicit GPU disposal remain documented limitations. No native app was installed.
+The production deploy job was skipped; the repository's existing PR automation
+publishes a separate preview of the verified bundle.
+
+---
+
 # Episode verification — 2026-09-07
 
 Production continuation from `7bc0245`, `85fe080`, `3106b9c`, `89063ed`, then `f3bd4d1`. Original local DOOM1.WAD, 4,196,020

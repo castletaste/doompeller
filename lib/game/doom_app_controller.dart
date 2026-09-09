@@ -2,44 +2,12 @@ import 'package:flutter/foundation.dart';
 import 'package:doom_core/doom_core.dart';
 
 import 'content_source.dart';
+import 'browser_wad_selection.dart';
+import 'doom_app_state.dart';
 import 'level_load_coordinator.dart';
 import 'level_preparer.dart';
 
-enum DoomAppPhase { loading, fixtureReady, developerIwadReady, failure }
-
-@immutable
-final class DoomAppState {
-  const DoomAppState._({
-    required this.phase,
-    this.level,
-    this.errorMessage,
-    this.setupMessage,
-  });
-
-  const DoomAppState.loading() : this._(phase: DoomAppPhase.loading);
-
-  const DoomAppState.failure(String message)
-    : this._(phase: DoomAppPhase.failure, errorMessage: message);
-
-  const DoomAppState.ready(
-    PreparedDoomLevel level, {
-    required DoomAppPhase phase,
-    String? setupMessage,
-    String? errorMessage,
-  }) : this._(
-         phase: phase,
-         level: level,
-         setupMessage: setupMessage,
-         errorMessage: errorMessage,
-       );
-
-  final DoomAppPhase phase;
-  final PreparedDoomLevel? level;
-  final String? errorMessage;
-  final String? setupMessage;
-
-  bool get isFixture => phase == DoomAppPhase.fixtureReady;
-}
+export 'doom_app_state.dart';
 
 typedef LoadDeveloperContent = Future<DoomContentLoadResult> Function();
 typedef LoadFixtureContent = DoomContent Function();
@@ -57,7 +25,7 @@ typedef PrepareDoomLevel =
 
 /// App-facing load state with an outer request fence and CPU generation fence.
 final class DoomAppController extends ChangeNotifier {
-  DoomAppController({
+  factory DoomAppController({
     DoomContentSource? contentSource,
     DoomLevelPreparer? preparer,
     LoadDeveloperContent? loadDeveloper,
@@ -65,15 +33,24 @@ final class DoomAppController extends ChangeNotifier {
     LoadSelectedContent? loadSelected,
     PrepareDoomLevel? prepare,
     DoomAppState initialState = const DoomAppState.loading(),
-  }) : _loadDeveloper =
-           loadDeveloper ??
-           (contentSource ?? DoomContentSource()).loadDeveloperIwad,
-       _loadFixture =
-           loadFixture ?? (contentSource ?? DoomContentSource()).loadFixture,
-       _loadSelected =
-           loadSelected ?? (contentSource ?? DoomContentSource()).loadIwadBytes,
-       _prepare = prepare ?? (preparer ?? DoomLevelPreparer()).prepare,
-       _state = initialState;
+  }) {
+    final source = contentSource ?? DoomContentSource();
+    return DoomAppController._(
+      loadDeveloper ?? source.loadDeveloperIwad,
+      loadFixture ?? source.loadFixture,
+      loadSelected ?? source.loadIwadBytes,
+      prepare ?? (preparer ?? DoomLevelPreparer()).prepare,
+      initialState,
+    );
+  }
+
+  DoomAppController._(
+    this._loadDeveloper,
+    this._loadFixture,
+    this._loadSelected,
+    this._prepare,
+    this._state,
+  );
 
   final LoadDeveloperContent _loadDeveloper;
   final LoadFixtureContent _loadFixture;
@@ -84,6 +61,7 @@ final class DoomAppController extends ChangeNotifier {
 
   DoomAppState _state;
   int _requestGeneration = 0;
+  int _pickerGeneration = 0;
   bool _disposed = false;
   int? _transitionRequest;
 
@@ -122,9 +100,11 @@ final class DoomAppController extends ChangeNotifier {
   }
 
   Future<void> start() async {
+    if (_disposed) return;
     final int request = ++_requestGeneration;
     _coordinator.cancel();
     _publish(const DoomAppState.loading());
+    if (!_isCurrent(request)) return;
     DoomContentLoadResult result;
     try {
       result = await _loadDeveloper();
@@ -169,9 +149,11 @@ final class DoomAppController extends ChangeNotifier {
   }
 
   Future<void> useFixtureFallback() async {
+    if (_disposed) return;
     final int request = ++_requestGeneration;
     _coordinator.cancel();
     _publish(const DoomAppState.loading());
+    if (!_isCurrent(request)) return;
     DoomContent fixture;
     try {
       fixture = _loadFixture();
@@ -200,6 +182,7 @@ final class DoomAppController extends ChangeNotifier {
     String mapName = 'E1M1',
     String? sourceLabel,
   }) async {
+    if (_disposed) return;
     final DoomAppState retained = _state;
     final int request = ++_requestGeneration;
     _coordinator.cancel();
@@ -226,6 +209,38 @@ final class DoomAppController extends ChangeNotifier {
     }
   }
 
+  /// Owns the complete selection request, including the native chooser gap.
+  /// [isOwnerActive] fences an embedding widget without disposing an injected
+  /// controller that may outlive that widget.
+  Future<void> pickIwad(
+    Future<BrowserWadSelection?> Function() picker, {
+    required bool Function() isOwnerActive,
+  }) async {
+    if (_disposed || !isOwnerActive()) return;
+    // Opening or cancelling a chooser does not cancel an existing level load.
+    // A later chooser still supersedes an earlier chooser, while any explicit
+    // load invalidates both through the main request generation.
+    final request = _requestGeneration;
+    final pickerRequest = ++_pickerGeneration;
+    bool current() =>
+        _isCurrent(request) &&
+        _pickerGeneration == pickerRequest &&
+        isOwnerActive();
+    try {
+      final selection = await picker();
+      if (selection == null || !current()) return;
+      await useSelectedIwad(selection.bytes, sourceLabel: selection.name);
+    } on BrowserWadPickerFailure catch (error) {
+      if (current()) reportSelectedIwadFailure(error.message);
+    } on Object {
+      if (current()) {
+        reportSelectedIwadFailure(
+          'The browser could not open the selected IWAD.',
+        );
+      }
+    }
+  }
+
   void reportSelectedIwadFailure(String message) {
     if (_disposed) return;
     final DoomAppState retained = _state;
@@ -241,6 +256,9 @@ final class DoomAppController extends ChangeNotifier {
     DoomAppState? retainOnFailure,
     PlayerLoadout? entryLoadout,
   }) async {
+    // Injected sources and listeners may synchronously start another request.
+    // A stale caller must not advance the coordinator generation.
+    if (!_isCurrent(request)) return;
     final outcome = await _coordinator.load(
       prepare: (token) => _prepare(content, token),
       assemble: (prepared) => prepared,
@@ -267,7 +285,13 @@ final class DoomAppController extends ChangeNotifier {
           _publishSelectionFailure(retainOnFailure, message);
         }
       case LevelLoadStale<PreparedDoomLevel>():
-        break;
+        // This controller's request is still current. A shared preparer may
+        // nevertheless displace its pending job on behalf of another owner.
+        // Give this owner a retryable terminal state instead of a stuck spinner.
+        _publishSelectionFailure(
+          retainOnFailure ?? _state,
+          'Level preparation was superseded by another load. Try again.',
+        );
     }
   }
 
@@ -303,7 +327,7 @@ final class DoomAppController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _requestGeneration++;
-    _coordinator.cancel();
+    _coordinator.detachActive();
     super.dispose();
   }
 }

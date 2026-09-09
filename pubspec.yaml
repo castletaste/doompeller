@@ -15,7 +15,6 @@ dependencies:
   flame: 1.38.0
   flame_3d: 0.3.0
   vector_math: 2.2.0
-  meta: 1.18.0
   web: 1.1.1
   doom_wad:
     path: packages/doom_wad

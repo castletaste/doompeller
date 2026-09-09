@@ -1,3 +1,6 @@
+@Tags(['content'])
+library;
+
 import 'dart:async';
 
 import 'package:doom_core/doom_core.dart';
@@ -11,6 +14,8 @@ import 'package:doompeller/game/doom_hud.dart';
 import 'package:doompeller/ui/doom_app.dart';
 
 import '../widget_test.dart' show FakeRuntime, testSurface;
+
+import '../support/local_iwad.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +33,7 @@ void main() {
       LevelExit(mapName: name, secret: false, loadout: loadout);
 
   setUpAll(() async {
-    final ByteData data = await rootBundle.load('.local/doom/DOOM1.WAD');
+    final ByteData data = await loadLocalIwad('.local/doom/DOOM1.WAD');
     final result =
         DoomContentSource(environment: const {}).loadIwadBytes(
               data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
@@ -202,7 +207,19 @@ void main() {
   testWidgets('continue button replaces original E1M1 with original E1M2', (
     tester,
   ) async {
-    final app = controller();
+    // Native preparation has its own controller tests above. Prepare real E1M2
+    // outside the fake widget clock, then explicitly control the UI async gap.
+    final prepared = await tester.runAsync(() async {
+      final loading = controller();
+      try {
+        await loading.advanceLevel(first, exitFor('E1M1'));
+        return loading.state.level!;
+      } finally {
+        loading.dispose();
+      }
+    });
+    final preparation = Completer<PreparedDoomLevel>();
+    final app = controller(prepare: (_, _) => preparation.future);
     addTearDown(app.dispose);
     final runtime = FakeRuntime()..levelExit = exitFor('E1M1');
     runtime.notifier.value = DoomHudSnapshot(
@@ -236,6 +253,9 @@ void main() {
     expect(find.text('CONTINUE TO E1M2'), findsOneWidget);
     expect(find.text('SELECT LOCAL IWAD'), findsNothing);
     await tester.tap(find.text('CONTINUE TO E1M2'));
+    await tester.pump();
+    expect(app.state.level, same(first));
+    preparation.complete(prepared!);
     await tester.pumpAndSettle();
     expect(app.state.level!.map.name, 'E1M2');
     expect(find.text('DEVELOPER IWAD · E1M2'), findsOneWidget);

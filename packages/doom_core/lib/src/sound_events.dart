@@ -34,6 +34,17 @@ class SoundEvent {
   bool get fromPlayer => origin == SoundOrigin.player;
   bool get isPositional => origin != SoundOrigin.nonPositional;
 
+  /// Cues retained ahead of ordinary sounds when an output queue is full.
+  bool get isCritical => switch (soundId) {
+    'DSDOROPN' ||
+    'DSDORCLS' ||
+    'DSPSTART' ||
+    'DSPSTOP' ||
+    'DSPODTH1' ||
+    'DSSWTCHX' => true,
+    _ => false,
+  };
+
   static const int playerSourceId = 0;
   static const int nonPositionalSourceId = -0x80000000;
 

@@ -55,6 +55,13 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  doom_music:
+    dependency: "direct main"
+    description:
+      path: "packages/doom_music"
+      relative: true
+    source: path
+    version: "0.1.0"
   doom_wad:
     dependency: "direct main"
     description:

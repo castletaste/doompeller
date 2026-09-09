@@ -6,6 +6,7 @@ import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart';
 import 'package:doompeller/adapter/adapter.dart';
 import 'package:doompeller/game/content_source.dart';
+import 'package:doompeller/game/audio_session.dart';
 import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
@@ -73,6 +74,62 @@ final class _UpdateDeltaProbe extends Component {
   }
 }
 
+final class _MusicBackend extends FakeAudioBackend
+    implements MusicAudioBackend {
+  final operations = <String>[];
+  final tracks = <(String, Uint8List, Uint8List)>[];
+  bool failMusic = false;
+
+  @override
+  void playMusic({
+    required String track,
+    required Uint8List mus,
+    required Uint8List genMidi,
+  }) {
+    if (failMusic) throw StateError('synthetic music failure');
+    operations.add('play:$track');
+    tracks.add((track, mus, genMidi));
+  }
+
+  @override
+  void setPaused(bool paused) => operations.add('paused:$paused');
+  @override
+  void setFocused(bool focused) => operations.add('focused:$focused');
+  @override
+  void stopMusic() => operations.add('stop');
+}
+
+// Marker bytes exercise only the runtime-to-backend ownership boundary.
+// The bounded MUS/GENMIDI decoders have their own valid-format fixtures.
+PreparedDoomLevel withMusicMarkers(PreparedDoomLevel base) {
+  final names = ['D_${base.map.name}', 'D_INTER', 'D_VICTOR', 'GENMIDI'];
+  final bytes = Uint8List(12 + names.length * 17);
+  bytes.setRange(0, 4, 'PWAD'.codeUnits);
+  final view = ByteData.sublistView(bytes);
+  view.setUint32(4, names.length, Endian.little);
+  final directory = 12 + names.length;
+  view.setUint32(8, directory, Endian.little);
+  for (var i = 0; i < names.length; i++) {
+    bytes[12 + i] = i + 1;
+    final entry = directory + i * 16;
+    view.setUint32(entry, 12 + i, Endian.little);
+    view.setUint32(entry + 4, 1, Endian.little);
+    bytes.setRange(entry + 8, entry + 8 + names[i].length, names[i].codeUnits);
+  }
+  return PreparedDoomLevel(
+    content: DoomContent(
+      wads: WadSet([DoomFixtures.wad(), WadFile.parse(bytes)]),
+      mapName: base.map.name,
+      origin: DoomContentOrigin.syntheticFixture,
+    ),
+    resources: base.resources,
+    map: base.map,
+    geometry: base.geometry,
+    gameConfig: base.gameConfig,
+    seed: base.seed,
+  );
+}
+
 Future<PreparedDoomLevel> fixtureLevel() async {
   final content = DoomContentSource(
     environment: const <String, String>{},
@@ -89,7 +146,10 @@ Future<PreparedDoomLevel> fixtureLevel() async {
   );
 }
 
-Future<PreparedDoomLevel> fixtureExitLevel({bool secretExit = false}) async {
+Future<PreparedDoomLevel> fixtureExitLevel({
+  bool secretExit = false,
+  String? mapName,
+}) async {
   final base = await fixtureLevel();
   final source = base.map;
   final linedefs = List<Linedef>.of(source.linedefs);
@@ -124,7 +184,7 @@ Future<PreparedDoomLevel> fixtureExitLevel({bool secretExit = false}) async {
     leftSidedef: old.leftSidedef,
   );
   final map = MapData(
-    name: source.name,
+    name: mapName ?? source.name,
     vertices: source.vertices,
     linedefs: linedefs,
     sidedefs: source.sidedefs,
@@ -577,8 +637,8 @@ void main() {
           .where((call) => call.soundId == 'DSDOROPN')
           .single
           .volume,
-      closeTo(1 - 36 / 1200, 1e-12),
-      reason: 'listener PlayerView fixed-point coordinates become map units',
+      1,
+      reason: '36 map units is inside the classic 160-unit full-volume radius',
     );
   });
 
@@ -831,6 +891,97 @@ void main() {
       expect(backend.disposed, isTrue);
     },
   );
+
+  test(
+    'music pause, focus, restart and disposal preserve gameplay state',
+    () async {
+      final backend = _MusicBackend();
+      final runtime = DoomRuntimeGame(
+        withMusicMarkers(await fixturePlayerSoundLevel()),
+        audioBackend: backend,
+      );
+      final initialHash = runtime.gameState.hashState();
+      expect(backend.tracks.single.$1, 'D_MAP01');
+      expect(backend.tracks.single.$2, [1]);
+      expect(backend.tracks.single.$3, [4]);
+      runtime.togglePause();
+      runtime.advanceMicrosForTest(0);
+      runtime.setAudioFocused(false);
+      runtime.setAudioFocused(true);
+      expect(runtime.gameState.hashState(), initialHash);
+      runtime.restartLevel();
+      expect(runtime.gameState.hashState(), initialHash);
+      expect(backend.operations, [
+        'play:D_MAP01',
+        'paused:true',
+        'focused:false',
+        'focused:true',
+        'play:D_MAP01',
+        'paused:false',
+      ]);
+      runtime.dispose();
+      await runtime.soundPlaybackIdleForTest;
+      final accepted = backend.operations.length;
+      runtime.setAudioFocused(true);
+      runtime.dispose();
+      expect(backend.operations.length, accepted);
+      expect(backend.operations.last, 'stop');
+      expect(backend.disposed, isTrue);
+    },
+  );
+
+  for (final map in ['E1M1', 'E1M8']) {
+    test(
+      '$map completion switches music once; restart restores the map song',
+      () async {
+        final backend = _MusicBackend();
+        final runtime = DoomRuntimeGame(
+          withMusicMarkers(await fixtureExitLevel(mapName: map)),
+          audioBackend: backend,
+        );
+        addTearDown(runtime.dispose);
+        runtime.triggerUse();
+        runtime.advanceMicrosForTest(28572);
+        expect(runtime.gameState.levelComplete, isTrue);
+        runtime.advanceMicrosForTest(500000);
+        expect(backend.tracks.map((track) => track.$1), [
+          'D_$map',
+          map == 'E1M8' ? 'D_VICTOR' : 'D_INTER',
+        ]);
+        runtime.restartLevel();
+        expect(backend.tracks.last.$1, 'D_$map');
+      },
+    );
+  }
+
+  test('music failure leaves effects, restart and disposal usable', () async {
+    final backend = _MusicBackend()..failMusic = true;
+    final runtime = DoomRuntimeGame(
+      withMusicMarkers(await fixturePlayerSoundLevel()),
+      audioBackend: backend,
+    );
+    expect(runtime.soundPlaybackErrorCountForTest, 1);
+    runtime.input.press(DoomControl.attack);
+    for (var tic = 0; tic < 40 && backend.playCalls.isEmpty; tic++) {
+      runtime.advanceMicrosForTest(28572);
+      await runtime.soundPlaybackIdleForTest;
+    }
+    expect(backend.playCalls, isNotEmpty);
+    runtime.clearInputPreservingAudio();
+    await runtime.soundPlaybackIdleForTest;
+    expect(
+      backend.stopCalls,
+      isEmpty,
+      reason: 'death/exit input lock preserves the final cue',
+    );
+    expect(runtime.input.consume().command, TicCmd.empty);
+    backend.failMusic = false;
+    runtime.restartLevel();
+    expect(backend.tracks.single.$1, 'D_MAP01');
+    runtime.dispose();
+    await runtime.soundPlaybackIdleForTest;
+    expect(backend.disposed, isTrue);
+  });
 
   test('clearInput stops active audio after focus or lifecycle loss', () async {
     final FakeAudioBackend backend = FakeAudioBackend();

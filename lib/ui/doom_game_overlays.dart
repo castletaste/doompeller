@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../game/audio_session.dart';
+import 'doom_audio_settings.dart';
 
 final class DoomLoadingView extends StatelessWidget {
   const DoomLoadingView({super.key});
@@ -157,6 +159,7 @@ final class DoomPauseOverlay extends StatelessWidget {
     this.onTouchControlsChanged,
     this.onLoadIwad,
     this.errorMessage,
+    this.audioSession,
   });
 
   final VoidCallback onResume;
@@ -164,6 +167,7 @@ final class DoomPauseOverlay extends StatelessWidget {
   final ValueChanged<bool>? onTouchControlsChanged;
   final VoidCallback? onLoadIwad;
   final String? errorMessage;
+  final DoomAudioSession? audioSession;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -214,6 +218,8 @@ final class DoomPauseOverlay extends StatelessWidget {
                     child: const Text('SELECT LOCAL IWAD'),
                   ),
                 ],
+                if (audioSession?.controlsAvailable == true)
+                  DoomAudioSettings(session: audioSession!),
                 if (errorMessage != null) ...<Widget>[
                   const SizedBox(height: 12),
                   ConstrainedBox(

@@ -51,6 +51,14 @@ build packages `.local/doom/DOOM1.WAD` at
 **SELECT LOCAL IWAD** remains available only from the pause menu for switching
 content at runtime.
 
+Browser audio uses the WAD's original PCM effects and MUS/GENMIDI music. A
+pure-Dart OPL2 synthesizer runs in a separate Wasm worker, with an AudioWorklet
+feeding the browser output. Click or press a key to unlock sound. The pause
+menu has independent music and effects volumes, retained until the app closes.
+Pause and browser blur freeze music; restarting a level restarts its track.
+If the browser cannot provide the music transport, the pause menu reports the
+failure while effects remain available.
+
 Build the reproducible release with Flutter 3.44.4, naga-cli 30.0.1 and
 ripgrep (`rg`) on PATH:
 
@@ -59,7 +67,7 @@ DOOMPELLER_FLUTTER="$(command -v flutter)" bash tool/build_web_release.sh
 ```
 
 The build removes Flutter's generated dart2js fallback and verifies the
-dart2wasm entrypoint, local CanvasKit assets, generated WGSL shader bundle,
+dart2wasm entrypoint, music worker/worklet, local CanvasKit assets, generated WGSL shader bundle,
 deployment headers, and the exact bundled `DOOM1.WAD` size and checksum.
 Deployment must preserve `web/_headers` so Wasm/worker resources run under
 COOP/COEP. The supported and tested runtime target is Wasm/WebGPU.
@@ -134,5 +142,8 @@ This includes collision challenges, effect lifetimes, episode progression and
 deterministic traversal. The `content` tag distinguishes these tests from the
 synthetic suite. Neither test mode copies the WAD into its temporary project.
 Run `dart analyze --fatal-infos` and `dart test` in each of `packages/doom_wad`,
-`packages/doom_geometry`, and `packages/doom_core` for the pure-Dart suites.
+`packages/doom_geometry`, `packages/doom_core`, and `packages/doom_music` for the
+pure-Dart suites. `node --test test/web/doom_music_worklet_test.mjs` verifies the
+bounded output protocol; `tool/web_audio_harness/build.sh` builds the local
+browser transport stress harness.
 The macOS build still requires the local WAD described above.

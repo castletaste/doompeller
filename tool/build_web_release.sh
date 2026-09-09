@@ -89,6 +89,8 @@ done
 
 "$DOOMPELLER_FLUTTER" build web --wasm --release --no-web-resources-cdn
 "$DOOMPELLER_DART" run tool/finalize_wasm_web_build.dart build/web
+"$DOOMPELLER_DART" compile wasm lib/web/doom_music_worker.dart \
+  -o build/web/doom_music_worker.wasm
 
 # Flutter does not guarantee that web dotfiles are copied into build/web.
 cp web/_headers build/web/_headers
@@ -98,6 +100,10 @@ required=(
   build/web/flutter_bootstrap.js
   build/web/main.dart.wasm
   build/web/main.dart.mjs
+  build/web/doom_music_worker.wasm
+  build/web/doom_music_worker.mjs
+  build/web/doom_music_worker_loader.mjs
+  build/web/doom_music_worklet.js
   build/web/assets/assets/shaders/doom_palette.wgslbundle
   build/web/_headers
   build/web/assets/.local/doom/DOOM1.WAD
@@ -168,6 +174,9 @@ require_route_header '/flutter_service_worker.js' 'Cache-Control: public, max-ag
 require_route_header '/version.json' 'Cache-Control: public, max-age=0, must-revalidate'
 require_route_header '/main.dart.wasm' 'Cache-Control: public, max-age=0, must-revalidate'
 require_route_header '/main.dart.mjs' 'Cache-Control: public, max-age=0, must-revalidate'
+for audio_asset in doom_music_worker.wasm doom_music_worker.mjs doom_music_worker_loader.mjs doom_music_worklet.js; do
+  require_route_header "/$audio_asset" 'Cache-Control: public, max-age=0, must-revalidate'
+done
 require_route_header '/assets/.local/doom/DOOM1.WAD' 'Cache-Control: public, max-age=31536000, immutable'
 
 sh tool/audit_project_contracts.sh

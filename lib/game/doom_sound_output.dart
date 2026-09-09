@@ -30,9 +30,15 @@ final class DoomSoundOutput {
     required List<SoundEvent> events,
     required AudioListener listener,
     required int gameTic,
+    Map<int, AudioPosition> sources = const {},
   }) {
     if (_disposed) return;
     _latestTic = gameTic;
+    try {
+      _playback.updateSpatial(listener: listener, sources: sources);
+    } catch (error, stackTrace) {
+      onError(error, stackTrace);
+    }
     if (events.isEmpty) {
       if (_draining == null) _playback.advanceToTic(gameTic);
       return;

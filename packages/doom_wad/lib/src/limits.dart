@@ -29,6 +29,11 @@ class DoomLimits {
     this.maxAtlasPixels = 4096 * 4096,
     this.maxSoundSamples = 16 * 1024 * 1024,
     this.maxSoundSampleRate = 48000,
+    this.maxMusicBytes = 1024 * 1024,
+    this.maxMusEvents = 1000000,
+    this.maxMusInstruments = 256,
+    this.maxMusTicks = 10000000,
+    this.maxGenMidiBytes = 1024 * 1024,
   });
 
   static const DoomLimits defaults = DoomLimits();
@@ -71,6 +76,21 @@ class DoomLimits {
 
   /// Highest accepted sample rate for an unsigned 8-bit DMX sound.
   final int maxSoundSampleRate;
+
+  /// Maximum encoded bytes accepted for one MUS song lump.
+  final int maxMusicBytes;
+
+  /// Maximum decoded MUS events allocated for one song.
+  final int maxMusEvents;
+
+  /// Maximum instrument numbers declared by a MUS header.
+  final int maxMusInstruments;
+
+  /// Maximum absolute MUS tick reached while decoding event delays.
+  final int maxMusTicks;
+
+  /// Maximum bytes accepted for one GENMIDI instrument-bank lump.
+  final int maxGenMidiBytes;
 
   /// Throws [DoomLimitFailure] when [value] exceeds [limit].
   static void check(int value, int limit, String limitName) {

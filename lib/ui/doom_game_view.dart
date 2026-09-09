@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:flame/game.dart';
 import 'package:flutter/gestures.dart';
@@ -5,6 +7,8 @@ import 'package:flutter/material.dart';
 import '../game/frame_probe.dart';
 import '../adapter/adapter.dart';
 import '../game/audio_backend_factory.dart';
+import '../game/audio_session.dart';
+import '../game/sound_playback.dart';
 import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
 import '../game/level_preparer.dart';
@@ -24,8 +28,33 @@ typedef DoomGameSurfaceBuilder =
 
 /// Production runtime boundary. Direct [DoomRuntimeGame] construction remains
 /// silent by default for tests and non-UI tools.
-DoomRuntimeView createProductionDoomRuntime(PreparedDoomLevel level) =>
-    DoomRuntimeGame(level, audioBackend: createDefaultAudioBackend());
+DoomRuntimeView createProductionDoomRuntime(
+  PreparedDoomLevel level, {
+  AudioBackend? audioBackend,
+}) {
+  final backend = audioBackend ?? createDefaultAudioBackend();
+  try {
+    return DoomRuntimeGame(level, audioBackend: backend);
+  } catch (_) {
+    unawaited(
+      Future<void>.sync(backend.dispose).catchError((
+        Object error,
+        StackTrace stack,
+      ) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            context: ErrorDescription(
+              'releasing audio after runtime creation failed',
+            ),
+          ),
+        );
+      }),
+    );
+    rethrow;
+  }
+}
 
 final class DoomGameView extends StatefulWidget {
   const DoomGameView({
@@ -41,6 +70,7 @@ final class DoomGameView extends StatefulWidget {
     this.touchControlsEnabled = false,
     this.onTouchDetected,
     this.onTouchControlsChanged,
+    this.audioSession,
   });
 
   final PreparedDoomLevel level;
@@ -54,6 +84,7 @@ final class DoomGameView extends StatefulWidget {
   final bool touchControlsEnabled;
   final VoidCallback? onTouchDetected;
   final ValueChanged<bool>? onTouchControlsChanged;
+  final DoomAudioSession? audioSession;
 
   @override
   State<DoomGameView> createState() => _DoomGameViewState();
@@ -85,7 +116,8 @@ final class _DoomGameViewState extends State<DoomGameView>
   @override
   void didUpdateWidget(covariant DoomGameView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.level, widget.level)) {
+    if (!identical(oldWidget.level, widget.level) ||
+        !identical(oldWidget.audioSession, widget.audioSession)) {
       _detachInputListeners();
       _clearDeviceInput(rebuild: false);
       if (_runtime case final DoomRuntimeLifecycle owned) owned.dispose();
@@ -102,9 +134,12 @@ final class _DoomGameViewState extends State<DoomGameView>
   }
 
   void _createRuntime() {
-    _runtime = (widget.runtimeFactory ?? createProductionDoomRuntime)(
-      widget.level,
-    );
+    _runtime = widget.runtimeFactory != null
+        ? widget.runtimeFactory!(widget.level)
+        : createProductionDoomRuntime(
+            widget.level,
+            audioBackend: widget.audioSession?.acquireLevel(),
+          );
     _hudInputBlocked = _blocksInput(_runtime.hud.value);
     _mapOpen = _runtime.automap.value.isOpen;
     _runtime.hud.addListener(_handleHudInputState);
@@ -139,6 +174,9 @@ final class _DoomGameViewState extends State<DoomGameView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_runtime case final DoomRuntimeAudio audio) {
+      audio.setAudioFocused(state == AppLifecycleState.resumed);
+    }
     if (state != AppLifecycleState.resumed) {
       _clearDeviceInput();
     }
@@ -162,7 +200,14 @@ final class _DoomGameViewState extends State<DoomGameView>
     final blocked = _blocksInput(_runtime.hud.value);
     if (blocked == _hudInputBlocked) return;
     _hudInputBlocked = blocked;
-    if (blocked) _clearDeviceInput(rebuild: false);
+    if (blocked) {
+      _clearDeviceInput(
+        rebuild: false,
+        preserveAudio: !_runtime.hud.value.paused,
+      );
+    } else {
+      _gameFocusNode.requestFocus();
+    }
     if (mounted) setState(() {});
   }
 
@@ -172,9 +217,13 @@ final class _DoomGameViewState extends State<DoomGameView>
     if (mounted) setState(() => _mapOpen = open);
   }
 
-  void _clearDeviceInput({bool rebuild = true}) {
+  void _clearDeviceInput({bool rebuild = true, bool preserveAudio = false}) {
     _mousePointer = null;
-    _runtime.clearInput();
+    if (preserveAudio && _runtime is DoomRuntimeAudio) {
+      (_runtime as DoomRuntimeAudio).clearInputPreservingAudio();
+    } else {
+      _runtime.clearInput();
+    }
     _touchResetGeneration++;
     if (rebuild && mounted) setState(() {});
   }
@@ -387,6 +436,7 @@ final class _DoomGameViewState extends State<DoomGameView>
         onResume: _runtime.togglePause,
         onLoadIwad: widget.onLoadIwad,
         errorMessage: widget.selectionErrorMessage,
+        audioSession: widget.audioSession,
       );
     }
     return const SizedBox.shrink();

@@ -98,21 +98,24 @@ jobs:
       - name: Test trusted preview policies
         run: node --test .github/scripts/*.test.cjs
 
+      - name: Test browser audio output protocol
+        run: node --test test/web/doom_music_worklet_test.mjs
+
       - name: Resolve locked pure-Dart package dependencies
         run: |
-          for package in packages/doom_wad packages/doom_geometry packages/doom_core; do
+          for package in packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music; do
             (cd "$package" && dart pub get --enforce-lockfile)
           done
 
       - name: Analyze pure-Dart packages
         run: |
-          for package in packages/doom_wad packages/doom_geometry packages/doom_core; do
+          for package in packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music; do
             (cd "$package" && dart analyze)
           done
 
       - name: Test pure-Dart packages
         run: |
-          for package in packages/doom_wad packages/doom_geometry packages/doom_core; do
+          for package in packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music; do
             (cd "$package" && dart test)
           done
 

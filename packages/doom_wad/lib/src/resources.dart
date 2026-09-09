@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'failures.dart';
 import 'limits.dart';
+import 'music_decoder.dart';
+import 'music_model.dart';
 import 'resources_model.dart';
 import 'sound_decoder.dart';
 import 'patch_decoder.dart';
@@ -95,6 +97,9 @@ class WadResources {
   final Map<String, PatchImage?> _spriteCache = <String, PatchImage?>{};
   final Map<String, DoomSound?> _soundCache = <String, DoomSound?>{};
   final Map<String, DoomMusicInfo?> _musicCache = <String, DoomMusicInfo?>{};
+  final Map<String, MusSong?> _musSongCache = <String, MusSong?>{};
+  GenMidiBank? _genMidiBank;
+  bool _genMidiBankLoaded = false;
 
   /// Decodes the resource lumps of [set].
   ///
@@ -220,6 +225,33 @@ class WadResources {
     );
     _musicCache[key] = info;
     return info;
+  }
+
+  /// Decodes a D_* MUS score by lump name, memoised.
+  MusSong? musicSong(String lumpName) {
+    final String key = normaliseLumpName(lumpName);
+    if (!key.startsWith('D_')) return null;
+    final MusSong? cached = _musSongCache[key];
+    if (cached != null || _musSongCache.containsKey(key)) return cached;
+    final int? lump = _set.indexOf(key);
+    if (lump == null) {
+      _musSongCache[key] = null;
+      return null;
+    }
+    final MusSong decoded = parseMus(_set.bytesAt(lump), limits: _limits);
+    _musSongCache[key] = decoded;
+    return decoded;
+  }
+
+  /// Decodes the shared GENMIDI instrument bank, or null when it is absent.
+  GenMidiBank? get genMidiBank {
+    if (_genMidiBankLoaded) return _genMidiBank;
+    final int? lump = _set.indexOf('GENMIDI');
+    if (lump != null) {
+      _genMidiBank = parseGenMidi(_set.bytesAt(lump), limits: _limits);
+    }
+    _genMidiBankLoaded = true;
+    return _genMidiBank;
   }
 
   /// Texture directory entry for [name], or null when it is unknown or '-'.

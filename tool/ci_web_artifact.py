@@ -33,6 +33,10 @@ ALLOWED_ROOT_FILES = {
     "index.html",
     "main.dart.mjs",
     "main.dart.wasm",
+    "doom_music_worker.wasm",
+    "doom_music_worker.mjs",
+    "doom_music_worker_loader.mjs",
+    "doom_music_worklet.js",
     "manifest.json",
     "version.json",
 }
@@ -43,6 +47,10 @@ REQUIRED_FILES = {
     PurePosixPath("index.html"),
     PurePosixPath("main.dart.mjs"),
     PurePosixPath("main.dart.wasm"),
+    PurePosixPath("doom_music_worker.wasm"),
+    PurePosixPath("doom_music_worker.mjs"),
+    PurePosixPath("doom_music_worker_loader.mjs"),
+    PurePosixPath("doom_music_worklet.js"),
     PurePosixPath("assets/assets/shaders/doom_palette.wgslbundle"),
     EXPECTED_WAD_PATH,
 }

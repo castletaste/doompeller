@@ -1,8 +1,9 @@
 # Runtime boundaries
 
-The three packages remain usable without Flutter: `doom_wad` decodes content,
-`doom_geometry` compiles it, and `doom_core` owns the deterministic 35 Hz
-simulation. Only `lib/adapter` imports flame_3d. Rendering, audio and UI consume
+The four packages remain usable without Flutter: `doom_wad` decodes content,
+`doom_geometry` compiles it, `doom_core` owns the deterministic 35 Hz
+simulation, and `doom_music` sequences MUS/GENMIDI into OPL2 PCM. Only
+`lib/adapter` imports flame_3d. Rendering, audio and UI consume
 simulation output; they do not decide or hash gameplay state.
 
 ## Loading and ownership
@@ -33,7 +34,7 @@ GPU objects and sprite scene assembly stay on the UI isolate.
 
 On web, Flutter's `compute` executes on the calling event loop. Preparation
 yields between CPU stages but each stage can still block rendering. There is
-no browser worker or claim of jank-free custom-WAD loading. Sprite atlas packing
+no level-preparation worker or claim of jank-free custom-WAD loading. Sprite atlas packing
 also remains synchronous; the disposable design measurements did not justify
 another worker protocol for the current episode.
 
@@ -83,6 +84,25 @@ continues to use these states and overlays; no router or DI package is needed.
 
 ## Audio and failures
 
+`DoomApp` owns one default `DoomAudioSession`; injected sessions remain owned by
+their caller. Each level acquires a generation-fenced backend lease. Replacing
+a level retires its voices and music without replacing the browser AudioContext
+or resetting the two volume preferences. The preferences are session-only.
+
+Web music runs in a separately compiled Dart Wasm worker. `doom_music` owns the
+MUS clock, Doom 1.9 voice decisions and OPL2 synthesis. The AudioWorklet only
+consumes mono PCM at 49,716 Hz through a direct worker port. Eight credits of
+4,096 frames bound the PCM queue; configuration admission permits one active
+request and one replaceable pending request. The AudioContext sample rate is
+checked before enabling music. A music failure remains visible in the pause
+panel and leaves PCM effects usable.
+
+The runtime selects `D_E1Mx`, `D_INTER`, or `D_VICTOR` from the current content.
+Restart retires the old song and resets the score. Pause and browser blur
+suspend the audio clock and preserve the bounded music queue; effects are
+dropped. AudioContext resume never blocks the effects pump. Death and exit
+input locks clear held controls while allowing the final cue to finish.
+
 `DoomSoundOutput` serializes mixer work without adding a future for every empty
 tic. At most 128 sound events wait behind the active batch. Overflow follows
 the core journal's critical-cue policy: remove the oldest expendable sound first;
@@ -95,6 +115,13 @@ before the same output pump can complete teardown.
 `WadSoundCatalog` caches immutable WAV encodings for WAD samples. Custom catalogs
 may provide an immutable encoding through `SoundDefinition.wavBytes`; mutable
 custom PCM without one continues to be encoded per request.
+
+The mixer uses classic sound priorities (smaller values win), replaces a
+sound from the same origin, and computes distance/pan from the listener.
+An optional `SpatialAudioBackend` updates active voices as actors and the
+listener move. These output decisions never consume gameplay RNG or enter the
+replay hash. Native backends without the optional capability retain their
+existing transport protocol.
 
 `MacOsAudioBackend` leases the transport by BinaryMessenger identity and channel
 name. Takeover dispatches the previous owner's native cleanup before publishing

@@ -167,3 +167,11 @@ abstract interface class DoomRuntimeView {
 abstract interface class DoomRuntimeLifecycle {
   void dispose();
 }
+
+/// Optional audio lifecycle support, keeping custom runtime factories valid.
+abstract interface class DoomRuntimeAudio {
+  void setAudioFocused(bool focused);
+
+  /// Death/intermission lock input while their final sound cues finish.
+  void clearInputPreservingAudio();
+}

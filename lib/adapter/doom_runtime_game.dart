@@ -18,6 +18,7 @@ import '../game/doom_device_input.dart';
 import '../game/level_preparer.dart';
 import '../game/sound_playback.dart';
 import '../game/doom_sound_output.dart';
+import '../game/audio_session.dart';
 import 'doom_scene.dart';
 import 'doom_sprite_catalog.dart';
 import 'doom_camera.dart';
@@ -58,7 +59,7 @@ const Set<String> _completionTransientSprites = <String>{
 /// Production 35 Hz simulation and retained Flame 3D scene boundary.
 final class DoomRuntimeGame extends FlameGame3D
     with KeyboardEvents
-    implements DoomRuntimeView, DoomRuntimeLifecycle {
+    implements DoomRuntimeView, DoomRuntimeLifecycle, DoomRuntimeAudio {
   @override
   LevelExit? get levelExit => gameState.levelExit;
 
@@ -121,9 +122,11 @@ final class DoomRuntimeGame extends FlameGame3D
       input ?? DoomInputState(),
       replayInput,
       onLevelComplete,
+      audioBackend,
       SoundPlaybackManager(
         backend: audioBackend,
         catalog: WadSoundCatalog(level.resources),
+        bossArena: level.map.name == 'E1M8',
       ),
       camera: _cameraFor(player),
       packedSpritePrefixes: packed,
@@ -137,6 +140,7 @@ final class DoomRuntimeGame extends FlameGame3D
     this.input,
     this.replayInput,
     this._onLevelComplete,
+    this._audioBackend,
     this._soundPlayback, {
     required CameraComponent3D camera,
     required Set<String> packedSpritePrefixes,
@@ -164,6 +168,7 @@ final class DoomRuntimeGame extends FlameGame3D
     _syncWeapon(force: true);
     _syncCamera(0);
     _publishHud();
+    _playLevelMusic();
   }
 
   final PreparedDoomLevel level;
@@ -187,6 +192,8 @@ final class DoomRuntimeGame extends FlameGame3D
   late final _CountingValueListenable<DoomAutomapSnapshot> _automapListenable =
       _CountingValueListenable<DoomAutomapSnapshot>(_automap);
   final SoundPlaybackManager _soundPlayback;
+  final AudioBackend _audioBackend;
+  bool _completionMusicStarted = false;
   late DoomCoreSoundJournal _soundJournal = DoomCoreSoundJournal(gameState);
   late final DoomSoundOutput _soundOutput = DoomSoundOutput(
     _soundPlayback,
@@ -418,6 +425,10 @@ final class DoomRuntimeGame extends FlameGame3D
     _syncActors();
     _syncWeapon();
     if (gameState.levelComplete) {
+      if (!_completionMusicStarted) {
+        _completionMusicStarted = true;
+        _playMusic(level.map.name == 'E1M8' ? 'D_VICTOR' : 'D_INTER');
+      }
       _hideCompletionTransients();
       if (!hasReplayInput) _reportLevelComplete();
     }
@@ -452,7 +463,80 @@ final class DoomRuntimeGame extends FlameGame3D
     }
     final AudioListener listener = audioListenerFromPlayer(_currentPlayer);
     final int gameTic = gameState.tic;
-    _soundOutput.add(events: events, listener: listener, gameTic: gameTic);
+    final sources = <int, AudioPosition>{};
+    if (_soundPlayback.supportsSpatialUpdates) {
+      final needed = _soundPlayback.activePositionalSources
+          .where((source) => source > 0)
+          .toSet();
+      if (needed.isNotEmpty) {
+        for (final actor in gameState.mobjs) {
+          if (!needed.remove(actor.id)) continue;
+          sources[actor.id] = AudioPosition(
+            actor.x / 65536,
+            actor.y / 65536,
+            actor.z / 65536,
+          );
+          if (needed.isEmpty) break;
+        }
+      }
+    }
+    _soundOutput.add(
+      events: events,
+      listener: listener,
+      gameTic: gameTic,
+      sources: sources,
+    );
+  }
+
+  void _playLevelMusic() {
+    _completionMusicStarted = false;
+    _playMusic('D_${level.map.name}');
+  }
+
+  void _playMusic(String track) {
+    final backend = _audioBackend;
+    if (_disposed || backend is! MusicAudioBackend) return;
+    try {
+      final mus = level.content.wads.read(track);
+      final bank = level.content.wads.read('GENMIDI');
+      if (level.content.isFixture && mus == null && bank == null) {
+        backend.stopMusic();
+        return;
+      }
+      backend.playMusic(
+        track: track,
+        mus: mus ?? Uint8List(0),
+        genMidi: bank ?? Uint8List(0),
+      );
+    } catch (error, stackTrace) {
+      _recordSoundPlaybackError(error, stackTrace);
+    }
+  }
+
+  void _setMusicPaused(bool paused) {
+    _withMusic((backend) => backend.setPaused(paused));
+  }
+
+  void _withMusic(void Function(MusicAudioBackend) operation) {
+    final backend = _audioBackend;
+    if (backend is! MusicAudioBackend) return;
+    try {
+      operation(backend);
+    } catch (error, stackTrace) {
+      _recordSoundPlaybackError(error, stackTrace);
+    }
+  }
+
+  @override
+  void setAudioFocused(bool focused) {
+    if (_disposed) return;
+    if (!focused) _soundOutput.stop();
+    _withMusic((backend) => backend.setFocused(focused));
+  }
+
+  @override
+  void clearInputPreservingAudio() {
+    if (!_disposed) _devices.clear();
   }
 
   void _syncPalette() {
@@ -772,6 +856,7 @@ final class DoomRuntimeGame extends FlameGame3D
     if (input.takePauseToggle()) {
       _paused = !_paused;
       if (_paused) clearInput();
+      _setMusicPaused(_paused);
     }
   }
 
@@ -895,6 +980,8 @@ final class DoomRuntimeGame extends FlameGame3D
     );
     _soundJournal = DoomCoreSoundJournal(gameState);
     _paused = false;
+    _playLevelMusic();
+    _setMusicPaused(false);
     _completionReported = false;
     _replay?.reset();
     _pendingReplayTerminal = null;
@@ -920,6 +1007,7 @@ final class DoomRuntimeGame extends FlameGame3D
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _withMusic((backend) => backend.stopMusic());
     _devices.clear();
     _soundOutput.dispose();
     _hud.dispose();

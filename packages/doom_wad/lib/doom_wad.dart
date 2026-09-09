@@ -49,6 +49,8 @@ export 'src/map_loader.dart'
         loadMapData,
         parseBlockmap;
 export 'src/map_model.dart';
+export 'src/music_decoder.dart';
+export 'src/music_model.dart';
 export 'src/playthrough_fixture.dart' show DoomPlaythroughFixture;
 export 'src/resources.dart' show WadResources, decodeDoomPatch, decodeDoomSound;
 export 'src/resources_model.dart';

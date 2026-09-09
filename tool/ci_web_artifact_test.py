@@ -27,6 +27,10 @@ class CiWebArtifactTest(unittest.TestCase):
             "index.html": "<html></html>",
             "main.dart.mjs": "export {};",
             "main.dart.wasm": "wasm",
+            "doom_music_worker.wasm": "wasm",
+            "doom_music_worker.mjs": "export {};",
+            "doom_music_worker_loader.mjs": "export {};",
+            "doom_music_worklet.js": "registerProcessor('fixture', class {});",
             "assets/assets/shaders/doom_palette.wgslbundle": "shader",
         }
         for relative, contents in files.items():
@@ -58,6 +62,22 @@ class CiWebArtifactTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ArtifactError, "unsafe artifact"):
             pack(bundle, self.root / "bundle.tar.gz")
+
+    def test_pack_requires_every_music_runtime_asset(self) -> None:
+        bundle = self._bundle()
+        for asset in (
+            "doom_music_worker.wasm",
+            "doom_music_worker.mjs",
+            "doom_music_worker_loader.mjs",
+            "doom_music_worklet.js",
+        ):
+            with self.subTest(asset=asset):
+                path = bundle / asset
+                contents = path.read_bytes()
+                path.unlink()
+                with self.assertRaisesRegex(ArtifactError, "missing required files"):
+                    pack(bundle, self.root / "bundle.tar.gz")
+                path.write_bytes(contents)
 
     def test_extract_rejects_path_traversal(self) -> None:
         archive = self.root / "malicious.tar.gz"

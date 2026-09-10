@@ -1,3 +1,181 @@
+# Web UX verification — 2026-09-10
+
+Implementation: `codex/web-ux`, based on
+`ba1dd5ba7c7cc0634183059673b89ae9b1982887`.
+The implementation was written separately from the disposable design spike.
+
+- `flutter analyze --no-pub`: no issues. Content-inclusive
+  `flutter test --no-pub --reporter expanded`: **334 tests pass**.
+- `dart test --reporter expanded` in `packages/doom_core`: **190 tests pass**.
+  Original E1M1 replay remains 2,160 tics / `0x9c565b42`; keyboard acceptance
+  remains 2,155 tics / `0x55608565`; fixture playthrough remains
+  821 tics / `0x4c4136d3`.
+- Node tests for the startup shell, AudioWorklet and `.github/scripts`
+  policies: **45 pass**, including seven startup failure/recovery cases.
+  `python3 -m unittest discover -s tool -p 'ci_web_artifact_test.py'`:
+  **five pass**.
+- `bash tool/build_web_release.sh`, using Flutter 3.44.4 / Dart 3.12.2:
+  release Wasm build, worker build and project/packaging audits pass.
+  `main.dart.wasm` is 2,143,656 bytes; the approved shareware IWAD remains
+  4,196,020 bytes. Dependency pins and lockfiles are unchanged.
+
+The final release was served locally in Chrome on macOS at port 8883 with
+the existing COOP/COEP harness server. E1M1 rendered; the first click acquired
+Pointer Lock without firing, subsequent clicks fired, and Esc released the
+cursor and paused. Repeated Esc stayed paused. Resume reacquired the mouse
+and Chrome reported audio playback again. Leaving and returning to the tab
+kept the game paused. Mouse sensitivity changed from 1.00 to 1.75 and survived
+pause/resume; the touch-control switch displayed the joystick and action
+buttons. The stand was left paused with sensitivity 1.00 and touch controls off.
+
+Deterministic tests cover relative horizontal turning without firing,
+sensitivity scaling, stale capture completion after level replacement/disposal,
+coarse-pointer defaults, explicit touch overrides, wheel and trackpad weapon
+selection over the HUD, six-second idle hints, startup retry, and superseded
+audio resume/suspend requests. Native UI automation did not provide reliable
+physical relative-motion or wheel input, so mouse feel and wheel behavior are
+not claimed as a manual browser pass. A physical touch device and other browser
+engines were not exercised. No native-renderer, performance or audio-fidelity
+claim is added by this UX check.
+
+# Web audio verification — 2026-09-09
+
+**Numeric fidelity and runtime checks pass. Listening acceptance is pending.**
+
+Production implementation starts from `61818662fee3d6d90f788c9af0950a0218eec181`.
+The local original shareware IWAD is 4,196,020 bytes, SHA-256
+`1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771`.
+The reference implementations and WAD-derived traces/audio remain in ignored
+local evidence directories; they are not runtime dependencies or repository assets.
+
+The musical frontend passes the pinned Chocolate Doom `opl_doom_1_9`/OPL2
+register oracle at 49,716 Hz. All 11 required tracks (`D_E1M1`–`D_E1M9`,
+`D_INTER`, `D_VICTOR`) and the extra `D_INTRO` have exactly matching ordered
+register streams over 300 seconds each; every horizon crosses at least one
+loop. Seven synthetic cases cover pitch, volume, sustain, voice stealing,
+percussion, double voices and looping. All 16,384 note/bend combinations and
+16,256 channel-volume/velocity combinations match the oracle. See the
+[table provenance and trace command](../packages/doom_music/tool/DMX_TABLE_PROVENANCE.md).
+
+The parser includes the reserved word at offsets 14–15 in the physical
+16-byte MUS header. An authored regression checks that this word is excluded
+from the declared instrument list; all 147 WAD-package tests pass. After this
+correction, all 12 original 300-second register traces were re-rendered and
+remain exact (summary SHA-256
+`38dfbc6e361be8e39aa3b8f8ee791d21bc6878014df725c46a359d168cd2054c`).
+The seven behavior fixtures and eight exhaustive sweep inputs also pass again;
+their new summary SHA-256 is
+`820fa41af48525388f3995d1daee3509fcf6ee15041b7e84218ec6f5b912cd25`.
+
+The content-inclusive app suite passes **321 tests**. Original E1M1 remains
+2,160 tics with hash `0x9c565b42`, including the FakeGPU adapter replay;
+keyboard acceptance remains 2,155 tics with hash `0x55608565`. The existing
+native ownership/protocol tests pass in the same suite. Root Flutter analysis
+is clean. The actual JavaScript worklet has three passing Node protocol tests;
+the artifact-policy tests pass all five cases, including missing audio assets.
+Shared production-state tests cover bounded replacement, pause behind pending
+resume, requested-rate constructor fallback, and late events after transport
+failure/disposal.
+
+Register equivalence does not establish waveform equivalence. PCM comparisons use the
+same native sample rate, sample-zero alignment, no trimming and no gain fit.
+Required limits include 1 cent steady pitch, envelope landmarks within
+max(1 ms, 2% of the interval), p95 RMS-envelope difference at most 1 dB, and
+p95 log-STFT magnitude difference at most 1 dB. The spectrum uses a 2,048-frame
+Hann window, 256-frame hop and the union of each signal's active bins above
+−60 dBFS and within 40 dB of its local peak. Numeric gates do not replace the
+separate listening check, which remains open.
+
+The full 300-second PCM corpus, on core SHA-256
+`a188e39613c6d05cd3e73d0465269729761b80698800e990f33fc30ccc97512d`,
+passes both dB gates for all 11 required tracks. The worst spectrum p95 is
+0.313376 dB (D_INTER); the worst RMS-envelope p95 is 0.016449 dB (E1M4).
+Every track crosses a loop, and none has reference or produced clipped frames.
+The hash-fenced local corpus summary has SHA-256
+`65f631ab41747af0cae5836295b53b7348391af65e11a87c11912fd162083491`.
+All 31 music-package tests and its analyzer pass; the content-inclusive app
+suite was rerun after the parser correction and still passes all 321 tests.
+All 11 complete PCM streams are byte-identical between the Dart VM and compiled
+WebAssembly: 164,062,800 mono s16 samples in total. The parity report SHA-256 is
+`c99027d300221497f3e253655c6ca2df468c1a7becc65fe6c302fd9e6b85e6fc`.
+
+Authored regressions cover history-sensitive envelope transitions as well as
+fresh notes: zero-rate decay can reach sustain, and a live sustain-level write
+matches the current 16-step attenuation band without increasing its amplitude.
+The original VICTOR reduction has 117 register writes; after the corrected
+transition, every post-transition sample matches the oracle. Rare transient
+differences remain in the full corpus, so this is not a claim of chip-wide
+bit-exact YM3812 emulation for arbitrary register sequences.
+
+Independent authored active-vibrato probes cover all seven nonzero FNUM
+high-bit groups, shallow/deep depth and two complete LFO cycles. Maximum
+measured pitch difference is 0.011132 cent; each PCM stream differs by at most
+one s16 unit. The one-second envelope fixture is byte-identical to the oracle,
+including its measured attack/release landmarks, and live envelope changes
+first affect frames 580 and 801 in both implementations. These claims apply
+to those covered rates and transitions; the full corpus provides the broader
+numeric acceptance gate.
+
+The first browser transport checkpoint exercised the actual production session,
+Wasm worker and AudioWorklet with synthetic MUS/GENMIDI/PCM inputs:
+
+- Before a trusted gesture, the context was suspended at 49,716 Hz, eight
+  music blocks were queued, no music frames had played, and a dropped effect
+  completed without occupying a channel.
+- Main-thread stalls of 500 ms and 2 seconds left music underruns at zero.
+  One hundred synchronous score replacements produced one final configuration
+  after the active work; no pending configuration or retirement remained.
+- Pause kept exactly 9,743,616 played frames across repeated observations.
+  Resume, replacement after stale-lease disposal and lifecycle focus recovery
+  resumed progress. This did not capture the intermediate focus-suspended state.
+- Malformed MUS produced a typed failure; effects still completed. A real
+  uncaught worker failure disabled music while effects continued. Disposal
+  closed the context and left no active voices or cached PCM buffers.
+
+These are transport observations, not original-WAD sound or perceptual proof.
+The first checkpoint exposed stale diagnostic counters after failure/disposal;
+those paths were subsequently changed. The completed follow-up confirmed that
+malformed MUS preserves effects (3/3 completions), stale-lease disposal preserves
+the successor (4/4), focus recovery works (6/6), and a real worker crash clears
+music diagnostics while effects still complete (7/7). Three post-disposal
+observations show a closed context, zero voices/cache entries, no pending
+commands and no reappearing music counters. This checkpoint's main Wasm SHA-256
+is `a6ea7024b6f4b808a01de60bab63fbb805ccff3f4e023c16b47f617623da59b1`.
+Two earlier follow-up attempts crashed the browser tab on START with forced
+Flutter semantics enabled; the normal Flutter harness mode completed. Pending
+autoplay transition ordering is covered by tests of the shared production state
+class; it was not reproduced as an unresolved browser `resume()` promise.
+
+A native macOS debug build passes. This is compilation evidence only; no new
+native audible-output check is claimed. Original E1M1 also rendered in the
+browser, and the pause music slider changed independently of the effects slider.
+The final release build passes its artifact and project-contract checks. A
+browser probe using that exact music worker confirmed original E1M1 music
+progressing from 2,049,920 to 2,547,072 played frames, a seven-to-eight-block
+queue and zero underruns. The screenshot at 1280×720 shows Enter firing the
+pistol (ammo 50→49); the browser error log is empty. The same window reported
+Flutter `FrameTiming.totalSpan` p95 2.799 ms and p99 4.176 ms over 7,168 samples
+after a five-second warmup, with one sample above 16.667 ms. The histogram
+includes frames before the first trusted audio gesture, and other local
+validation work was running; this is a bounded smoke, not an isolated benchmark
+or presented-frame timing. The final worker Wasm SHA-256 is
+`9ee665ddb0f5e1239c2613e1f05f041808f91fdc23e3b97f222317527f2ff579`.
+Original-rate A/B clips for every track's opening and first loop transition
+are available locally for the outstanding listening check; no perceptual pass
+is claimed from the numeric results or browser counters.
+
+The subsequent CI integration fix aligns the trusted preview headers and exact
+audio-file allowlist with the production bundle. All 35 trusted-policy tests
+and five artifact tests pass. Worker compilation now stages its auxiliary
+files outside the web bundle and omits source maps. The resulting worker
+SHA-256 is `929983c10a87721185a8c8a63f573199535e47340612a6dec4ee6d0b056922ce`;
+all non-custom Wasm sections are byte-identical to the browser-tested worker
+above. The real release archive passes packing and the updated preview
+sanitizer. Automatic preview publication still uses the policy from `main`,
+which rejects these new audio assets until that policy is updated there.
+
+---
+
 # Architecture refactor verification — 2026-09-07
 
 Refactor of baseline `d12073a`, integrated with main `6e8ba73` in `67f82ef`;

@@ -45,11 +45,24 @@ requires an explicit button press.
 
 ## Run in a WebGPU browser
 
+The HTML startup screen shows loading and offers retry on errors or slow loading.
+Graphics and IWAD loading failures also have explicit retry actions. Browser
+focus loss pauses the game; returning to the tab leaves it paused. Controls hints
+hide on player movement and return after six idle seconds.
+
 The browser target is Flutter Wasm plus flame_3d's WebGPU backend. The release
 build packages `.local/doom/DOOM1.WAD` at
 `build/web/assets/.local/doom/DOOM1.WAD`, and startup loads E1M1 automatically.
 **SELECT LOCAL IWAD** remains available only from the pause menu for switching
 content at runtime.
+
+Browser audio uses the WAD's original PCM effects and MUS/GENMIDI music. A
+pure-Dart OPL2 synthesizer runs in a separate Wasm worker, with an AudioWorklet
+feeding the browser output. Click or press a key to unlock sound. The pause
+menu has independent music and effects volumes, retained until the app closes.
+Pause and browser blur freeze music; restarting a level restarts its track.
+If the browser cannot provide the music transport, the pause menu reports the
+failure while effects remain available.
 
 Build the reproducible release with Flutter 3.44.4, naga-cli 30.0.1 and
 ripgrep (`rg`) on PATH:
@@ -59,7 +72,7 @@ DOOMPELLER_FLUTTER="$(command -v flutter)" bash tool/build_web_release.sh
 ```
 
 The build removes Flutter's generated dart2js fallback and verifies the
-dart2wasm entrypoint, local CanvasKit assets, generated WGSL shader bundle,
+dart2wasm entrypoint, music worker/worklet, local CanvasKit assets, generated WGSL shader bundle,
 deployment headers, and the exact bundled `DOOM1.WAD` size and checksum.
 Deployment must preserve `web/_headers` so Wasm/worker resources run under
 COOP/COEP. The supported and tested runtime target is Wasm/WebGPU.
@@ -95,13 +108,17 @@ final verdicts; `PROBLEMS` exits non-zero.
 - `Enter`, numpad `Enter`, `Ctrl` or primary click: attack
 - `Space` or `E`: use
 - `1`–`6`: fist, pistol, shotgun, chaingun, rocket launcher, chainsaw
-- `Esc`: pause/resume
-- primary-button drag: mouse yaw
+- Browser: click the game to capture the mouse, move to turn, primary click to fire
+- Browser: `Esc` releases the cursor and pauses; click `RESUME` to continue
+- Browser: wheel or trackpad vertical scroll cycles owned weapons, including over the HUD
+- Native: `Esc` pauses/resumes; primary-button drag turns
+- The browser pause menu includes session-only mouse sensitivity
 
 All simulation input is sampled into `TicCmd`. Rendering interpolates the
 camera between completed 35 Hz tics and never advances game state.
 
-Touching the game enables smartphone controls; the pause menu also has a
+Browsers with a coarse primary pointer start with smartphone controls. Touching
+a hybrid device also enables them; an explicit choice in the pause menu wins. The menu has a
 `TOUCH CONTROLS` toggle. Drag the left stick to move/strafe, swipe the right
 side to turn, and hold `FIRE` to shoot (dragging it also turns). Hold `RUN`
 for the existing run speed. `USE`, weapon selection, map/zoom, and pause have
@@ -134,5 +151,8 @@ This includes collision challenges, effect lifetimes, episode progression and
 deterministic traversal. The `content` tag distinguishes these tests from the
 synthetic suite. Neither test mode copies the WAD into its temporary project.
 Run `dart analyze --fatal-infos` and `dart test` in each of `packages/doom_wad`,
-`packages/doom_geometry`, and `packages/doom_core` for the pure-Dart suites.
+`packages/doom_geometry`, `packages/doom_core`, and `packages/doom_music` for the
+pure-Dart suites. `node --test test/web/doom_music_worklet_test.mjs` verifies the
+bounded output protocol; `tool/web_audio_harness/build.sh` builds the local
+browser transport stress harness.
 The macOS build still requires the local WAD described above.

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:doompeller/game/sound_playback.dart';
+import 'package:doompeller/game/doom_sound_policy.dart';
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_wad/doom_wad.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,6 +33,102 @@ core.SoundEvent event({
 );
 
 void main() {
+  test('Doom priority data preserves player, weapon and ambient ordering', () {
+    expect(doomSoundPriority('DSTELEPT'), 32);
+    expect(doomSoundPriority('DSPISTOL'), 64);
+    expect(doomSoundPriority('dspodth1'), 70);
+    expect(doomSoundPriority('DSDOROPN'), 100);
+    expect(doomSoundPriority('DSDMACT'), 120);
+  });
+
+  test(
+    'classic near radius, diagonal clipping and boss minimum are distinct',
+    () {
+      const listener = AudioListener(position: AudioPosition(0, 0), angle: 0);
+      SpatializedSound at(double x, double y, {bool boss = false}) =>
+          DoomSoundSpatializer.calculate(
+            source: AudioPosition(x, y),
+            listener: listener,
+            bossArena: boss,
+          );
+      expect(at(159, 0).volume, 1);
+      expect(at(680, 0).volume, .5);
+      expect(at(800, 800).volume, 0);
+      expect(at(2000, 0).volume, 0);
+      expect(at(2000, 0, boss: true).volume, closeTo(15 / 127, 1e-12));
+    },
+  );
+
+  test(
+    'same source replaces its voice even while another channel is free',
+    () async {
+      final backend = FakeAudioBackend();
+      final mixer = SoundPlaybackManager(
+        backend: backend,
+        catalog: MapSoundCatalog({
+          'DSPISTOL': definition(32),
+          'DSDMACT': definition(120),
+        }),
+        maxChannels: 2,
+      );
+      const listener = AudioListener(position: AudioPosition(0, 0), angle: 0);
+      await mixer.consumeEvents(
+        events: [event()],
+        listener: listener,
+        gameTic: 1,
+      );
+      await mixer.consumeEvents(
+        events: [event(soundId: 'DSDMACT', tic: 2)],
+        listener: listener,
+        gameTic: 1,
+      );
+      expect(backend.playCalls.map((r) => r.channelId), [0, 0]);
+      expect(backend.stopCalls, [0]);
+      expect(mixer.activeChannelCount, 1);
+    },
+  );
+
+  test(
+    'moving source and listener update the current voice without restarting',
+    () async {
+      final backend = _SpatialBackend();
+      final mixer = SoundPlaybackManager(
+        backend: backend,
+        catalog: MapSoundCatalog({'DSPISTOL': definition(64)}),
+      );
+      const listener = AudioListener(position: AudioPosition(0, 0), angle: 0);
+      await mixer.consumeEvents(
+        events: [event(y: 100 * 65536)],
+        listener: listener,
+        gameTic: 1,
+      );
+      final playback = backend.playCalls.single;
+      mixer.updateSpatial(
+        listener: listener,
+        sources: {1: const AudioPosition(0, -680)},
+      );
+      expect(backend.updates.last, (playback.playbackId, .5, .75));
+      mixer.updateSpatial(
+        listener: const AudioListener(
+          position: AudioPosition(0, 0),
+          angle: 0x80000000,
+        ),
+      );
+      expect(backend.updates.last.$3, closeTo(-.75, 1e-12));
+      expect(backend.playCalls, hasLength(1));
+      mixer.updateSpatial(
+        listener: listener,
+        sources: {1: const AudioPosition(2000, 0)},
+      );
+      expect(backend.updates.last.$2, 0);
+      expect(mixer.activeChannelCount, 0);
+      final count = backend.updates.length;
+      await mixer.dispose();
+      mixer.updateSpatial(listener: listener);
+      expect(backend.updates, hasLength(count));
+    },
+  );
+
   test(
     'WAD catalog reuses immutable WAV bytes while preserving priority policy',
     () {
@@ -106,22 +203,23 @@ void main() {
       maxDistance: 100,
     );
 
-    expect(left.pan, closeTo(-1, 1e-12));
-    expect(right.pan, closeTo(1, 1e-12));
+    expect(left.pan, closeTo(-0.75, 1e-12));
+    expect(right.pan, closeTo(0.75, 1e-12));
     expect(behind.pan, closeTo(0, 1e-12));
-    expect(left.volume, closeTo(0.9, 1e-12));
+    expect(left.volume, 1);
     expect(far.volume, 0);
   });
 
   test(
-    'mixer merges duplicate source sounds and evicts only lower priority',
+    'mixer deduplicates, replaces equal priority, and protects greater importance',
     () async {
       final FakeAudioBackend backend = FakeAudioBackend();
       final SoundPlaybackManager mixer = SoundPlaybackManager(
         backend: backend,
         catalog: MapSoundCatalog(<String, SoundDefinition>{
-          'DSPISTOL': definition(1),
-          'DSPLASMA': definition(2),
+          'DSPISTOL': definition(64),
+          'DSPLASMA': definition(32),
+          'DSDMACT': definition(120),
         }),
         maxChannels: 1,
       );
@@ -140,8 +238,14 @@ void main() {
         listener: const AudioListener(position: AudioPosition(0, 0), angle: 0),
         gameTic: 1,
       );
-      expect(backend.playCalls, hasLength(1));
-      expect(backend.stopCalls, isEmpty);
+      expect(backend.playCalls, hasLength(2));
+      expect(backend.stopCalls, <int>[0]);
+      await mixer.consumeEvents(
+        events: [event(soundId: 'DSDMACT', sourceId: 4)],
+        listener: const AudioListener(position: AudioPosition(0, 0), angle: 0),
+        gameTic: 1,
+      );
+      expect(backend.playCalls, hasLength(2));
 
       await mixer.consumeEvents(
         events: <core.SoundEvent>[
@@ -150,8 +254,8 @@ void main() {
         listener: const AudioListener(position: AudioPosition(0, 0), angle: 0),
         gameTic: 1,
       );
-      expect(backend.playCalls, hasLength(2));
-      expect(backend.stopCalls, <int>[0]);
+      expect(backend.playCalls, hasLength(3));
+      expect(backend.stopCalls, <int>[0, 0]);
       expect(backend.playCalls.last.soundId, 'DSPLASMA');
     },
   );
@@ -179,8 +283,8 @@ void main() {
       expect(journal.consumed, isTrue);
       expect(backend.playCalls, hasLength(1));
       expect(backend.playCalls.single.soundId, 'DSPISTOL');
-      expect(backend.playCalls.single.volume, closeTo(1190 / 1200, 1e-12));
-      expect(backend.playCalls.single.pan, closeTo(-1, 1e-12));
+      expect(backend.playCalls.single.volume, 1);
+      expect(backend.playCalls.single.pan, closeTo(-0.75, 1e-12));
       expect(backend.playCalls.single.wavBytes.sublist(0, 4), <int>[
         82,
         73,
@@ -256,8 +360,9 @@ void main() {
       final SoundPlaybackManager mixer = SoundPlaybackManager(
         backend: backend,
         catalog: MapSoundCatalog(<String, SoundDefinition>{
-          'DSPISTOL': definition(1),
-          'DSPLASMA': definition(2),
+          'DSPISTOL': definition(64),
+          'DSPLASMA': definition(32),
+          'DSDMACT': definition(120),
         }),
         maxChannels: 1,
       );
@@ -311,8 +416,8 @@ void main() {
     final SoundPlaybackManager mixer = SoundPlaybackManager(
       backend: backend,
       catalog: MapSoundCatalog(<String, SoundDefinition>{
-        'DSPISTOL': definition(1),
-        'DSPLASMA': definition(2),
+        'DSPISTOL': definition(64),
+        'DSPLASMA': definition(32),
       }),
       maxChannels: 1,
     );
@@ -371,5 +476,20 @@ class _FailingAudioBackend extends FakeAudioBackend {
       throw StateError('synthetic play failure');
     }
     await super.play(request, onComplete: onComplete);
+  }
+}
+
+class _SpatialBackend extends FakeAudioBackend implements SpatialAudioBackend {
+  final updates = <(int, double, double)>[];
+
+  @override
+  void updateSpatial({
+    required int channelId,
+    required int playbackId,
+    required double volume,
+    required double pan,
+  }) {
+    updates.add((playbackId, volume, pan));
+    if (volume == 0) complete(playbackId);
   }
 }

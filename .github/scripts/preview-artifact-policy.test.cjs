@@ -211,6 +211,10 @@ function validEntries() {
     {name: 'index.html', contents: '<!doctype html>'},
     {name: 'main.dart.mjs', contents: 'export const app = true;'},
     {name: 'main.dart.wasm', contents: 'wasm'},
+    {name: 'doom_music_worker.wasm', contents: 'music wasm'},
+    {name: 'doom_music_worker.mjs', contents: 'export const worker = true;'},
+    {name: 'doom_music_worker_loader.mjs', contents: 'export const loader = true;'},
+    {name: 'doom_music_worklet.js', contents: 'registerProcessor("doom-music", class {});'},
     {name: 'assets/assets/shaders/doom_palette.wgslbundle', contents: 'shader'},
     {name: APPROVED_IWAD_PATH, contents: testWad},
   ];
@@ -257,7 +261,7 @@ test('trusted header constant stays byte-identical to the production source', ()
 test('sanitizes an archive while preserving the one approved hidden WAD', () => {
   withArtifact(validEntries(), ({source, destination}) => {
     const result = sanitize(source, destination);
-    assert.equal(result.fileCount, 7);
+    assert.equal(result.fileCount, 11);
     assert.equal(result.iwadBytes, testWad.length);
     assert.equal(result.iwadSha256, testWadSha256);
     assert.deepEqual(
@@ -329,10 +333,18 @@ test('rejects traversal, duplicate paths, malformed checksums, and extra outer f
 });
 
 test('enforces required files, Wasm-only bootstrap, and bounded sizes', () => {
-  const missing = validEntries().filter((entry) => entry.name !== 'main.dart.wasm');
-  withArtifact(missing, ({source, destination}) => {
-    assert.throws(() => sanitize(source, destination), /missing required/);
-  });
+  for (const name of [
+    'main.dart.wasm',
+    'doom_music_worker.wasm',
+    'doom_music_worker.mjs',
+    'doom_music_worker_loader.mjs',
+    'doom_music_worklet.js',
+  ]) {
+    const missing = validEntries().filter((entry) => entry.name !== name);
+    withArtifact(missing, ({source, destination}) => {
+      assert.throws(() => sanitize(source, destination), /missing required/, name);
+    });
+  }
   const fallback = validEntries().map((entry) => entry.name === 'flutter_bootstrap.js'
     ? {...entry, contents: '{"compileTarget":"dart2js","renderer":"skwasm","useLocalCanvasKit":true}'}
     : entry);

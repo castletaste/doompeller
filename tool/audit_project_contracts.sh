@@ -18,7 +18,7 @@ need_line() {
 }
 
 # Pure-Dart packages are deliberately usable without Flutter or a GPU runtime.
-if rg -n -g '*.dart' "^(import|export) ['\"](dart:(ui|ffi)|package:(flutter|flame|flame_3d)(/|['\"]))" packages/doom_wad packages/doom_geometry packages/doom_core
+if rg -n -g '*.dart' "^(import|export) ['\"](dart:(ui|ffi|js|js_interop|js_interop_unsafe|html)|package:(flutter|flame|flame_3d|web)(/|['\"]))" packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music
 then
   fail "pure-Dart package imports a forbidden platform library"
 fi
@@ -41,11 +41,11 @@ then
   fail "FFI, WebView, or native dynamic loading found"
 fi
 
-# WebGPU needs two small browser bridges: default IWAD fetch and the pause-menu
-# file picker. Keep modern JS interop confined to those named boundaries.
-js_hits=$(rg -l -g '*.dart' "^(import|export) ['\"]dart:js(_interop)?['\"]" lib packages tool 2>/dev/null || true)
+# Browser APIs are confined to content input, pointer capture, and the audio session/worker.
+# Music synthesis itself stays pure Dart in doom_music.
+js_hits=$(rg -l -g '*.dart' "^(import|export) ['\"]dart:js(_interop(_unsafe)?)?['\"]" lib packages tool 2>/dev/null || true)
 outside_web_bridges=$(printf '%s\n' "$js_hits" |
-  rg -v "^lib/game/(browser_wad_picker_web|content_source_platform_web)\.dart$" || true)
+  rg -v "^lib/(game/(browser_wad_picker_web|content_source_platform_web|browser_pointer_web|web_audio_session)|web/doom_music_worker)\.dart$" || true)
 if [ -n "$outside_web_bridges" ]; then
   printf '%s\n' "$outside_web_bridges" >&2
   fail "JS interop exists outside the approved browser boundaries"

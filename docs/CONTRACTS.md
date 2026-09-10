@@ -10,6 +10,7 @@ updating this file in the same commit and telling the orchestrator.
 packages/doom_wad       pure Dart, zero Flutter deps  -> WAD bytes to typed data
 packages/doom_geometry  pure Dart, depends on doom_wad -> map data to packed meshes
 packages/doom_core      pure Dart, depends on doom_wad -> 35 Hz gameplay simulation
+packages/doom_music     pure Dart, depends on doom_wad -> MUS/GENMIDI to OPL2 PCM
 lib/adapter             the ONLY place that touches flame_3d / flutter_gpu
 lib/game                app state, CPU preparation, input, HUD, audio
 lib/ui                  runtime host, focus/lifecycle, HUD and overlays
@@ -17,7 +18,7 @@ lib/ui                  runtime host, focus/lifecycle, HUD and overlays
 
 Hard rules:
 
-- `doom_wad`, `doom_geometry`, `doom_core` must not import `dart:ui`,
+- `doom_wad`, `doom_geometry`, `doom_core`, `doom_music` must not import `dart:ui`,
   `package:flutter`, `package:flame`, `package:flame_3d` or `dart:ffi`.
 - Only `lib/adapter` imports `package:flame_3d`. Everything else consumes the
   adapter's own types.
@@ -80,6 +81,8 @@ class WadResources {
   DoomSound? sound(String lumpName);       // lazy, memoised unsigned 8-bit PCM
   List<String> get soundNames;             // DS* lumps, sorted
   DoomMusicInfo? music(String lumpName);   // D_* length + MUS signature only
+  MusSong? musicSong(String lumpName);     // bounded lazy MUS decoding
+  GenMidiBank? get genMidiBank;            // bounded lazy GENMIDI decoding
 }
 
 enum DoomAnimationKind { flat, wall }
@@ -103,6 +106,49 @@ class MapData {
   Blockmap? blockmap;
 }
 ```
+
+## Music and browser audio API
+
+```dart
+MusSong parseMus(Uint8List bytes, {DoomLimits limits});
+GenMidiBank parseGenMidi(Uint8List bytes, {DoomLimits limits});
+
+class DoomMusicPlayer {
+  DoomMusicPlayer(MusSong song, GenMidiBank bank, {
+    bool loop = true,
+    void Function(int sample, int address, int value)? onRegisterWrite,
+  });
+  static const int sampleRate = 49716;
+  void renderInto(Float32List output, {int offset = 0, int? count});
+  void reset();
+  int get renderedFrames;
+  int get loopCount;
+}
+
+class Opl2Chip {
+  static const int sampleRate = 49716;
+  void writeRegister(int address, int value);
+  void renderInto(Float32List output, {int offset = 0, int? count});
+  void reset();
+}
+```
+
+MUS events are immutable absolute score ticks; GENMIDI retains raw operator
+fields and the unsigned fine-tuning byte. `DoomLimits` bounds encoded music and
+bank bytes, decoded event count, declared instrument count and score duration.
+Malformed or over-budget content produces a typed `DoomFailure` before an
+unbounded allocation. Rendering errors use `MusicFailure`.
+
+`DoomAudioSession` owns session-only music/effects gains and `acquireLevel()`.
+Its optional `MusicAudioBackend` lease supports `playMusic(track, mus, genMidi)`
+with named arguments, `setPaused`, `setFocused` and `stopMusic`. Retired leases
+cannot affect the current level. `AudioPlayRequest.pcmSound` supplies original
+PCM alongside the existing WAV payload. Optional `SpatialAudioBackend` updates
+channel/playback-ID-fenced gain and pan; zero gain retires that playback.
+
+Only `lib/game/web_audio_session.dart` and `lib/web/doom_music_worker.dart`
+add browser interop to the existing content bridges. Browser glue contains no
+MUS sequencer or FM synthesizer. Native MethodChannel audio stays unchanged.
 
 ## doom_geometry public API
 

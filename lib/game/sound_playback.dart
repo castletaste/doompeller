@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_wad/doom_wad.dart' as wad;
 
+import 'doom_sound_policy.dart';
+
 /// A Doom sound sample: unsigned, mono, 8-bit PCM.
 ///
 /// This is deliberately a small app-layer type. The WAD package can expose a
@@ -104,14 +106,27 @@ abstract final class DoomSoundSpatializer {
     required AudioPosition source,
     required AudioListener listener,
     double maxDistance = 1200,
+    bool bossArena = false,
   }) {
     if (!maxDistance.isFinite || maxDistance <= 0) {
       throw ArgumentError.value(maxDistance, 'maxDistance', 'must be positive');
     }
     final double dx = source.x - listener.position.x;
     final double dy = source.y - listener.position.y;
-    final double distance = math.sqrt(dx * dx + dy * dy);
-    final double volume = _clamp01(1 - distance / maxDistance);
+    // Doom's approximate distance, full-volume radius and stereo swing.
+    // The output layer uses normalized gains; simulation remains integer-only.
+    final double distance =
+        dx.abs() + dy.abs() - math.min(dx.abs(), dy.abs()) / 2;
+    final double closeDistance = math.min(160, maxDistance);
+    final double minimum = bossArena ? 15 / 127 : 0;
+    final double volume = distance < closeDistance
+        ? 1
+        : distance >= maxDistance
+        ? minimum
+        : minimum +
+              (1 - minimum) *
+                  ((maxDistance - distance).floor() /
+                      (maxDistance - closeDistance));
     if (distance == 0) {
       return SpatializedSound(volume: volume, pan: 0);
     }
@@ -120,10 +135,9 @@ abstract final class DoomSoundSpatializer {
         (listener.angle & 0xffffffff) * (2 * math.pi / 0x100000000);
     // Doom's map Y axis is the positive sine direction. The right vector for
     // a forward vector (cos, sin) is therefore (sin, -cos).
-    final double right =
-        (dx * math.sin(radians) - dy * math.cos(radians)) / distance;
+    final double right = -math.sin(math.atan2(dy, dx) - radians) * 0.75;
     return SpatializedSound(
-      volume: volume,
+      volume: _clamp01(volume),
       pan: right.clamp(-1.0, 1.0).toDouble(),
     );
   }
@@ -194,7 +208,7 @@ class WadSoundCatalog implements SoundCatalog {
     return SoundDefinition(
       sound: encoded.sound,
       wavBytes: encoded.wav,
-      priority: priorityFor?.call(soundId) ?? 0,
+      priority: priorityFor?.call(soundId) ?? doomSoundPriority(soundId),
     );
   }
 }
@@ -221,12 +235,16 @@ class AudioPlayRequest {
     required this.pan,
     required this.sourceId,
     required this.fromPlayer,
+    this.pcmSound,
   });
 
   final int channelId;
   final int playbackId;
   final String soundId;
   final Uint8List wavBytes;
+
+  /// Original PCM for backends that do not need a WAV container.
+  final PcmSound? pcmSound;
   final double volume;
   final double pan;
   final int sourceId;
@@ -240,6 +258,17 @@ abstract interface class AudioBackend {
   Future<void> play(AudioPlayRequest request, {void Function()? onComplete});
   Future<void> stop(int channelId);
   Future<void> dispose();
+}
+
+/// Optional synchronous spatial updates, fenced by the current playback ID.
+/// A zero volume retires that playback and invokes its completion callback.
+abstract interface class SpatialAudioBackend {
+  void updateSpatial({
+    required int channelId,
+    required int playbackId,
+    required double volume,
+    required double pan,
+  });
 }
 
 class NoAudioBackend implements AudioBackend {
@@ -292,32 +321,35 @@ class FakeAudioBackend implements AudioBackend {
 }
 
 class _ActiveChannel {
-  const _ActiveChannel({
+  _ActiveChannel({
     required this.request,
     required this.priority,
-    required this.sequence,
     required this.expiresAtTic,
+    required this.position,
   });
 
   final AudioPlayRequest request;
   final int priority;
-  final int sequence;
   final int expiresAtTic;
+
+  /// Null for player-local and non-positional sounds.
+  AudioPosition? position;
 }
 
 /// Fixed-channel Doom-style mixer.
 ///
 /// Rules are intentionally explicit: a duplicate (sound, stable source, tic)
 /// in one consumed journal batch is collapsed; an absent sound or zero-gain event
-/// is dropped; when full, an incoming sound must have strictly greater
-/// priority than the oldest active sound at the lowest priority, otherwise it
-/// is dropped. Ties preserve the currently playing sound.
+/// is dropped. A source replaces its prior sound; otherwise use the first free
+/// channel, or the first channel with a numerically equal/lower importance.
+/// Lower numeric priorities are more important, matching Doom's sound table.
 class SoundPlaybackManager {
   SoundPlaybackManager({
     required AudioBackend backend,
     required SoundCatalog catalog,
     int maxChannels = 8,
     this.maxDistance = 1200,
+    this.bossArena = false,
   }) : _channels = List<_ActiveChannel?>.filled(maxChannels, null) {
     _backend = backend;
     _catalog = catalog;
@@ -333,12 +365,54 @@ class SoundPlaybackManager {
   late final SoundCatalog _catalog;
   final List<_ActiveChannel?> _channels;
   final double maxDistance;
+  final bool bossArena;
+  AudioListener? _latestListener;
+  Map<int, AudioPosition> _latestSources = const {};
   int _sequence = 0;
   int _generation = 0;
   bool _disposed = false;
 
   int get maxChannels => _channels.length;
   int get activeChannelCount => _channels.whereType<_ActiveChannel>().length;
+  bool get supportsSpatialUpdates => _backend is SpatialAudioBackend;
+
+  Iterable<int> get activePositionalSources sync* {
+    for (final channel in _channels) {
+      if (channel?.position != null) yield channel!.request.sourceId;
+    }
+  }
+
+  /// Only the latest positions are retained; empty tics never queue work.
+  void updateSpatial({
+    required AudioListener listener,
+    Map<int, AudioPosition> sources = const {},
+  }) {
+    if (_disposed || _backend is! SpatialAudioBackend) return;
+    _latestListener = listener;
+    _latestSources = sources;
+    final spatialBackend = _backend as SpatialAudioBackend;
+    for (var i = 0; i < _channels.length; i++) {
+      final active = _channels[i];
+      if (active == null || active.position == null) continue;
+      final request = active.request;
+      active.position = sources[request.sourceId] ?? active.position;
+      final spatial = DoomSoundSpatializer.calculate(
+        source: active.position!,
+        listener: listener,
+        maxDistance: maxDistance,
+        bossArena: bossArena,
+      );
+      spatialBackend.updateSpatial(
+        channelId: i,
+        playbackId: request.playbackId,
+        volume: spatial.volume,
+        pan: spatial.pan,
+      );
+      // Release the mixer slot immediately even if the backend completes
+      // asynchronously. This is idempotent after a synchronous onComplete.
+      if (spatial.volume <= 0) _complete(i, request.playbackId);
+    }
+  }
 
   /// Stops an in-flight batch at its next async boundary without losing the
   /// active channel IDs needed by the subsequent stop/dispose operation.
@@ -383,17 +457,20 @@ class SoundPlaybackManager {
       final SpatializedSound spatial = !event.isPositional || event.fromPlayer
           ? const SpatializedSound(volume: 1, pan: 0)
           : DoomSoundSpatializer.calculate(
-              source: AudioPosition(
-                event.x / 65536,
-                event.y / 65536,
-                event.z / 65536,
-              ),
-              listener: listener,
+              source:
+                  _latestSources[event.sourceId] ??
+                  AudioPosition(
+                    event.x / 65536,
+                    event.y / 65536,
+                    event.z / 65536,
+                  ),
+              listener: _latestListener ?? listener,
               maxDistance: maxDistance,
+              bossArena: bossArena,
             );
       if (spatial.volume <= 0) continue;
 
-      final int channel = _chooseChannel(definition.priority);
+      final int channel = _chooseChannel(definition.priority, event.sourceId);
       if (channel < 0) continue;
       final _ActiveChannel? victim = _channels[channel];
       if (victim != null) {
@@ -406,6 +483,7 @@ class SoundPlaybackManager {
         channelId: channel,
         playbackId: playbackId,
         soundId: event.soundId,
+        pcmSound: definition.sound,
         wavBytes:
             definition.wavBytes ??
             encodeDoomPcmAsWav(
@@ -420,8 +498,10 @@ class SoundPlaybackManager {
       _channels[channel] = _ActiveChannel(
         request: request,
         priority: definition.priority,
-        sequence: playbackId,
         expiresAtTic: gameTic + _durationTics(definition.sound),
+        position: event.isPositional && !event.fromPlayer
+            ? AudioPosition(event.x / 65536, event.y / 65536, event.z / 65536)
+            : null,
       );
       try {
         await _backend.play(
@@ -459,26 +539,27 @@ class SoundPlaybackManager {
     }
   }
 
-  int _chooseChannel(int incomingPriority) {
+  int _chooseChannel(int incomingPriority, int sourceId) {
+    // A real origin owns at most one voice. UI/non-positional events have no
+    // shared physical origin and may overlap.
+    if (sourceId != core.SoundEvent.nonPositionalSourceId) {
+      for (var i = 0; i < _channels.length; i++) {
+        if (_channels[i]?.request.sourceId == sourceId) return i;
+      }
+    }
     for (int i = 0; i < _channels.length; i++) {
       if (_channels[i] == null) return i;
     }
-    int victimIndex = 0;
-    _ActiveChannel victim = _channels.first!;
-    for (int i = 1; i < _channels.length; i++) {
-      final _ActiveChannel candidate = _channels[i]!;
-      if (candidate.priority < victim.priority ||
-          (candidate.priority == victim.priority &&
-              candidate.sequence < victim.sequence)) {
-        victimIndex = i;
-        victim = candidate;
-      }
+    for (var i = 0; i < _channels.length; i++) {
+      if (_channels[i]!.priority >= incomingPriority) return i;
     }
-    return incomingPriority > victim.priority ? victimIndex : -1;
+    return -1;
   }
 
   Future<void> stopAll() async {
     cancelPendingEvents();
+    _latestListener = null;
+    _latestSources = const {};
     Object? firstError;
     StackTrace? firstStack;
     for (int i = 0; i < _channels.length; i++) {

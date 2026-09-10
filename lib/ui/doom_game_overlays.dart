@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../game/audio_session.dart';
+import 'doom_audio_settings.dart';
 
 final class DoomLoadingView extends StatelessWidget {
   const DoomLoadingView({super.key});
@@ -22,10 +24,12 @@ final class DoomFailureView extends StatelessWidget {
     super.key,
     required this.message,
     required this.onFallback,
+    this.onRetry,
   });
 
   final String message;
   final VoidCallback onFallback;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -49,6 +53,12 @@ final class DoomFailureView extends StatelessWidget {
               const SizedBox(height: 12),
               Text(message, textAlign: TextAlign.center),
               const SizedBox(height: 18),
+              if (onRetry != null)
+                FilledButton(
+                  key: const Key('retry-iwad'),
+                  onPressed: onRetry,
+                  child: const Text('TRY AGAIN'),
+                ),
               FilledButton.tonal(
                 key: const Key('fixture-fallback'),
                 onPressed: onFallback,
@@ -72,9 +82,11 @@ final class DoomRuntimeConfigurationError extends StatelessWidget {
   const DoomRuntimeConfigurationError({
     super.key,
     this.message = 'The configured game runtime cannot be rendered.',
+    this.onRetry,
   });
 
   final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -83,7 +95,16 @@ final class DoomRuntimeConfigurationError extends StatelessWidget {
     child: Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text(message, textAlign: TextAlign.center),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, textAlign: TextAlign.center),
+            if (onRetry != null) ...[
+              const SizedBox(height: 16),
+              FilledButton(onPressed: onRetry, child: const Text('TRY AGAIN')),
+            ],
+          ],
+        ),
       ),
     ),
   );
@@ -157,6 +178,10 @@ final class DoomPauseOverlay extends StatelessWidget {
     this.onTouchControlsChanged,
     this.onLoadIwad,
     this.errorMessage,
+    this.audioSession,
+    this.browserControls = false,
+    this.mouseSensitivity = 1,
+    this.onSensitivityChanged,
   });
 
   final VoidCallback onResume;
@@ -164,6 +189,10 @@ final class DoomPauseOverlay extends StatelessWidget {
   final ValueChanged<bool>? onTouchControlsChanged;
   final VoidCallback? onLoadIwad;
   final String? errorMessage;
+  final DoomAudioSession? audioSession;
+  final bool browserControls;
+  final double mouseSensitivity;
+  final ValueChanged<double>? onSensitivityChanged;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
@@ -186,8 +215,10 @@ final class DoomPauseOverlay extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Press Esc to resume',
+                Text(
+                  browserControls
+                      ? 'Click Resume to continue'
+                      : 'Press Esc to resume',
                   style: TextStyle(color: Colors.white70),
                 ),
                 const SizedBox(height: 16),
@@ -214,6 +245,28 @@ final class DoomPauseOverlay extends StatelessWidget {
                     child: const Text('SELECT LOCAL IWAD'),
                   ),
                 ],
+                if (browserControls && onSensitivityChanged != null)
+                  Material(
+                    type: MaterialType.transparency,
+                    child: Column(
+                      children: [
+                        Text(
+                          'MOUSE SENSITIVITY  ${mouseSensitivity.toStringAsFixed(2)}×',
+                        ),
+                        Slider(
+                          key: const Key('mouse-sensitivity'),
+                          value: mouseSensitivity,
+                          min: 0.25,
+                          max: 3,
+                          divisions: 11,
+                          label: '${mouseSensitivity.toStringAsFixed(2)}×',
+                          onChanged: onSensitivityChanged,
+                        ),
+                      ],
+                    ),
+                  ),
+                if (audioSession?.controlsAvailable == true)
+                  DoomAudioSettings(session: audioSession!),
                 if (errorMessage != null) ...<Widget>[
                   const SizedBox(height: 12),
                   ConstrainedBox(
@@ -240,10 +293,12 @@ final class DoomControlsHint extends StatelessWidget {
     super.key,
     required this.narrow,
     required this.onHide,
+    this.browserControls = false,
   });
 
   final bool narrow;
   final VoidCallback onHide;
+  final bool browserControls;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -254,7 +309,11 @@ final class DoomControlsHint extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          narrow
+          browserControls
+              ? (narrow
+                    ? 'WASD · mouse look · click fire · E use · Esc pause'
+                    : 'WASD move · Shift run · mouse look · click fire · E use · wheel/1–6 weapon · Esc pause')
+              : narrow
               ? 'WASD · Shift run · ←→ · Enter fire · E use'
               : 'W/S move · A/D strafe · Shift run · ←/→ turn · Enter/Ctrl/click fire · Space/E use · 1–6 weapon · Esc pause',
           style: const TextStyle(color: Colors.white70, fontSize: 10),

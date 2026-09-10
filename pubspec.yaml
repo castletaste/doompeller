@@ -22,6 +22,8 @@ dependencies:
     path: packages/doom_geometry
   doom_core:
     path: packages/doom_core
+  doom_music:
+    path: packages/doom_music
 
 dev_dependencies:
   flutter_test:

@@ -50,39 +50,60 @@ final class AudioTransportLifecycleState {
   }
 }
 
-final class AudioContextCommandState {
-  bool resumePending = false;
-  bool suspendPending = false;
+/// Identity of one admitted browser operation. A superseded Promise may still
+/// settle; its completion must never retire a newer operation.
+final class AudioContextRequest {
+  AudioContextRequest._(this.command, [this.cancelledResume]);
+  final AudioContextCommand command;
+  final AudioContextRequest? cancelledResume;
+}
 
-  AudioContextCommand? takeNext({
+final class AudioContextCommandState {
+  AudioContextRequest? _resume;
+  AudioContextRequest? _suspend;
+  bool get resumePending => _resume != null;
+  bool get suspendPending => _suspend != null;
+
+  AudioContextRequest? takeNext({
     required bool unlocked,
     required bool shouldRun,
     required String contextState,
   }) {
+    if (contextState == 'closed') return null;
     if (unlocked && shouldRun) {
-      if (resumePending || contextState == 'running') return null;
-      resumePending = true;
-      return AudioContextCommand.resume;
+      if (_resume != null || contextState == 'running') return null;
+      return _resume = AudioContextRequest._(AudioContextCommand.resume);
     }
-    if (suspendPending || (contextState == 'suspended' && !resumePending)) {
+    if (_suspend != null || (contextState == 'suspended' && _resume == null)) {
       return null;
     }
-    suspendPending = true;
-    return AudioContextCommand.suspend;
+    return _suspend = AudioContextRequest._(
+      AudioContextCommand.suspend,
+      _resume,
+    );
   }
 
-  void settle(AudioContextCommand command) {
-    switch (command) {
+  /// A successful suspend supersedes the resume it followed, including when
+  /// Chromium leaves that resume's Promise unresolved. This both bounds the
+  /// Promise reconciliation loop and permits the next user gesture to resume.
+  bool settle(AudioContextRequest request, {bool succeeded = true}) {
+    switch (request.command) {
       case AudioContextCommand.resume:
-        resumePending = false;
+        if (!identical(_resume, request)) return false;
+        _resume = null;
       case AudioContextCommand.suspend:
-        suspendPending = false;
+        if (!identical(_suspend, request)) return false;
+        _suspend = null;
+        if (succeeded && identical(_resume, request.cancelledResume)) {
+          _resume = null;
+        }
     }
+    return true;
   }
 
   void clear() {
-    resumePending = false;
-    suspendPending = false;
+    _resume = null;
+    _suspend = null;
   }
 }
 

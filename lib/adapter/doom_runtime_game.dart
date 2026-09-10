@@ -59,7 +59,11 @@ const Set<String> _completionTransientSprites = <String>{
 /// Production 35 Hz simulation and retained Flame 3D scene boundary.
 final class DoomRuntimeGame extends FlameGame3D
     with KeyboardEvents
-    implements DoomRuntimeView, DoomRuntimeLifecycle, DoomRuntimeAudio {
+    implements
+        DoomRuntimeView,
+        DoomRuntimeLifecycle,
+        DoomRuntimeAudio,
+        DoomRuntimeWebControls {
   @override
   LevelExit? get levelExit => gameState.levelExit;
 
@@ -208,6 +212,13 @@ final class DoomRuntimeGame extends FlameGame3D
   ViewLockedWeaponSpriteComponent? _weaponSprite;
   ViewLockedWeaponSpriteComponent? _weaponFlashSprite;
   bool _paused = false;
+  final _movementRevision = ValueNotifier<int>(0);
+  @override
+  ValueListenable<int> get movementRevision => _movementRevision;
+  @override
+  VoidCallback? onPauseRequested;
+  int? _wheelWeaponSlot;
+
   bool _completionReported = false;
   late final DoomReplaySession? _replay = replayInput == null
       ? null
@@ -407,6 +418,14 @@ final class DoomRuntimeGame extends FlameGame3D
     _previousPlayer = _currentPlayer;
     gameState.runTic(command);
     _currentPlayer = gameState.player;
+    if (_currentPlayer.weapon != _previousPlayer.weapon) {
+      _wheelWeaponSlot = null;
+    }
+    if (_currentPlayer.x != _previousPlayer.x ||
+        _currentPlayer.y != _previousPlayer.y ||
+        _currentPlayer.angle != _previousPlayer.angle) {
+      _movementRevision.value++;
+    }
     if (_damageFlashTics > 0) _damageFlashTics--;
     if (_pickupFlashTics > 0) _pickupFlashTics--;
     final int damage =
@@ -936,7 +955,49 @@ final class DoomRuntimeGame extends FlameGame3D
 
   @override
   void selectWeapon(int slot) {
-    if (_acceptsGameplayInput) input.selectWeapon(slot);
+    if (_acceptsGameplayInput) {
+      _wheelWeaponSlot = slot;
+      input.selectWeapon(slot);
+    }
+  }
+
+  @override
+  void setPaused(bool paused) {
+    if (_disposed ||
+        hasReplayInput ||
+        gameState.levelComplete ||
+        _paused == paused) {
+      return;
+    }
+    _paused = paused;
+    clearInput();
+    _setMusicPaused(paused);
+    _publishHud();
+  }
+
+  @override
+  void cycleWeapon(int direction) {
+    if (!_acceptsGameplayInput ||
+        gameState.player.health <= 0 ||
+        direction == 0) {
+      return;
+    }
+    const slots = [
+      Weapon.fist,
+      Weapon.pistol,
+      Weapon.shotgun,
+      Weapon.chaingun,
+      Weapon.rocketLauncher,
+      Weapon.chainsaw,
+    ];
+    final current = _wheelWeaponSlot ?? slots.indexOf(gameState.player.weapon);
+    for (var offset = 1; offset <= slots.length; offset++) {
+      final slot = (current + offset * direction.sign) % slots.length;
+      if (gameState.ownsWeapon(slots[slot])) {
+        selectWeapon(slot);
+        return;
+      }
+    }
   }
 
   @override
@@ -961,6 +1022,7 @@ final class DoomRuntimeGame extends FlameGame3D
   void clearInput() {
     if (_disposed) return;
     _devices.clear();
+    _wheelWeaponSlot = null;
     _soundOutput.stop();
   }
 
@@ -973,6 +1035,7 @@ final class DoomRuntimeGame extends FlameGame3D
     scene.setPaletteIndex(_paletteIndex);
     scene.materials.setFixedColorMap(-1);
     _devices.clear();
+    _wheelWeaponSlot = null;
     _soundOutput.stop();
     gameState = level.createGame();
     tickDriver = FixedTickDriver(
@@ -1010,6 +1073,8 @@ final class DoomRuntimeGame extends FlameGame3D
     _withMusic((backend) => backend.stopMusic());
     _devices.clear();
     _soundOutput.dispose();
+    _movementRevision.dispose();
+    onPauseRequested = null;
     _hud.dispose();
     _automap.dispose();
   }
@@ -1026,6 +1091,12 @@ final class DoomRuntimeGame extends FlameGame3D
     Set<LogicalKeyboardKey> keysPressed,
   ) {
     if (_disposed || hasReplayInput) return KeyEventResult.handled;
+    if (event.logicalKey == LogicalKeyboardKey.escape &&
+        onPauseRequested != null) {
+      if (event is KeyDownEvent) onPauseRequested!();
+      return KeyEventResult.handled;
+    }
+    if (event is KeyDownEvent) _wheelWeaponSlot = null;
     switch (_devices.handle(
       event,
       playerDead: gameState.player.health <= 0,

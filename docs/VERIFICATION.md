@@ -1,3 +1,43 @@
+# Web UX verification — 2026-09-10
+
+Implementation: `codex/web-ux`, based on
+`ba1dd5ba7c7cc0634183059673b89ae9b1982887`.
+The implementation was written separately from the disposable design spike.
+
+- `flutter analyze --no-pub`: no issues. Content-inclusive
+  `flutter test --no-pub --reporter expanded`: **334 tests pass**.
+- `dart test --reporter expanded` in `packages/doom_core`: **190 tests pass**.
+  Original E1M1 replay remains 2,160 tics / `0x9c565b42`; keyboard acceptance
+  remains 2,155 tics / `0x55608565`; fixture playthrough remains
+  821 tics / `0x4c4136d3`.
+- Node tests for the startup shell, AudioWorklet and `.github/scripts`
+  policies: **45 pass**, including seven startup failure/recovery cases.
+  `python3 -m unittest discover -s tool -p 'ci_web_artifact_test.py'`:
+  **five pass**.
+- `bash tool/build_web_release.sh`, using Flutter 3.44.4 / Dart 3.12.2:
+  release Wasm build, worker build and project/packaging audits pass.
+  `main.dart.wasm` is 2,143,656 bytes; the approved shareware IWAD remains
+  4,196,020 bytes. Dependency pins and lockfiles are unchanged.
+
+The final release was served locally in Chrome on macOS at port 8883 with
+the existing COOP/COEP harness server. E1M1 rendered; the first click acquired
+Pointer Lock without firing, subsequent clicks fired, and Esc released the
+cursor and paused. Repeated Esc stayed paused. Resume reacquired the mouse
+and Chrome reported audio playback again. Leaving and returning to the tab
+kept the game paused. Mouse sensitivity changed from 1.00 to 1.75 and survived
+pause/resume; the touch-control switch displayed the joystick and action
+buttons. The stand was left paused with sensitivity 1.00 and touch controls off.
+
+Deterministic tests cover relative horizontal turning without firing,
+sensitivity scaling, stale capture completion after level replacement/disposal,
+coarse-pointer defaults, explicit touch overrides, wheel and trackpad weapon
+selection over the HUD, six-second idle hints, startup retry, and superseded
+audio resume/suspend requests. Native UI automation did not provide reliable
+physical relative-motion or wheel input, so mouse feel and wheel behavior are
+not claimed as a manual browser pass. A physical touch device and other browser
+engines were not exercised. No native-renderer, performance or audio-fidelity
+claim is added by this UX check.
+
 # Web audio verification — 2026-09-09
 
 **Numeric fidelity and runtime checks pass. Listening acceptance is pending.**

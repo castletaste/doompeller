@@ -8,6 +8,8 @@ import '../game/frame_probe.dart';
 import '../adapter/adapter.dart';
 import '../game/audio_backend_factory.dart';
 import '../game/audio_session.dart';
+import '../game/browser_input.dart';
+import '../game/weapon_scroll.dart';
 import '../game/sound_playback.dart';
 import '../game/doom_automap.dart';
 import '../game/doom_hud.dart';
@@ -71,6 +73,10 @@ final class DoomGameView extends StatefulWidget {
     this.onTouchDetected,
     this.onTouchControlsChanged,
     this.audioSession,
+    this.onRetry,
+    this.browserInput,
+    this.mouseSensitivity = 1,
+    this.onSensitivityChanged,
   });
 
   final PreparedDoomLevel level;
@@ -85,6 +91,10 @@ final class DoomGameView extends StatefulWidget {
   final VoidCallback? onTouchDetected;
   final ValueChanged<bool>? onTouchControlsChanged;
   final DoomAudioSession? audioSession;
+  final VoidCallback? onRetry;
+  final DoomBrowserInput? browserInput;
+  final double mouseSensitivity;
+  final ValueChanged<double>? onSensitivityChanged;
 
   @override
   State<DoomGameView> createState() => _DoomGameViewState();
@@ -96,6 +106,12 @@ final class _DoomGameViewState extends State<DoomGameView>
   late final FocusNode _gameFocusNode;
   late Widget _surface;
   bool _showControls = true;
+  bool _hintsManuallyHidden = false;
+  Timer? _hintTimer;
+  DoomBrowserInputLease? _browserLease;
+  final _weaponScroll = DoomWeaponScroll();
+  bool get _webInput => widget.browserInput?.available == true;
+  bool get _captured => widget.browserInput?.captured == true;
   bool _advancing = false;
   DoomFrameProbe? _frameProbe;
   int _touchResetGeneration = 0;
@@ -111,11 +127,21 @@ final class _DoomGameViewState extends State<DoomGameView>
     WidgetsBinding.instance.addObserver(this);
     _frameProbe = DoomFrameProbe.startIfEnabled();
     _createRuntime();
+    widget.browserInput?.addListener(_handleBrowserState);
   }
 
   @override
   void didUpdateWidget(covariant DoomGameView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.browserInput, widget.browserInput)) {
+      oldWidget.browserInput?.removeListener(_handleBrowserState);
+      widget.browserInput?.addListener(_handleBrowserState);
+      _connectBrowser();
+    }
+    if (!oldWidget.touchControlsEnabled && widget.touchControlsEnabled) {
+      _browserLease?.release();
+      _clearDeviceInput(rebuild: false);
+    }
     if (!identical(oldWidget.level, widget.level) ||
         !identical(oldWidget.audioSession, widget.audioSession)) {
       _detachInputListeners();
@@ -144,6 +170,7 @@ final class _DoomGameViewState extends State<DoomGameView>
     _mapOpen = _runtime.automap.value.isOpen;
     _runtime.hud.addListener(_handleHudInputState);
     _runtime.automap.addListener(_handleMapInputState);
+    _connectBrowser();
     _createSurface();
   }
 
@@ -152,6 +179,7 @@ final class _DoomGameViewState extends State<DoomGameView>
       runtime: _runtime,
       focusNode: _gameFocusNode,
       surfaceBuilder: widget.gameSurfaceBuilder,
+      onRetry: widget.onRetry,
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
       onPointerUp: _handlePointerUp,
@@ -162,6 +190,8 @@ final class _DoomGameViewState extends State<DoomGameView>
   @override
   void dispose() {
     _frameProbe?.dispose();
+    _hintTimer?.cancel();
+    widget.browserInput?.removeListener(_handleBrowserState);
     WidgetsBinding.instance.removeObserver(this);
     _detachInputListeners();
     _clearDeviceInput(rebuild: false);
@@ -178,6 +208,7 @@ final class _DoomGameViewState extends State<DoomGameView>
       audio.setAudioFocused(state == AppLifecycleState.resumed);
     }
     if (state != AppLifecycleState.resumed) {
+      if (_webInput) _pause();
       _clearDeviceInput();
     }
   }
@@ -192,6 +223,13 @@ final class _DoomGameViewState extends State<DoomGameView>
       hud.paused || hud.levelComplete || hud.health <= 0;
 
   void _detachInputListeners() {
+    _browserLease?.dispose();
+    _browserLease = null;
+    _hintTimer?.cancel();
+    if (_runtime case final DoomRuntimeWebControls controls) {
+      controls.onPauseRequested = null;
+      controls.movementRevision.removeListener(_handleMovement);
+    }
     _runtime.hud.removeListener(_handleHudInputState);
     _runtime.automap.removeListener(_handleMapInputState);
   }
@@ -201,12 +239,15 @@ final class _DoomGameViewState extends State<DoomGameView>
     if (blocked == _hudInputBlocked) return;
     _hudInputBlocked = blocked;
     if (blocked) {
+      _hintTimer?.cancel();
+      _browserLease?.release();
       _clearDeviceInput(
         rebuild: false,
         preserveAudio: !_runtime.hud.value.paused,
       );
     } else {
       _gameFocusNode.requestFocus();
+      _armHints();
     }
     if (mounted) setState(() {});
   }
@@ -219,6 +260,7 @@ final class _DoomGameViewState extends State<DoomGameView>
 
   void _clearDeviceInput({bool rebuild = true, bool preserveAudio = false}) {
     _mousePointer = null;
+    _weaponScroll.clear();
     if (preserveAudio && _runtime is DoomRuntimeAudio) {
       (_runtime as DoomRuntimeAudio).clearInputPreservingAudio();
     } else {
@@ -236,16 +278,22 @@ final class _DoomGameViewState extends State<DoomGameView>
   void _handlePointerDown(PointerDownEvent event) {
     _gameFocusNode.requestFocus();
     if (event.kind == PointerDeviceKind.touch) {
+      if (_captured) _pause();
       widget.onTouchDetected?.call();
     } else if (event.kind == PointerDeviceKind.mouse &&
         (event.buttons & kPrimaryMouseButton) != 0 &&
         _mousePointer == null) {
+      if (_webInput) {
+        if (!_hudInputBlocked) _browserLease?.capture();
+        return;
+      }
       _mousePointer = event.pointer;
       _runtime.setPointerAttack(true);
     }
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (_webInput) return;
     if (event.kind == PointerDeviceKind.mouse &&
         event.pointer == _mousePointer &&
         (event.buttons & kPrimaryMouseButton) != 0) {
@@ -263,6 +311,85 @@ final class _DoomGameViewState extends State<DoomGameView>
     if (event.pointer != _mousePointer) return;
     _mousePointer = null;
     _runtime.setPointerAttack(false, cancelled: true);
+  }
+
+  void _connectBrowser() {
+    _browserLease?.dispose();
+    _browserLease = null;
+    if (_runtime case final DoomRuntimeWebControls controls) {
+      controls.movementRevision.removeListener(_handleMovement);
+      controls.onPauseRequested = _webInput ? _pause : null;
+      if (_webInput) controls.movementRevision.addListener(_handleMovement);
+    }
+    if (!_webInput) return;
+    _browserLease = widget.browserInput!.acquire(
+      onTurn: (dx) {
+        if (!_hudInputBlocked) {
+          _runtime.addPointerYaw(dx * widget.mouseSensitivity);
+        }
+      },
+      onAttack: (down) {
+        if (!down || !_hudInputBlocked) _runtime.setPointerAttack(down);
+      },
+      onPause: _pause,
+    );
+  }
+
+  void _handleBrowserState() {
+    if (mounted) setState(() {});
+  }
+
+  void _pause() {
+    _browserLease?.release();
+    final hud = _runtime.hud.value;
+    if (hud.health <= 0 || hud.levelComplete) return;
+    if (_webInput && _runtime is DoomRuntimeWebControls) {
+      (_runtime as DoomRuntimeWebControls).setPaused(true);
+    } else if (!hud.paused) {
+      _runtime.togglePause();
+    }
+  }
+
+  void _resume() {
+    if (_webInput && _runtime is DoomRuntimeWebControls) {
+      (_runtime as DoomRuntimeWebControls).setPaused(false);
+      if (!widget.touchControlsEnabled) _browserLease?.capture();
+    } else {
+      _runtime.togglePause();
+    }
+    _gameFocusNode.requestFocus();
+  }
+
+  void _handleMovement() {
+    if (_hintsManuallyHidden || _hudInputBlocked) return;
+    if (_showControls && mounted) setState(() => _showControls = false);
+    _armHints();
+  }
+
+  void _armHints() {
+    _hintTimer?.cancel();
+    if (!_webInput || _hintsManuallyHidden || _showControls) return;
+    _hintTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted && !_hudInputBlocked) setState(() => _showControls = true);
+    });
+  }
+
+  void _handleScroll(PointerSignalEvent event) {
+    if (!_webInput || _hudInputBlocked || event is! PointerScrollEvent) return;
+    if (event.scrollDelta.dy.abs() <= event.scrollDelta.dx.abs()) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (event) {
+      _cycleScroll((event as PointerScrollEvent).scrollDelta.dy);
+    });
+  }
+
+  void _cycleScroll(double dy) {
+    if (!_webInput || _hudInputBlocked || _advancing) return;
+    if (_runtime case final DoomRuntimeWebControls controls) {
+      final steps = _weaponScroll.add(dy);
+      for (var i = 0; i < steps.abs(); i++) {
+        controls.cycleWeapon(steps.sign);
+      }
+    }
   }
 
   void _restartLevel() {
@@ -292,83 +419,125 @@ final class _DoomGameViewState extends State<DoomGameView>
       final narrow = constraints.maxWidth < 1100;
       return ColoredBox(
         color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _surface,
-            ValueListenableBuilder<DoomAutomapSnapshot>(
-              valueListenable: _runtime.automap,
-              builder: (context, map, _) => map.isOpen
-                  ? DoomAutomapOverlay(map: widget.level.map, snapshot: map)
-                  : const SizedBox.shrink(),
-            ),
-            SafeArea(
-              child: Column(
-                children: [
-                  Expanded(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        if (widget.touchControlsEnabled)
-                          Positioned.fill(
-                            top: 44,
-                            child: _buildTouchControls(),
-                          ),
-                        Positioned(
-                          top: 10,
-                          left: 10,
-                          child: DoomContentBadge(
-                            synthetic: widget.synthetic,
-                            mapName: widget.level.map.name,
-                            setupMessage: widget.setupMessage,
-                          ),
-                        ),
-                        if (!widget.touchControlsEnabled)
-                          Positioned(
-                            top: narrow && _showControls ? 44 : 10,
-                            right: 10,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (_showControls)
-                                  DoomControlsHint(
-                                    narrow: narrow,
-                                    onHide: () =>
-                                        setState(() => _showControls = false),
-                                  )
-                                else
-                                  IconButton(
-                                    key: const Key('show-controls'),
-                                    tooltip: 'Show controls',
-                                    onPressed: () =>
-                                        setState(() => _showControls = true),
-                                    icon: const Icon(
-                                      Icons.keyboard_alt_outlined,
-                                      size: 18,
-                                    ),
-                                  ),
-                                DoomPauseButton(
-                                  onPressed: _runtime.togglePause,
-                                ),
-                              ],
+        child: Listener(
+          key: const Key('web-input-root'),
+          onPointerSignal: _handleScroll,
+          onPointerPanZoomStart: (_) => _weaponScroll.clear(),
+          onPointerPanZoomUpdate: (event) {
+            if (event.panDelta.dy.abs() > event.panDelta.dx.abs()) {
+              _cycleScroll(-event.panDelta.dy);
+            }
+          },
+          onPointerPanZoomEnd: (_) => _weaponScroll.clear(),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _surface,
+              ValueListenableBuilder<DoomAutomapSnapshot>(
+                valueListenable: _runtime.automap,
+                builder: (context, map, _) => map.isOpen
+                    ? DoomAutomapOverlay(map: widget.level.map, snapshot: map)
+                    : const SizedBox.shrink(),
+              ),
+              IgnorePointer(
+                ignoring: _captured,
+                child: SafeArea(
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (widget.touchControlsEnabled)
+                              Positioned.fill(
+                                top: 44,
+                                child: _buildTouchControls(),
+                              ),
+                            Positioned(
+                              top: 10,
+                              left: 10,
+                              child: DoomContentBadge(
+                                synthetic: widget.synthetic,
+                                mapName: widget.level.map.name,
+                                setupMessage: widget.setupMessage,
+                              ),
                             ),
-                          ),
-                      ],
+                            if (!widget.touchControlsEnabled)
+                              Positioned(
+                                top: narrow && _showControls ? 44 : 10,
+                                right: 10,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_showControls)
+                                      DoomControlsHint(
+                                        narrow: narrow,
+                                        browserControls: _webInput,
+                                        onHide: () => setState(() {
+                                          _hintsManuallyHidden = true;
+                                          _showControls = false;
+                                          _hintTimer?.cancel();
+                                        }),
+                                      )
+                                    else
+                                      IconButton(
+                                        key: const Key('show-controls'),
+                                        tooltip: 'Show controls',
+                                        onPressed: () => setState(() {
+                                          _hintsManuallyHidden = false;
+                                          _showControls = true;
+                                        }),
+                                        icon: const Icon(
+                                          Icons.keyboard_alt_outlined,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    DoomPauseButton(onPressed: _pause),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      ValueListenableBuilder<DoomHudSnapshot>(
+                        valueListenable: _runtime.hud,
+                        builder: (context, hud, _) => DoomStatusBar(
+                          hud: hud,
+                          synthetic: widget.synthetic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_webInput &&
+                  !_captured &&
+                  !_hudInputBlocked &&
+                  !widget.touchControlsEnabled)
+                Positioned(
+                  left: 10,
+                  bottom: 84,
+                  right: 10,
+                  child: IgnorePointer(
+                    child: Text(
+                      widget.browserInput?.errorMessage ??
+                          'Click the game to capture the mouse · Esc pauses',
+                      key: const Key('mouse-capture-hint'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        backgroundColor: Colors.black87,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
-                  ValueListenableBuilder<DoomHudSnapshot>(
-                    valueListenable: _runtime.hud,
-                    builder: (context, hud, _) =>
-                        DoomStatusBar(hud: hud, synthetic: widget.synthetic),
-                  ),
-                ],
+                ),
+              ValueListenableBuilder<DoomHudSnapshot>(
+                valueListenable: _runtime.hud,
+                builder: (context, hud, _) => _buildOverlay(hud),
               ),
-            ),
-            ValueListenableBuilder<DoomHudSnapshot>(
-              valueListenable: _runtime.hud,
-              builder: (context, hud, _) => _buildOverlay(hud),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     },
@@ -396,7 +565,7 @@ final class _DoomGameViewState extends State<DoomGameView>
       onSelectWeapon: runtime.selectWeapon,
       onToggleMap: runtime.toggleAutomap,
       onZoomMap: (inwards) => runtime.zoomAutomap(inwards: inwards),
-      onPause: runtime.togglePause,
+      onPause: _pause,
     );
   }
 
@@ -433,7 +602,10 @@ final class _DoomGameViewState extends State<DoomGameView>
         key: const Key('pause-overlay'),
         touchControlsEnabled: widget.touchControlsEnabled,
         onTouchControlsChanged: _setTouchControls,
-        onResume: _runtime.togglePause,
+        onResume: _resume,
+        browserControls: _webInput,
+        mouseSensitivity: widget.mouseSensitivity,
+        onSensitivityChanged: widget.onSensitivityChanged,
         onLoadIwad: widget.onLoadIwad,
         errorMessage: widget.selectionErrorMessage,
         audioSession: widget.audioSession,
@@ -451,6 +623,7 @@ final class _DoomInputSurface extends StatelessWidget {
     required this.runtime,
     required this.focusNode,
     this.surfaceBuilder,
+    this.onRetry,
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
@@ -459,6 +632,7 @@ final class _DoomInputSurface extends StatelessWidget {
   final DoomRuntimeView runtime;
   final FocusNode focusNode;
   final DoomGameSurfaceBuilder? surfaceBuilder;
+  final VoidCallback? onRetry;
   final void Function(PointerDownEvent) onPointerDown;
   final void Function(PointerMoveEvent) onPointerMove;
   final void Function(PointerUpEvent) onPointerUp;
@@ -496,7 +670,9 @@ final class _DoomInputSurface extends StatelessWidget {
         child: Center(child: CircularProgressIndicator()),
       ),
       errorBuilder: (_, error) => DoomRuntimeConfigurationError(
-        message: 'Could not start the renderer: $error',
+        message:
+            'Could not load the game graphics. Check your connection and try again.',
+        onRetry: onRetry,
       ),
     );
   }

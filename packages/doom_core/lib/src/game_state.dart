@@ -231,6 +231,7 @@ class GameState {
   /// existing gameplay state and does not add a new word to [hashState].
   int get playerSectorIndex => _playerMobj.sectorIndex;
   bool get levelComplete => _levelComplete;
+  bool ownsWeapon(Weapon weapon) => _ownedWeapons.contains(weapon);
   bool get usedSecretExit => _secretExit;
   LevelExit? get levelExit => !_levelComplete || _health <= 0
       ? null

@@ -75,12 +75,40 @@ a directly embedded game view handles level replacement itself.
 HUD, overlays and automap listen within their own subtrees. The game view
 selects only input-blocked and map-open transitions, so movement and HUD values
 do not rebuild the game surface or touch panel. Equal HUD snapshots suppress
-redundant notification. The four StatefulWidgets have actual ownership duties:
-the app controller, runtime/focus, intermission animation and touch pointer
+redundant notification. Stateful widgets have explicit ownership duties:
+graphics startup, the app controller, runtime/focus, intermission animation and touch pointer
 captures. The app owns the touch-control preference; the game view resets input
 on lifecycle changes and the touch panel owns individual pointer captures. Loading, failure and ready
 are sealed states, with a non-null prepared level in the ready state. Navigation
 continues to use these states and overlays; no router or DI package is needed.
+
+## Browser input and startup
+
+`DoomApp` owns a `DoomBrowserInput` session alongside its audio session. The
+browser driver confines Pointer Lock and coarse-pointer detection to one web
+bridge. Each level acquires a revocable input lease. An outstanding request
+blocks new requests until the browser reports its outcome; capture arriving
+after pause, level replacement or disposal is released. Promise completion
+alone never admits input. The session retains cleanup listeners for a pending
+request after disposal and removes them when that request can no longer own
+capture. Native builds use a no-op driver and keep their existing mouse controls.
+
+Captured relative movement and primary fire travel independently through the
+lease. Capture loss and browser Escape use explicit idempotent pause, while
+native keyboard pause retains its toggle behavior. Blur/hidden pauses; returning
+to the tab does not resume. Capture failure leaves keyboard/touch usable and
+shows a retry hint. The host's root listener receives wheel/pan-zoom above HUD
+siblings, accumulates vertical distance and asks the runtime to cycle owned
+weapons. This does not alter tic sampling or simulation state hashes.
+
+The app keeps coarse-pointer/touch preference and mouse sensitivity for the
+session. Explicit touch override wins over later touch detection. A runtime
+movement revision only advances when player position or angle changes; the
+host hides hints once and uses a resettable six-second idle timer. Pause and
+teardown cancel that timer. HTML bootstrap failures retain the initial accessible
+loading shell with retry; Flutter graphics initialization has its own recoverable
+screen before creating the game app. No dependency, persistent setting, or
+backend API is added.
 
 ## Audio and failures
 
@@ -100,7 +128,11 @@ panel and leaves PCM effects usable.
 The runtime selects `D_E1Mx`, `D_INTER`, or `D_VICTOR` from the current content.
 Restart retires the old song and resets the score. Pause and browser blur
 suspend the audio clock and preserve the bounded music queue; effects are
-dropped. AudioContext resume never blocks the effects pump. Death and exit
+dropped. AudioContext resume never blocks the effects pump. Resume/suspend commands have
+identity tokens: completing a suspend retires only the older resume it supersedes,
+including a Promise Chromium leaves unresolved. Stale completion/rejection cannot
+retire a newer operation or revoke its unlock. Actual context state changes
+reconcile to current intent; already-suspended promises cannot spin in a retry loop. Death and exit
 input locks clear held controls while allowing the final cue to finish.
 
 `DoomSoundOutput` serializes mixer work without adding a future for every empty

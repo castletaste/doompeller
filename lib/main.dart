@@ -1,10 +1,11 @@
 import 'package:flutter/widgets.dart';
-
 import 'adapter/adapter.dart';
 import 'ui/doom_app.dart';
+import 'ui/doom_startup.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDoomRenderer();
-  runApp(const DoomApp());
+  runApp(
+    DoomStartup(initialize: initializeDoomRenderer, child: const DoomApp()),
+  );
 }

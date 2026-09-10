@@ -100,50 +100,129 @@ void main() {
     expect(pending.take(), 'song-12');
   });
 
-  test('pause queues suspend behind a deferred resume exactly once', () {
+  test('pause queues one suspend behind resume in either completion order', () {
+    for (final suspendFirst in [false, true]) {
+      final state = AudioContextCommandState();
+      final resume = state.takeNext(
+        unlocked: true,
+        shouldRun: true,
+        contextState: 'suspended',
+      )!;
+      expect(resume.command, AudioContextCommand.resume);
+      final suspend = state.takeNext(
+        unlocked: true,
+        shouldRun: false,
+        contextState: 'suspended',
+      )!;
+      expect(suspend.command, AudioContextCommand.suspend);
+      expect(
+        state.takeNext(
+          unlocked: true,
+          shouldRun: false,
+          contextState: 'suspended',
+        ),
+        isNull,
+      );
+      if (suspendFirst) {
+        state.settle(suspend);
+        // Already-suspended calls must not starve the pending resume's task.
+        for (var i = 0; i < 100; i++) {
+          expect(
+            state.takeNext(
+              unlocked: true,
+              shouldRun: false,
+              contextState: 'suspended',
+            ),
+            isNull,
+          );
+        }
+        expect(state.settle(resume), isFalse);
+      } else {
+        state.settle(resume);
+        expect(
+          state.takeNext(
+            unlocked: true,
+            shouldRun: false,
+            contextState: 'running',
+          ),
+          isNull,
+        );
+        state.settle(suspend);
+      }
+      expect(state.resumePending, isFalse);
+      expect(state.suspendPending, isFalse);
+    }
+  });
+
+  test('superseded resume does not block or settle the next gesture', () {
     final state = AudioContextCommandState();
+    final old = state.takeNext(
+      unlocked: true,
+      shouldRun: true,
+      contextState: 'suspended',
+    )!;
+    final pause = state.takeNext(
+      unlocked: true,
+      shouldRun: false,
+      contextState: 'suspended',
+    )!;
+    state.settle(pause);
+    final next = state.takeNext(
+      unlocked: true,
+      shouldRun: true,
+      contextState: 'suspended',
+    )!;
+    expect(state.settle(old), isFalse);
+    expect(state.settle(old, succeeded: false), isFalse);
+    expect(state.resumePending, isTrue);
+    expect(state.settle(next), isTrue);
+    expect(state.resumePending, isFalse);
+  });
 
-    expect(
-      state.takeNext(
-        unlocked: true,
-        shouldRun: true,
-        contextState: 'suspended',
-      ),
-      AudioContextCommand.resume,
-    );
-    expect(
-      state.takeNext(
-        unlocked: true,
-        shouldRun: true,
-        contextState: 'suspended',
-      ),
-      isNull,
-    );
-
-    expect(
+  test('late running notification reconciles to the current paused intent', () {
+    final state = AudioContextCommandState();
+    state.takeNext(unlocked: true, shouldRun: true, contextState: 'suspended');
+    state.settle(
       state.takeNext(
         unlocked: true,
         shouldRun: false,
         contextState: 'suspended',
-      ),
+      )!,
+    );
+    expect(
+      state
+          .takeNext(unlocked: true, shouldRun: false, contextState: 'running')
+          ?.command,
       AudioContextCommand.suspend,
     );
-    expect(
-      state.takeNext(
-        unlocked: true,
-        shouldRun: false,
-        contextState: 'suspended',
-      ),
-      isNull,
-    );
+  });
 
-    state.settle(AudioContextCommand.resume);
+  test('failed suspend and disposal cannot retire an unrelated request', () {
+    final state = AudioContextCommandState();
+    final resume = state.takeNext(
+      unlocked: true,
+      shouldRun: true,
+      contextState: 'suspended',
+    )!;
+    final suspend = state.takeNext(
+      unlocked: true,
+      shouldRun: false,
+      contextState: 'suspended',
+    )!;
+    state.settle(suspend, succeeded: false);
+    expect(state.resumePending, isTrue);
+    state.clear();
+    final next = state.takeNext(
+      unlocked: true,
+      shouldRun: true,
+      contextState: 'suspended',
+    )!;
+    expect(state.settle(resume), isFalse);
+    expect(state.resumePending, isTrue);
+    state.settle(next);
     expect(
-      state.takeNext(unlocked: true, shouldRun: false, contextState: 'running'),
+      state.takeNext(unlocked: true, shouldRun: true, contextState: 'closed'),
       isNull,
     );
-    state.settle(AudioContextCommand.suspend);
-    expect(state.resumePending, isFalse);
-    expect(state.suspendPending, isFalse);
   });
 }

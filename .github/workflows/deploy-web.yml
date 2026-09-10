@@ -98,8 +98,10 @@ jobs:
       - name: Test trusted preview policies
         run: node --test .github/scripts/*.test.cjs
 
-      - name: Test browser audio output protocol
-        run: node --test test/web/doom_music_worklet_test.mjs
+      - name: Test browser audio output and startup recovery
+        run: |
+          node --test test/web/doom_music_worklet_test.mjs
+          node --test tool/web_startup_test.cjs
 
       - name: Resolve locked pure-Dart package dependencies
         run: |

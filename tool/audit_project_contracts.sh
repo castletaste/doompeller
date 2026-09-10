@@ -41,11 +41,11 @@ then
   fail "FFI, WebView, or native dynamic loading found"
 fi
 
-# Browser APIs are confined to content input and the audio session/worker.
+# Browser APIs are confined to content input, pointer capture, and the audio session/worker.
 # Music synthesis itself stays pure Dart in doom_music.
 js_hits=$(rg -l -g '*.dart' "^(import|export) ['\"]dart:js(_interop(_unsafe)?)?['\"]" lib packages tool 2>/dev/null || true)
 outside_web_bridges=$(printf '%s\n' "$js_hits" |
-  rg -v "^lib/(game/(browser_wad_picker_web|content_source_platform_web|web_audio_session)|web/doom_music_worker)\.dart$" || true)
+  rg -v "^lib/(game/(browser_wad_picker_web|content_source_platform_web|browser_pointer_web|web_audio_session)|web/doom_music_worker)\.dart$" || true)
 if [ -n "$outside_web_bridges" ]; then
   printf '%s\n' "$outside_web_bridges" >&2
   fail "JS interop exists outside the approved browser boundaries"

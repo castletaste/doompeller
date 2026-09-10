@@ -45,6 +45,11 @@ requires an explicit button press.
 
 ## Run in a WebGPU browser
 
+The HTML startup screen shows loading and offers retry on errors or slow loading.
+Graphics and IWAD loading failures also have explicit retry actions. Browser
+focus loss pauses the game; returning to the tab leaves it paused. Controls hints
+hide on player movement and return after six idle seconds.
+
 The browser target is Flutter Wasm plus flame_3d's WebGPU backend. The release
 build packages `.local/doom/DOOM1.WAD` at
 `build/web/assets/.local/doom/DOOM1.WAD`, and startup loads E1M1 automatically.
@@ -103,13 +108,17 @@ final verdicts; `PROBLEMS` exits non-zero.
 - `Enter`, numpad `Enter`, `Ctrl` or primary click: attack
 - `Space` or `E`: use
 - `1`–`6`: fist, pistol, shotgun, chaingun, rocket launcher, chainsaw
-- `Esc`: pause/resume
-- primary-button drag: mouse yaw
+- Browser: click the game to capture the mouse, move to turn, primary click to fire
+- Browser: `Esc` releases the cursor and pauses; click `RESUME` to continue
+- Browser: wheel or trackpad vertical scroll cycles owned weapons, including over the HUD
+- Native: `Esc` pauses/resumes; primary-button drag turns
+- The browser pause menu includes session-only mouse sensitivity
 
 All simulation input is sampled into `TicCmd`. Rendering interpolates the
 camera between completed 35 Hz tics and never advances game state.
 
-Touching the game enables smartphone controls; the pause menu also has a
+Browsers with a coarse primary pointer start with smartphone controls. Touching
+a hybrid device also enables them; an explicit choice in the pause menu wins. The menu has a
 `TOUCH CONTROLS` toggle. Drag the left stick to move/strafe, swipe the right
 side to turn, and hold `FIRE` to shoot (dragging it also turns). Hold `RUN`
 for the existing run speed. `USE`, weapon selection, map/zoom, and pause have

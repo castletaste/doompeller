@@ -4,6 +4,7 @@ import '../game/doom_app_controller.dart';
 import '../game/level_preparer.dart';
 import '../game/audio_session.dart';
 import '../game/audio_session_factory.dart';
+import '../game/browser_input.dart';
 import 'doom_game_overlays.dart';
 import 'doom_game_view.dart';
 export 'doom_status_bar.dart' show DoomStatusBar;
@@ -24,6 +25,7 @@ final class DoomApp extends StatefulWidget {
     this.gameSurfaceBuilder,
     this.wadPicker,
     this.audioSession,
+    this.browserInput,
   });
 
   final DoomAppController? controller;
@@ -32,6 +34,7 @@ final class DoomApp extends StatefulWidget {
   final DoomGameSurfaceBuilder? gameSurfaceBuilder;
   final DoomWadPicker? wadPicker;
   final DoomAudioSession? audioSession;
+  final DoomBrowserInput? browserInput;
 
   @override
   State<DoomApp> createState() => _DoomAppState();
@@ -44,6 +47,9 @@ final class _DoomAppState extends State<DoomApp> {
   late bool _ownsController;
   late DoomAudioSession _audioSession;
   late bool _ownsAudioSession;
+  late DoomBrowserInput _browserInput;
+  late bool _ownsBrowserInput;
+  double _mouseSensitivity = 1;
   bool _touchDetected = false;
   bool? _touchControlsOverride;
 
@@ -54,6 +60,11 @@ final class _DoomAppState extends State<DoomApp> {
   @override
   void didUpdateWidget(covariant DoomApp oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.browserInput, widget.browserInput)) {
+      if (_ownsBrowserInput) _browserInput.dispose();
+      _browserInput = widget.browserInput ?? DoomBrowserInput();
+      _ownsBrowserInput = widget.browserInput == null;
+    }
     if (!identical(oldWidget.audioSession, widget.audioSession)) {
       if (_ownsAudioSession) _audioSession.dispose();
       _audioSession = widget.audioSession ?? createDoomAudioSession();
@@ -81,6 +92,8 @@ final class _DoomAppState extends State<DoomApp> {
   @override
   void initState() {
     super.initState();
+    _browserInput = widget.browserInput ?? DoomBrowserInput();
+    _ownsBrowserInput = widget.browserInput == null;
     _audioSession = widget.audioSession ?? createDoomAudioSession();
     _ownsAudioSession = widget.audioSession == null;
     _ownsController = widget.controller == null;
@@ -91,6 +104,7 @@ final class _DoomAppState extends State<DoomApp> {
   @override
   void dispose() {
     if (_ownsController) _controller.dispose();
+    if (_ownsBrowserInput) _browserInput.dispose();
     if (_ownsAudioSession) _audioSession.dispose();
     super.dispose();
   }
@@ -113,9 +127,15 @@ final class _DoomAppState extends State<DoomApp> {
       builder: (context, _) => _DoomAppBody(
         controller: _controller,
         audioSession: _audioSession,
+        browserInput: _browserInput,
+        mouseSensitivity: _mouseSensitivity,
+        onSensitivityChanged: (value) =>
+            setState(() => _mouseSensitivity = value),
         runtimeFactory: widget.runtimeFactory,
         gameSurfaceBuilder: widget.gameSurfaceBuilder,
-        touchControlsEnabled: _touchControlsOverride ?? _touchDetected,
+        touchControlsEnabled:
+            _touchControlsOverride ??
+            (_touchDetected || _browserInput.touchPrimary),
         onTouchDetected: _detectTouch,
         onTouchControlsChanged: (enabled) =>
             setState(() => _touchControlsOverride = enabled),
@@ -131,6 +151,9 @@ final class _DoomAppBody extends StatelessWidget {
   const _DoomAppBody({
     required this.controller,
     required this.audioSession,
+    required this.browserInput,
+    required this.mouseSensitivity,
+    required this.onSensitivityChanged,
     required this.touchControlsEnabled,
     required this.onTouchDetected,
     required this.onTouchControlsChanged,
@@ -141,6 +164,9 @@ final class _DoomAppBody extends StatelessWidget {
 
   final DoomAppController controller;
   final DoomAudioSession audioSession;
+  final DoomBrowserInput browserInput;
+  final double mouseSensitivity;
+  final ValueChanged<double> onSensitivityChanged;
   final bool touchControlsEnabled;
   final VoidCallback onTouchDetected;
   final ValueChanged<bool> onTouchControlsChanged;
@@ -158,6 +184,7 @@ final class _DoomAppBody extends StatelessWidget {
         DoomAppFailure(:final errorMessage) => DoomFailureView(
           message: errorMessage,
           onFallback: controller.useFixtureFallback,
+          onRetry: controller.start,
         ),
         DoomAppReady()
             when runtimeFactory != null && gameSurfaceBuilder == null =>
@@ -169,6 +196,10 @@ final class _DoomAppBody extends StatelessWidget {
           key: ValueKey(level),
           level: level,
           audioSession: audioSession,
+          onRetry: controller.start,
+          browserInput: browserInput,
+          mouseSensitivity: mouseSensitivity,
+          onSensitivityChanged: onSensitivityChanged,
           synthetic: state.isFixture,
           setupMessage: state.setupMessage,
           selectionErrorMessage: state.errorMessage,

@@ -154,6 +154,7 @@ final class WebAudioSession extends DoomAudioSession {
       musicGain.connect(context.destination);
       effectsGain.connect(context.destination);
       _context = context;
+      context.onstatechange = ((web.Event _) => _applyContextState()).toJS;
       _musicGain = musicGain;
       _effectsGain = effectsGain;
       _installDocumentListeners();
@@ -594,24 +595,18 @@ final class WebAudioSession extends DoomAudioSession {
   void _applyContextState() {
     final context = _context;
     if (_disposed || context == null) return;
-    final AudioContextCommand? command = _contextCommands.takeNext(
+    final request = _contextCommands.takeNext(
       unlocked: _unlocked,
       shouldRun: _shouldRun,
       contextState: context.state,
     );
-    switch (command) {
+    switch (request?.command) {
       case AudioContextCommand.resume:
-        _observeContextTransition(
-          context.resume(),
-          command: AudioContextCommand.resume,
-        );
+        _observeContextTransition(context.resume(), request: request!);
       case AudioContextCommand.suspend:
         // This can be queued behind a pending resume while the reported state
         // is still suspended, so a later pause or blur always wins.
-        _observeContextTransition(
-          context.suspend(),
-          command: AudioContextCommand.suspend,
-        );
+        _observeContextTransition(context.suspend(), request: request!);
       case null:
         return;
     }
@@ -623,17 +618,17 @@ final class WebAudioSession extends DoomAudioSession {
 
   void _observeContextTransition(
     JSPromise<JSAny?> promise, {
-    required AudioContextCommand command,
+    required AudioContextRequest request,
   }) {
     unawaited(
       promise.toDart.then<void>(
         (_) {
-          _contextCommands.settle(command);
+          _contextCommands.settle(request);
           _applyContextState();
         },
         onError: (_) {
-          _contextCommands.settle(command);
-          if (command == AudioContextCommand.resume) {
+          if (!_contextCommands.settle(request, succeeded: false)) return;
+          if (request.command == AudioContextCommand.resume) {
             // A rejected autoplay attempt waits for another trusted gesture.
             _unlocked = false;
           }
@@ -743,6 +738,7 @@ final class WebAudioSession extends DoomAudioSession {
     _dropEffects(complete: true);
     _musicAdmission.clear();
     _contextCommands.clear();
+    _context?.onstatechange = null;
     _musicNode?.port.postMessage(
       <String, Object?>{'type': 'retire', 'epoch': _musicEpoch}.jsify(),
     );

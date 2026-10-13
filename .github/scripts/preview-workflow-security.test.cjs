@@ -121,7 +121,7 @@ test('clean checkout generates declared shader assets before app validation', ()
 
 test('CI installs ripgrep and audits contracts before the expensive build', () => {
   const installation = productionWorkflow.indexOf('sudo apt-get install --yes --no-install-recommends ripgrep');
-  const preflight = productionWorkflow.indexOf('sh tool/audit_project_contracts.sh');
+  const preflight = productionWorkflow.indexOf('sh tool/ci_contracts.sh');
   const build = productionWorkflow.indexOf('bash tool/build_web_release.sh');
   assert.ok(installation >= 0);
   assert.ok(preflight > installation);

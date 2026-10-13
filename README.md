@@ -12,7 +12,7 @@ CI and PR previews: [publishing guide](docs/PUBLISHING.md).
 
 ## Run original E1M1
 
-Use Flutter 3.44.4 and fetch the pinned shareware E1 content before resolving
+Use Flutter 3.47.7 and fetch the pinned shareware E1 content before resolving
 the app's assets, or provide the same verified `DOOM1.WAD` yourself:
 
 ```sh
@@ -64,7 +64,7 @@ Pause and browser blur freeze music; restarting a level restarts its track.
 If the browser cannot provide the music transport, the pause menu reports the
 failure while effects remain available.
 
-Build the reproducible release with Flutter 3.44.4, naga-cli 30.0.1 and
+Build the reproducible release with Flutter 3.47.7, naga-cli 30.0.1 and
 ripgrep (`rg`) on PATH:
 
 ```sh
@@ -127,7 +127,7 @@ held input when paused, cancelled, or the app loses focus.
 
 ## Verify
 
-Use the pinned Flutter 3.44.4 toolchain:
+Use the pinned Flutter 3.47.7 toolchain:
 
 ```sh
 flutter analyze

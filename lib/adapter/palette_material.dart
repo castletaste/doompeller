@@ -9,7 +9,7 @@ import 'palette_textures.dart';
 /// One material covers an entire atlas page. Per-texture data (the atlas
 /// sub-rectangle and the sampling mode) travels in the vertex record instead of
 /// in uniforms, so wall, flat and sprite geometry sharing a page collapse into
-/// a single draw. flame_3d 0.3.0 has no batching and insertion-sorts visible
+/// a single draw. flame_3d 0.3.2 has no batching and insertion-sorts visible
 /// draws back-to-front, so keeping the material count near the page count is
 /// the main lever on frame cost.
 ///
@@ -227,6 +227,6 @@ final class PaletteMaterialCache {
   }
 
   /// Drops every cached material. The underlying GPU pipelines are not
-  /// reclaimed, because flame_3d 0.3.0 exposes no disposal API.
+  /// reclaimed, because flame_3d 0.3.2 exposes no disposal API.
   void clear() => _materials.clear();
 }

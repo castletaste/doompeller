@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Set up Flutter 3.44.4
+      - name: Set up Flutter 3.47.7
         shell: bash
         run: |
           set -euo pipefail
@@ -40,14 +40,14 @@ jobs:
           curl --fail --location --silent --show-error --retry 3 \
             --connect-timeout 30 --proto '=https' --proto-redir '=https' \
             --output "$flutter_setup_dir/flutter.tar.xz" \
-            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.44.4-stable.tar.xz
+            https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.7-stable.tar.xz
           printf '%s  %s\n' \
-            c853cda0312a162854c481fe6a1bc286d84fbb74bfab7037c39750061dc9b466 \
+            af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230 \
             "$flutter_setup_dir/flutter.tar.xz" | sha256sum --check --strict
           tar --extract --xz --no-same-owner \
             --file "$flutter_setup_dir/flutter.tar.xz" --directory "$flutter_setup_dir"
           test "$(git -C "$flutter_setup_dir/flutter" rev-parse HEAD)" = \
-            ad70ec4617166f1c38e5d2bfd388af71fda14f06
+            abaf9c523780a608bd46686fd5e53740a07077f8
           printf '%s\n' "$flutter_setup_dir/flutter/bin" >> "$GITHUB_PATH"
           printf 'FLUTTER_ROOT=%s\n' "$flutter_setup_dir/flutter" >> "$GITHUB_ENV"
 

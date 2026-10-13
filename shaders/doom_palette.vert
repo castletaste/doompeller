@@ -2,7 +2,7 @@
 
 // Doompeller indexed-palette vertex stage.
 //
-// The attribute list must match flame_3d 0.3.0's pinned 20-float interleaved
+// The attribute list must match flame_3d 0.3.2's pinned 20-float interleaved
 // vertex record exactly, in this order, or the vertex stride changes and every
 // buffer misreads. See lib/adapter/vertex_abi.dart.
 //

@@ -216,7 +216,7 @@ void main() {
       expect(
         backend.textures.every((t) => t.format.name == 'rgba8888'),
         isTrue,
-        reason: 'flame_3d 0.3.0 has no R8 format',
+        reason: 'flame_3d 0.3.2 has no R8 format',
       );
       expect((backend.textures[0].width, backend.textures[0].height), (8, 4));
       expect(

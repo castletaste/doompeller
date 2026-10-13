@@ -42,7 +42,7 @@ import 'wad_types.dart';
 /// skins anything, so instead each vertex carries its own atlas sub-rectangle
 /// and sampling mode. That is what lets a single surface draw an entire atlas
 /// page: wall, flat and sprite geometry sharing a page merge into one draw
-/// rather than one draw per texture, which matters because flame_3d 0.3.0 has
+/// rather than one draw per texture, which matters because flame_3d 0.3.2 has
 /// no batching and sorts every visible draw.
 abstract final class DoomVertexAbi {
   static const int floatsPerVertex = 20;

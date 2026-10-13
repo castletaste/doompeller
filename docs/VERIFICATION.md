@@ -1,3 +1,43 @@
+# Flutter 3.47.7 toolchain verification — 2026-10-13
+
+Implementation: `codex/series-07-flutter-3-47`, based on
+`126f2ba` (`codex/series-06-ci-contract-gate`). Flutter 3.47.7 / Dart 3.13.5
+replaces 3.44.4 / 3.12.2.
+
+flame_3d 0.3.0 does not compile on 3.47: `flutter_gpu` made shader-bundle
+loading asynchronous and moved vertex/index counts from bind to draw calls.
+flame_3d 0.3.2 is the upstream adaptation; its only library change is in the
+native backend, which now preloads every manifest `.shaderbundle` inside
+`GpuBackend.initialize()`. The app already awaits that call at startup. The
+vertex record, WebGPU backend and material API are unchanged. Flutter 3.47
+requires `vector_math ^2.4.0` and `meta ^1.18.3`; both are pinned to the
+versions the SDK itself locks (2.4.0 and 1.18.3).
+
+- `flutter analyze`: no issues. Synthetic `dart run tool/test.dart`:
+  **300 pass**. Content-inclusive run: **336 pass**. Original E1M1 replay
+  remains 2,160 tics / `0x9c565b42`; keyboard acceptance remains
+  2,155 tics / `0x55608565`; fixture playthrough remains 821 tics /
+  `0x4c4136d3`; the FakeGPU adapter replay and runtime playthrough counters
+  (13 surfaces, 6 buffers, 1,732 dynamic updates) match 3.44.4 exactly.
+  One earlier content run timed out in `wad_report_test.dart`, which spawns
+  `dart run` per case; it passed alone and in two further full runs.
+- Package `dart analyze` / `dart test` on Dart 3.13.5: `doom_wad` 147,
+  `doom_geometry` 129 (+3 skipped), `doom_core` 190, `doom_music` 31 pass.
+- `sh tool/ci_contracts.sh`: project and content audits pass; ABI and replay
+  tripwires pass. Node policy tests: **45 pass**. Python artifact tests:
+  **five pass**; shareware fetch tests: **eight pass**.
+- `bash tool/build_web_release.sh` with naga 30.0.1: release Wasm build,
+  worker build and packaging audits pass. `main.dart.wasm` is 2,118,608 bytes
+  (3.44.4 rebuilt from the same base: 2,143,523).
+
+Both release builds were served with the COOP/COEP harness server and loaded
+in headless Chrome for Testing 155 on Linux with the SwiftShader WebGPU adapter.
+The idle E1M1 start frames at 1280×800 are identical: **0 of 1,024,000
+pixels differ**. A scripted keyboard walk made the headless renderer target
+close after the first turn on both versions, so no moving-camera comparison is
+claimed. No macOS Impeller run, physical-GPU browser or performance probe was
+available in this environment; those remain open for the bump.
+
 # Web UX verification — 2026-09-10
 
 Implementation: `codex/web-ux`, based on

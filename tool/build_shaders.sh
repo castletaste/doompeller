@@ -19,7 +19,7 @@ BUNDLE="$PROJECT_ROOT/assets/shaders/doom_palette.shaderbundle"
 
 if [[ ! -x "$DOOMPELLER_FLUTTER" ]]; then
   echo "error: flutter not found or not executable at $DOOMPELLER_FLUTTER" >&2
-  echo "       set DOOMPELLER_FLUTTER to the pinned 3.44.4 SDK" >&2
+  echo "       set DOOMPELLER_FLUTTER to the pinned 3.47.7 SDK" >&2
   exit 1
 fi
 
@@ -35,8 +35,8 @@ cd "$PROJECT_ROOT"
 mkdir -p assets/shaders
 
 SDK_VERSION="$("$DOOMPELLER_FLUTTER" --version --machine 2>/dev/null | sed -n 's/.*"frameworkVersion": *"\([^"]*\)".*/\1/p' || true)"
-if [[ -n "$SDK_VERSION" && "$SDK_VERSION" != "3.44.4" ]]; then
-  echo "warning: expected Flutter 3.44.4, found $SDK_VERSION" >&2
+if [[ -n "$SDK_VERSION" && "$SDK_VERSION" != "3.47.7" ]]; then
+  echo "warning: expected Flutter 3.47.7, found $SDK_VERSION" >&2
   echo "         the shader bundle format is tied to the pinned engine" >&2
 fi
 

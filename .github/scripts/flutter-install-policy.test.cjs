@@ -14,9 +14,9 @@ const workflow = fs.readFileSync(
 );
 const flutterUrl =
   'https://storage.googleapis.com/flutter_infra_release/releases/stable/' +
-  'linux/flutter_linux_3.44.4-stable.tar.xz';
+  'linux/flutter_linux_3.47.7-stable.tar.xz';
 const flutterSha256 =
-  'c853cda0312a162854c481fe6a1bc286d84fbb74bfab7037c39750061dc9b466';
+  'af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230';
 
 function shellStep(name) {
   const stepMarker = `      - name: ${name}\n`;
@@ -37,7 +37,7 @@ function shellStep(name) {
     .join('\n');
 }
 
-const setupScript = shellStep('Set up Flutter 3.44.4');
+const setupScript = shellStep('Set up Flutter 3.47.7');
 
 test('installs the exact official Flutter archive without a composite action', () => {
   assert.doesNotMatch(workflow, /flutter-action@/);
@@ -123,7 +123,7 @@ printf '%s\n' tar >> "$MOCK_LOG"
 `);
   writeExecutable(bin, 'git', `
 printf '%s\n' git >> "$MOCK_LOG"
-printf '%s\n' ad70ec4617166f1c38e5d2bfd388af71fda14f06
+printf '%s\n' abaf9c523780a608bd46686fd5e53740a07077f8
 `);
   const result = spawnSync('bash', ['-c', setupScript], {
     encoding: 'utf8',

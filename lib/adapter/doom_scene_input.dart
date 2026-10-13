@@ -32,7 +32,7 @@ final class SceneMeshInput {
   /// Interleaved vertices in the 20-float ABI. Retained without copying.
   final Float32List vertices;
 
-  /// Triangle indices, uint16 because that is all flame_3d 0.3.0 binds.
+  /// Triangle indices, uint16 because that is all flame_3d 0.3.2 binds.
   final Uint16List indices;
 
   /// Which atlas page this mesh samples. Meshes sharing a page and a kind are

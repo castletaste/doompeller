@@ -57,10 +57,10 @@ fi
 
 # Experimental rendering dependencies and ABI/replay pins are intentionally
 # exact. A change requires updating the corresponding tripwire corpus.
-need_line "^  flutter: 3\.44\.4$" pubspec.yaml
+need_line "^  flutter: 3\.47\.7$" pubspec.yaml
 need_line "^  flame: 1\.38\.0$" pubspec.yaml
-need_line "^  flame_3d: 0\.3\.0$" pubspec.yaml
-need_line "^  vector_math: 2\.2\.0$" pubspec.yaml
+need_line "^  flame_3d: 0\.3\.2$" pubspec.yaml
+need_line "^  vector_math: 2\.4\.0$" pubspec.yaml
 need_line "^  web: 1\.1\.1$" pubspec.yaml
 need_line "^    - \.local/doom/DOOM1\.WAD$" pubspec.yaml
 need_line "<key>FLTEnableImpeller</key>" macos/Runner/Info.plist

@@ -16,7 +16,7 @@ import 'render_diagnostics.dart';
 ///
 /// ## Why everything is RGBA8
 ///
-/// flame_3d 0.3.0 offers rgba8888, bgra8888 and rgbaFloat32 only. There is no
+/// flame_3d 0.3.2 offers rgba8888, bgra8888 and rgbaFloat32 only. There is no
 /// R8 format, so single-channel data is stored in RGBA8 and the shader reads
 /// one channel. The atlas puts the palette index in red and mask coverage in
 /// alpha, which costs 4x memory but needs no second texture binding and no
@@ -274,7 +274,7 @@ final class PaletteTextureData {
 /// The three GPU textures bound by [PaletteMaterial].
 ///
 /// Textures are created lazily by flame_3d on first use and there is no
-/// disposal API in 0.3.0, so one set should be built per level and shared by
+/// disposal API in 0.3.2, so one set should be built per level and shared by
 /// every material.
 final class PaletteTextures {
   PaletteTextures(this.data, {RenderDiagnostics? diagnostics})

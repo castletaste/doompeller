@@ -7,7 +7,7 @@ environment:
   sdk: ^3.12.2
 
 dependencies:
-  meta: 1.18.0
+  meta: 1.18.3
   doom_wad:
     path: ../doom_wad
 dev_dependencies:

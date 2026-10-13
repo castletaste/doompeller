@@ -10,10 +10,10 @@
 
 GitHub Actions builds the static Flutter Wasm / Flame 3D WebGPU application.
 There is no server-side Doom engine or Pages Function. The pinned game stack
-remains Flutter 3.44.4, Flame 1.38.0, flame_3d 0.3.0 and naga-cli 30.0.1.
+remains Flutter 3.47.7, Flame 1.38.0, flame_3d 0.3.2 and naga-cli 30.0.1.
 The published bootstrap has only `dart2wasm` / `skwasm`, no dart2js fallback.
 
-CI downloads the exact Flutter 3.44.4 Linux x64 archive directly from the
+CI downloads the exact Flutter 3.47.7 Linux x64 archive directly from the
 official Flutter release bucket, using the pin from the
 [Linux release manifest](https://storage.googleapis.com/flutter_infra_release/releases/releases_linux.json).
 Its SHA-256 is pinned in `deploy-web.yml`

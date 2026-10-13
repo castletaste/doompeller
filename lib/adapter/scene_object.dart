@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:vector_math/vector_math.dart';
 
 import 'doom_camera.dart';
@@ -13,7 +15,8 @@ final class DoomMesh {
 
   final List<PackedSurface> _surfaces;
 
-  List<PackedSurface> get surfaces => List.unmodifiable(_surfaces);
+  /// A read-only view, read by the presenter every frame without copying.
+  late final List<PackedSurface> surfaces = UnmodifiableListView(_surfaces);
 
   void addSurface(PackedSurface surface) => _surfaces.add(surface);
 }

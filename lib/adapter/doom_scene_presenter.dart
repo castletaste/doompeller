@@ -65,20 +65,33 @@ final class DoomScenePresenter {
     }
     _visibleObjects = visible;
 
+    // One copy of the camera block per camera change, shared by every
+    // material: a fresh object each time, so no material can hold a stale one.
+    final ByteData? vertexInfo = cameraChanged
+        ? ByteData.sublistView(Float32List.fromList(_vertexInfo))
+        : null;
     for (final material in _materials.values) {
-      material.sync(_vertexInfo, cameraChanged: cameraChanged);
+      material.sync(vertexInfo ?? _lastUploadedVertexInfo!);
     }
+    if (vertexInfo != null) _lastUploadedVertexInfo = vertexInfo;
   }
+
+  ByteData? _lastUploadedVertexInfo;
 
   /// A flutter_scene camera matching [camera], used for engine-side frustum
   /// culling. Drawing uses [DoomCamera]'s own matrices, so only the frustum
   /// volume matters here, and a symmetric frustum is the same volume in
   /// either view-space handedness.
-  Camera cullingCamera(DoomCamera camera) => PerspectiveCamera(
-    fovRadiansY: camera.fovY * degrees2Radians,
-    position: camera.position.clone(),
-    target: camera.target.clone(),
-    up: camera.up,
+  ///
+  /// One camera object is updated in place every frame, which keeps its
+  /// identity stable for the engine and allocates nothing.
+  Camera cullingCamera(DoomCamera camera) => _cullingCamera
+    ..fovRadiansY = camera.fovY * degrees2Radians
+    ..position.setFrom(camera.position)
+    ..target.setFrom(camera.target)
+    ..up.setFrom(camera.up);
+
+  final PerspectiveCamera _cullingCamera = PerspectiveCamera(
     fovNear: DoomCamera.distanceNear,
     fovFar: DoomCamera.distanceFar,
   );
@@ -148,6 +161,9 @@ final class _ObjectBinding {
   final Matrix4 _lastTransform = Matrix4.zero();
   bool _hasTransform = false;
   final List<_SurfaceBinding> _surfaces = [];
+  late final void Function(Matrix4) _copyTransform = _writeTransform;
+
+  void _writeTransform(Matrix4 target) => target.setFrom(_transform);
 
   /// Returns whether the object draws this frame.
   bool sync(DoomScenePresenter presenter) {
@@ -163,7 +179,10 @@ final class _ObjectBinding {
         )) {
       _lastTransform.setFrom(_transform);
       _hasTransform = true;
-      node.localTransform = _transform.clone();
+      // Edits the node's matrix in place: billboards turn every frame the
+      // camera moves, and a fresh matrix per node per frame is avoidable
+      // garbage.
+      node.mutateLocalTransform(_copyTransform);
     }
 
     final surfaces = object.mesh.surfaces;
@@ -218,10 +237,7 @@ final class _SurfaceBinding {
       _bounds.copyFrom(aabb);
       current.setLocalBounds(
         Aabb3.copy(aabb),
-        Sphere.centerRadius(
-          aabb.center,
-          (aabb.max - aabb.min).length / 2,
-        ),
+        Sphere.centerRadius(aabb.center, (aabb.max - aabb.min).length / 2),
       );
     }
     final wanted = presenter._materialFor(surface);
@@ -247,18 +263,18 @@ final class _MaterialBinding {
   final ShaderMaterial material;
   final Float32List _uniforms = Float32List(PaletteMaterial.uniformFloats);
   int _revision = -1;
-  bool _hasVertexInfo = false;
+  ByteData? _vertexInfo;
 
-  /// Uploads changed uniform blocks: the camera matrices when they moved or
-  /// this material has none yet, and the palette block when it changed.
-  void sync(Float32List vertexInfo, {required bool cameraChanged}) {
-    if (cameraChanged || !_hasVertexInfo) {
+  /// Uploads changed uniform blocks: the camera block when it is a newer one
+  /// than this material holds, and the palette block when it changed.
+  void sync(ByteData vertexInfo) {
+    if (!identical(vertexInfo, _vertexInfo)) {
+      _vertexInfo = vertexInfo;
       material.setUniformBlock(
         'VertexInfo',
-        ByteData.sublistView(Float32List.fromList(vertexInfo)),
+        vertexInfo,
         stage: ShaderStage.vertex,
       );
-      _hasVertexInfo = true;
     }
     if (palette.revision != _revision) {
       _revision = palette.revision;

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_scene/scene.dart';
 
+import 'doom_frame_clock.dart';
 import 'doom_scene_host.dart';
 import 'doom_scene_presenter.dart';
 
@@ -29,6 +30,7 @@ final class DoomSceneSurface extends StatefulWidget {
 
 final class _DoomSceneSurfaceState extends State<DoomSceneSurface> {
   late DoomScenePresenter _presenter = _presenterFor(widget.host);
+  final DoomFrameClock _clock = DoomFrameClock();
 
   /// Populates the GPU scene before SceneView's warm-up, so the palette
   /// pipelines compile while the loading frame is up rather than on the
@@ -42,6 +44,7 @@ final class _DoomSceneSurfaceState extends State<DoomSceneSurface> {
     if (!identical(oldWidget.host, widget.host)) {
       _presenter.dispose();
       _presenter = _presenterFor(widget.host);
+      _clock.reset();
     }
   }
 
@@ -51,9 +54,11 @@ final class _DoomSceneSurfaceState extends State<DoomSceneSurface> {
     super.dispose();
   }
 
-  void _onTick(Duration elapsed, double deltaSeconds) {
+  // SceneView's own delta is wall-clock time; the ticker's elapsed time is
+  // vsync time, which is what keeps motion even. See DoomFrameClock.
+  void _onTick(Duration elapsed, double _) {
     final host = widget.host;
-    host.update(deltaSeconds);
+    host.update(_clock.advance(elapsed));
     _presenter.sync(host.scene, host.camera);
   }
 

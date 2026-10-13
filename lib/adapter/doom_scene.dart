@@ -353,9 +353,7 @@ final class DoomScene {
 
   /// Surfaces drawing [page].
   List<PackedSurface> surfacesForPage(String page) => List.unmodifiable(
-    (_surfacesByPage[page] ?? const <PackedSurface>[]).where(
-      _surfaceIsActive,
-    ),
+    (_surfacesByPage[page] ?? const <PackedSurface>[]).where(_surfaceIsActive),
   );
 
   /// Moves a floor or ceiling to [height].

@@ -6,6 +6,7 @@
 library;
 
 export 'doom_camera.dart';
+export 'doom_frame_clock.dart';
 export 'doom_gpu.dart';
 export 'doom_runtime_game.dart';
 export 'doom_scene.dart';

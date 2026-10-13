@@ -55,7 +55,10 @@ final class SceneGpu extends DoomGpu {
       shim.StorageMode.hostVisible,
       vertexBytes,
     ),
-    shim.gpuContext.createDeviceBuffer(shim.StorageMode.hostVisible, indexBytes),
+    shim.gpuContext.createDeviceBuffer(
+      shim.StorageMode.hostVisible,
+      indexBytes,
+    ),
   );
 
   @override
@@ -134,7 +137,9 @@ final class SceneSurfaceBuffer implements DoomGpuBuffer {
 
   static void _overwrite(shim.DeviceBuffer buffer, ByteData data, int offset) {
     if (!buffer.overwrite(data, destinationOffsetInBytes: offset)) {
-      throw StateError('GPU buffer write of ${data.lengthInBytes} bytes failed');
+      throw StateError(
+        'GPU buffer write of ${data.lengthInBytes} bytes failed',
+      );
     }
   }
 }

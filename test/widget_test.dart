@@ -1,116 +1,18 @@
 import 'dart:async';
 
 import 'package:doom_core/doom_core.dart' as core;
-import 'package:doom_geometry/doom_geometry.dart';
-import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/browser_wad_selection.dart';
+import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_app_controller.dart';
-import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_hud.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'support/runtime_noops.dart';
-
-Future<PreparedDoomLevel> fixtureLevel() async {
-  final content = DoomContentSource(
-    environment: const <String, String>{},
-  ).loadFixture();
-  final resources = WadResources.load(content.wads);
-  final map = MapData.load(content.wads, content.mapName);
-  return PreparedDoomLevel(
-    content: content,
-    resources: resources,
-    map: map,
-    geometry: DoomGeometryCompiler.compile(map, resources),
-    gameConfig: const core.GameConfig(),
-    seed: 0,
-  );
-}
-
-final class FakeRuntime with DoomRuntimeNoopInput implements DoomRuntimeView {
-  @override
-  final ValueNotifier<int> movementRevision = ValueNotifier<int>(0);
-
-  @override
-  VoidCallback? onPauseRequested;
-
-  @override
-  core.LevelExit? levelExit;
-
-  final ValueNotifier<DoomHudSnapshot> notifier =
-      ValueNotifier<DoomHudSnapshot>(const DoomHudSnapshot.initial());
-
-  @override
-  ValueListenable<DoomHudSnapshot> get hud => notifier;
-
-  final ValueNotifier<DoomAutomapSnapshot> automapNotifier = ValueNotifier(
-    const DoomAutomapSnapshot(
-      isOpen: false,
-      zoom: DoomAutomapState.initialZoom,
-      playerX: 0,
-      playerY: 0,
-      playerAngle: 0,
-      visitedLines: <int>{},
-    ),
-  );
-
-  @override
-  ValueListenable<DoomAutomapSnapshot> get automap => automapNotifier;
-
-  int clearInputCalls = 0;
-  int restartCalls = 0;
-  final DoomInputState input = DoomInputState();
-
-  @override
-  void clearInput() {
-    clearInputCalls++;
-    input.clear();
-  }
-
-  @override
-  void restartLevel() {
-    restartCalls++;
-    notifier.value = const DoomHudSnapshot.initial();
-  }
-
-  @override
-  void triggerUse() => input.triggerUse();
-
-  @override
-  void selectWeapon(int slot) => input.selectWeapon(slot);
-
-  @override
-  void togglePause() {
-    final old = notifier.value;
-    notifier.value = DoomHudSnapshot(
-      health: old.health,
-      armor: old.armor,
-      bullets: old.bullets,
-      shells: old.shells,
-      weapon: old.weapon,
-      keys: old.keys,
-      kills: old.kills,
-      totalKills: old.totalKills,
-      items: old.items,
-      totalItems: old.totalItems,
-      secrets: old.secrets,
-      totalSecrets: old.totalSecrets,
-      levelTime: old.levelTime,
-      paused: !old.paused,
-      levelComplete: old.levelComplete,
-      diagnostics: old.diagnostics,
-    );
-  }
-}
-
-Widget testSurface(BuildContext context, DoomRuntimeView runtime) =>
-    const ColoredBox(key: Key('fake-game-surface'), color: Colors.black);
+import 'support/game_host.dart';
 
 void main() {
   testWidgets('loading and configured error states are explicit', (

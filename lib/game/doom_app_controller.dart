@@ -112,16 +112,10 @@ final class DoomAppController extends ChangeNotifier {
     if (_disposed) return;
     final int request = _beginLoad(showLoading: true);
     if (!_isCurrent(request)) return;
-    final result = await _readContent(
+    await _loadContent(
       request: request,
       mode: _ContentLoadMode.startup,
       read: _loadDeveloper,
-    );
-    if (result == null) return;
-    await _applyContentResult(
-      result,
-      request: request,
-      mode: _ContentLoadMode.startup,
     );
   }
 
@@ -149,19 +143,12 @@ final class DoomAppController extends ChangeNotifier {
     if (_disposed) return;
     final DoomAppState retained = _state;
     final int request = _beginLoad();
-    final result = await _readContent(
+    await _loadContent(
       request: request,
       mode: _ContentLoadMode.selection,
       retained: retained,
       read: () =>
           _loadSelected(bytes, mapName: mapName, sourcePath: sourceLabel),
-    );
-    if (result == null) return;
-    await _applyContentResult(
-      result,
-      request: request,
-      mode: _ContentLoadMode.selection,
-      retained: retained,
     );
   }
 
@@ -204,17 +191,20 @@ final class DoomAppController extends ChangeNotifier {
     _publishSelectionFailure(retained, message);
   }
 
-  Future<DoomContentLoadResult?> _readContent({
+  Future<void> _loadContent({
     required int request,
     required _ContentLoadMode mode,
     required FutureOr<DoomContentLoadResult> Function() read,
     DoomAppState? retained,
   }) async {
+    DoomContentLoadResult result;
     try {
-      final result = await read();
-      return _isCurrent(request) ? result : null;
+      final pending = read();
+      result = pending is Future<DoomContentLoadResult>
+          ? await pending
+          : pending;
     } catch (_) {
-      if (!_isCurrent(request)) return null;
+      if (!_isCurrent(request)) return;
       final String message = switch (mode) {
         _ContentLoadMode.startup =>
           'Unexpected error while loading the configured developer IWAD.',
@@ -226,16 +216,11 @@ final class DoomAppController extends ChangeNotifier {
       } else {
         _publishSelectionFailure(retained, message);
       }
-      return null;
+      return;
     }
-  }
-
-  Future<void> _applyContentResult(
-    DoomContentLoadResult result, {
-    required int request,
-    required _ContentLoadMode mode,
-    DoomAppState? retained,
-  }) async {
+    // A source can yield or synchronously start a replacement request. Check
+    // its identity immediately before any result can publish or load a fixture.
+    if (!_isCurrent(request)) return;
     switch (result) {
       case DoomContentLoaded(:final content):
         await _load(content, request: request, retainOnFailure: retained);

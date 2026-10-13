@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import '../adapter/fake_gpu_backend.dart';
 import '../support/fake_browser_pointer.dart';
-import '../widget_test.dart' show fixtureLevel, testSurface;
+import '../support/game_host.dart' show fixtureLevel, testSurface;
 
 void main() {
   Future<DoomRuntimeGame> mount(

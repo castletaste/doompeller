@@ -176,7 +176,15 @@ function tarBuffer(entries) {
       ? entry.contents
       : Buffer.from(entry.contents ?? '');
     const header = Buffer.alloc(512);
-    writeString(header, 0, 100, entry.name);
+    // ustar splits paths over 100 bytes into prefix and name, as the CI
+    // packer's USTAR_FORMAT does for flutter_scene's long asset paths.
+    let name = entry.name;
+    if (Buffer.byteLength(name) > 100) {
+      const split = name.lastIndexOf('/');
+      writeString(header, 345, 155, name.slice(0, split));
+      name = name.slice(split + 1);
+    }
+    writeString(header, 0, 100, name);
     writeOctal(header, 100, 8, entry.mode ?? 0o644);
     writeOctal(header, 108, 8, 0);
     writeOctal(header, 116, 8, 0);
@@ -330,6 +338,34 @@ test('rejects traversal, duplicate paths, malformed checksums, and extra outer f
     fs.writeFileSync(path.join(source, 'extra'), 'bad');
     assert.throws(() => sanitize(source, destination), /must contain only/);
   });
+});
+
+test('accepts either shader bundle form, but never none, both, or duplicates', () => {
+  const wgsl = 'assets/assets/shaders/doom_palette.wgslbundle';
+  const palette =
+    'assets/flutter_scene_generated/opengl_es/shaderbundle.doom_palette.0123abcd.shaderbundle';
+  const base =
+    'assets/packages/flutter_scene/flutter_scene_generated/opengl_es/shaderbundle.base.89abcdef.shaderbundle';
+  const withoutWgsl = validEntries().filter((entry) => entry.name !== wgsl);
+  const scene = [
+    ...withoutWgsl,
+    {name: palette, contents: 'shader'},
+    {name: base, contents: 'shader'},
+  ];
+  withArtifact(scene, ({source, destination}) => {
+    assert.equal(sanitize(source, destination).fileCount, 12);
+  });
+  const rejected = {
+    none: withoutWgsl,
+    mixed: [...validEntries(), {name: palette, contents: 'shader'}],
+    'palette only': [...withoutWgsl, {name: palette, contents: 'shader'}],
+    duplicate: [...scene, {name: palette.replace('0123abcd', 'feedface'), contents: 'stale'}],
+  };
+  for (const [label, entries] of Object.entries(rejected)) {
+    withArtifact(entries, ({source, destination}) => {
+      assert.throws(() => sanitize(source, destination), /shader bundle/, label);
+    });
+  }
 });
 
 test('enforces required files, Wasm-only bootstrap, and bounded sizes', () => {

@@ -1,3 +1,51 @@
+# flutter_scene renderer verification — 2026-10-13
+
+Implementation: `feat/flutter-scene-renderer`, stacked on
+`feat/flutter-3-47`. flutter_scene 0.24.3 replaces Flame 1.38.0 /
+flame_3d 0.3.2; the web target moves from WebGPU to WebGL2.
+
+- `flutter analyze`: no issues. `sh tool/ci_contracts.sh`: project and
+  content audits pass, ABI and replay tripwires pass. Synthetic
+  `dart run tool/test.dart`: **297 pass**; content-inclusive: **333 pass** (three
+  WGSL verifier tests were removed with the verifier). Every replay hash and
+  adapter counter is unchanged: E1M1 2,160 tics / `0x9c565b42`, keyboard
+  acceptance 2,155 / `0x55608565`, fixture playthrough 821 / `0x4c4136d3`,
+  13 surfaces, 6 buffers, 1,732 dynamic updates.
+- `flutter test --platform chrome --wasm` for the collision regression and
+  replay corpus passes in headless Chrome 155. Node policy tests: **45 pass**;
+  Python artifact tests: **six pass**; shareware fetch tests: **eight pass**.
+- `bash tool/build_web_release.sh`: passes without naga; `main.dart.wasm` is
+  2,268,839 bytes. The packed artifact (57 files, ustar) passes both the CI
+  packer and the preview sanitizer.
+
+Rendering parity was established on the spike branch
+`codex/spike-flutter-scene` by recording the production flame_3d draw list
+for nine E1M1 frames (start, and route tics 400–2100 covering sky, muzzle
+flash, the damage palette and a close wall) and replaying it through both
+flame_3d's WebGPU backend and a flutter_scene WebGL2 port of the palette
+shaders in headless Chrome 155 with SwiftShader. The flame_3d replay matched
+the real production start frame in **0 of 927,760** non-HUD pixels. Against
+it, flutter_scene differed only in 1-pixel edge or texel ties (0–291 pixels
+per frame) and in two coplanar-tie classes: two-sided grates, where back-face
+culling now shows the true holes instead of the mirrored opposite face, and
+coincident corpse/drop billboards, whose winner was already order-dependent.
+An exhaustive pattern of all 14 PLAYPAL × 34 COLORMAP × 256 indices was
+**bit-exact in 487,424 of 487,424 pixels**.
+
+The migrated release build's live E1M1 start frame differs from the previous
+production build in 180 of 1,024,000 pixels: barrels on a different animation
+frame (this build's simulation runs from the first frame in headless Chrome,
+the previous WebGPU build's stayed at tic 0 until a click) and edge pixels.
+HUD and overlays are identical. With WebGPU disabled the build renders the
+identical frame; the previous build failed at startup. A scripted keyboard
+walk renders correctly; clicking first makes headless Chrome request Pointer
+Lock and close the target, in both builds.
+
+Not verified here: any macOS run (the Metal bundle builds via the hook, but
+seams, cutouts, sky, depth order and palette need a live Impeller check),
+physical-GPU frame times, and memory over repeated level loads. SwiftShader
+frame rates are not evidence.
+
 # Flutter 3.47.7 toolchain verification — 2026-10-13
 
 Implementation: `codex/series-07-flutter-3-47`, based on

@@ -1,231 +1,96 @@
 # Runtime boundaries
 
-The four packages remain usable without Flutter: `doom_wad` decodes content,
-`doom_geometry` compiles it, `doom_core` owns the deterministic 35 Hz
-simulation, and `doom_music` sequences MUS/GENMIDI into OPL2 PCM. Only
-`lib/adapter` imports flame_3d. Rendering, audio and UI consume
-simulation output; they do not decide or hash gameplay state.
+Doompeller keeps WAD decoding, geometry compilation, deterministic gameplay and
+MUS/GENMIDI sequencing in four pure-Dart packages. Flutter, Flame 3D, browser
+APIs and native audio stay in the app adapters. Rendering and audio consume
+simulation output; they do not decide gameplay state or replay hashes.
 
 ## Loading and ownership
 
-`DoomApp` owns its default controller and a level preparer for the lifetime of
-the app widget. An injected controller belongs to its caller. Replacing it
-detaches the old subscription and disposes only a controller created by the app.
-Ownership is initialized before the first build. Internally created replacements
-reuse the preparer, so retiring a controller
-cannot bypass its CPU admission limit. Separately injected preparers/controllers
-have independent lifetimes by design.
+`DoomApp` owns the default controller and level preparer for the lifetime of
+the app widget. Injected controllers and preparers remain caller-owned.
+Replacing a controller detaches its listener and disposes only controllers
+created by the app.
 
-The controller fences content reads, file-picker results and episode transitions
-by request generation. Choosers have their own generation, so dismissing one
-does not invalidate an existing load. A displaced pending preparation that is
-still current for another controller reports a retryable failure.
-`LevelLoadCoordinator` fences CPU preparation and publication. Its generation
-checks tolerate disposal and synchronous listener reentrancy. A failed episode
-transition keeps the completed map available for a retry; an obsolete result
-cannot replace the current level.
+Asynchronous loading has separate ownership boundaries:
 
-Generation ownership is deliberately layered:
+| Fence | Owner | Responsibility |
+| --- | --- | --- |
+| Request | `DoomAppController` | Reject stale source results and state publication |
+| Picker | `DoomAppController` | Reject a late browser chooser without cancelling a level load |
+| Load | `LevelLoadCoordinator` | Issue preparation tokens and publish only the newest result |
+| Admission | `DoomLevelPreparer` | Keep one active worker and one replaceable pending request |
 
-| Fence | Owner | Invalidated by | Responsibility |
-| --- | --- | --- | --- |
-| Request generation | `DoomAppController` | a newer start, import, fallback or transition | Reject stale source results and app-state publication |
-| Picker generation | `DoomAppController` | a newer browser chooser | Reject late chooser results without cancelling a level load |
-| Load generation | `LevelLoadCoordinator` | a newer CPU load or cancel | Issue `LevelLoadToken`s and publish only the newest prepared value |
-| Admission | `DoomLevelPreparer` | replacement of its pending request | Keep one active worker and one latest pending request; it reuses the coordinator token rather than inventing another generation |
+The preparer bounds native isolate admission. Cancellation prevents obsolete
+publication and pending work, while an already-running isolate may finish.
+GPU objects and scene assembly stay on the UI isolate. On web, preparation
+still runs on the event loop and may block frames; the architecture does not
+claim otherwise.
 
-`DoomLevelPreparer` admits one active worker and one replaceable pending request.
-A native `compute` worker receives only content and immutable configuration:
-resources, map parsing and world geometry compilation run there. Cancellation
-prevents publication and skips obsolete pending work; it does not kill an
-already running isolate. The source content identity is preserved on return.
-GPU objects and sprite scene assembly stay on the UI isolate.
+`PreparedDoomLevel.geometry` is a reusable read-only template. A runtime gets
+its own mutable geometry copy for sector, wall and animation updates. Atlas
+data, topology and lookup tables remain shared.
 
-On web, Flutter's `compute` executes on the calling event loop. Preparation
-yields between CPU stages but each stage can still block rendering. There is
-no level-preparation worker or claim of jank-free custom-WAD loading. Sprite atlas packing
-also remains synchronous; the disposable design measurements did not justify
-another worker protocol for the current episode.
+## Runtime and presentation
 
-`PreparedDoomLevel.geometry` is a reusable template. `DoomRuntimeGame` calls
-`copyForRuntime` once when assembling a scene: vertices and mutable floor,
-ceiling and wall handles are independent. Atlas data, topology and lookup tables
-are shared as read-only data. Restart mutates only the runtime's copy. Direct
-`DoomScene.fromCompiledLevel` callers retain the existing buffer ownership
-contract; they supply the mutable geometry that the scene will update.
-
-`DoomRuntimeGame` remains the runtime facade, while its replay delivery, audio
-bridge, presentation synchronization and lifecycle helpers live in adjacent
-part files. The facade owns the prepared level, scene and disposed flag; the
-lifecycle part only contains the restart/dispose methods, so there is one owner
-for runtime state.
-
-## Simulation and presentation
-
-`GameState` orchestrates each tic and owns map/actor state. Actor tuning and
-special classification are separate tables; sector movers and the player weapon
-state machine own their local state. Their inputs are narrow callbacks or values,
-not access to the entire game. Actor iteration, RNG calls, integer arithmetic
-and replay hash word order remain unchanged.
-
-The read-only observables and replay hash remain grouped near the concrete
-`GameState` implementation. Keeping them as ordinary members avoids a second
-storage base or runtime type hierarchy while preserving one public simulation
-object.
-
-The runtime owns device input, replay progress and the scene. `DoomDeviceInput`
-tracks keyboard, mouse and touch owners independently, including pending
-one-shot controls and analog axes. Blur, pause and reset clear all owners. Replay
-completion callbacks run after the tick driver returns so a callback may safely
-restart or dispose the runtime. `DoomScene` composes dynamic world geometry,
-sky, sprite components and an actor pool. Dynamic geometry indexes sector and
-animation ranges once, then updates retained buffers through dirty ranges.
-Automap heights and player discovery publish together once per tic.
+`DoomRuntimeGame` is the runtime facade. Replay delivery, audio bridging,
+presentation synchronization and lifecycle helpers live in adjacent adapter
+parts, with one owner for runtime state and disposal.
 
 The game view owns the runtime, focus, lifecycle observer and optional frame
-probe. `DoomRuntimeView` includes the lifecycle, audio and browser hooks, so every
-runtime has one complete host contract and disposal remains explicit and
-idempotent through Flame removal.
+probe. `DoomRuntimeView` is a complete host contract covering observables,
+input, pause, audio focus and disposal. `DoomGameHost` keeps custom runtime
+creation paired with its surface builder so a mounted runtime cannot lack a
+renderer. Production uses the built-in Flame surface.
 
-The game surface has stable widget identity across gameplay publications.
-`DoomGameHost` keeps custom runtime creation and its surface builder as one
-complete configuration, so a mounted custom runtime cannot omit its renderer.
-Factories create runtimes when a level is mounted or replaced; changing the
-host updates the existing runtime's surface without restarting gameplay. A
-directly embedded game view handles level replacement itself.
-HUD, overlays and automap listen within their own subtrees. The game view
-selects only input-blocked and map-open transitions, so movement and HUD values
-do not rebuild the game surface or touch panel. Equal HUD snapshots suppress
-redundant notification. Stateful widgets have explicit ownership duties:
-graphics startup, the app controller, runtime/focus, intermission animation and touch pointer
-captures. The app owns the touch-control preference; the game view resets input
-on lifecycle changes and the touch panel owns individual pointer captures. Loading, failure and ready
-are sealed states, with a non-null prepared level in the ready state. Navigation
-continues to use these states and overlays; no router or DI package is needed.
+The game surface keeps stable widget identity while HUD, overlays and automap
+listen in their own subtrees. Loading, failure and ready are sealed app states;
+ready always contains a prepared level. No router or dependency-injection
+package is needed.
 
-## Browser input and startup
+## Browser input
 
-`DoomApp` owns a `DoomBrowserInput` session alongside its audio session. The
-browser driver confines Pointer Lock and coarse-pointer detection to one web
-bridge. Each level acquires a revocable input lease. An outstanding request
-blocks new requests until the browser reports its outcome; capture arriving
-after pause, level replacement or disposal is released. Promise completion
-alone never admits input. The session retains cleanup listeners for a pending
-request after disposal and removes them when that request can no longer own
-capture. Native builds use a no-op driver and keep their existing mouse controls.
+One browser bridge owns pointer lock and coarse-pointer detection. Each mounted
+level receives a revocable input lease. A pending browser request blocks a new
+request until its result arrives; a late capture after pause, replacement or
+disposal is released. Native builds use a no-op browser driver.
 
-Captured relative movement and primary fire travel independently through the
-lease. Capture loss and browser Escape use explicit idempotent pause, while
-native keyboard pause retains its toggle behavior. Blur/hidden pauses; returning
-to the tab does not resume. Capture failure leaves keyboard/touch usable and
-shows a retry hint. The host's root listener receives wheel/pan-zoom above HUD
-siblings, accumulates vertical distance and asks the runtime to cycle owned
-weapons. This does not alter tic sampling or simulation state hashes.
+Blur, hidden tabs, pause and teardown clear held input. Returning to a tab leaves
+the game paused. Pointer capture failure leaves keyboard and touch controls
+usable and exposes a retry hint. Touch preference and mouse sensitivity belong
+to the app session; explicit user choice wins over later device detection.
 
-The app keeps coarse-pointer/touch preference and mouse sensitivity for the
-session. Explicit touch override wins over later touch detection. A runtime
-movement revision only advances when player position or angle changes; the
-host hides hints once and uses a resettable six-second idle timer. Pause and
-teardown cancel that timer. HTML bootstrap failures retain the initial accessible
-loading shell with retry; Flutter graphics initialization has its own recoverable
-screen before creating the game app. No dependency, persistent setting, or
-backend API is added.
-
-## Audio and failures
+## Audio
 
 `DoomApp` owns one default `DoomAudioSession`; injected sessions remain owned by
-their caller. Each level acquires a generation-fenced backend lease. Replacing
-a level retires its voices and music without replacing the browser AudioContext
-or resetting the two volume preferences. The preferences are session-only.
+their caller. Each level gets a generation-fenced backend lease. Replacing a
+level retires voices and music while preserving the browser context and the
+two session-only volume preferences.
 
-Web music runs in a separately compiled Dart Wasm worker. `doom_music` owns the
-MUS clock, Doom 1.9 voice decisions and OPL2 synthesis. The AudioWorklet only
-consumes mono PCM at 49,716 Hz through a direct worker port. Eight credits of
-4,096 frames bound the PCM queue; configuration admission permits one active
-request and one replaceable pending request. The AudioContext sample rate is
-checked before enabling music. A music failure remains visible in the pause
-panel and leaves PCM effects usable.
+Browser music runs in a separately compiled Dart Wasm worker. `doom_music` owns
+the MUS clock and OPL2 synthesis; the AudioWorklet consumes PCM through a
+bounded queue. Music configuration is latest-wins and ordered behind retire
+acknowledgements. A sample-rate or worker failure disables music while leaving
+PCM effects available.
 
-The session and worker share one latest-wins pending-value primitive, while
-their retire and acknowledgement protocols remain separate. This keeps the
-storage rule uniform without merging the two lifecycle state machines.
+Effects use a bounded sound queue with critical-cue overflow rules. Backend
+failures are recorded without poisoning later playback or preventing disposal.
+Native audio leases the transport by messenger identity; takeover dispatches
+the previous owner's cleanup before the new owner can send commands.
 
-The runtime selects `D_E1Mx`, `D_INTER`, or `D_VICTOR` from the current content.
-Restart retires the old song and resets the score. Pause and browser blur
-suspend the audio clock and preserve the bounded music queue; effects are
-dropped. AudioContext resume never blocks the effects pump. Resume/suspend commands have
-identity tokens: completing a suspend retires only the older resume it supersedes,
-including a Promise Chromium leaves unresolved. Stale completion/rejection cannot
-retire a newer operation or revoke its unlock. Actual context state changes
-reconcile to current intent; already-suspended promises cannot spin in a retry loop. Death and exit
-input locks clear held controls while allowing the final cue to finish.
+## Content and verification
 
-`DoomSoundOutput` serializes mixer work without adding a future for every empty
-tic. At most 128 sound events wait behind the active batch. Overflow follows
-the core journal's critical-cue policy: remove the oldest expendable sound first;
-ordinary incoming sounds cannot evict a queue containing only critical cues.
-Stop/restart/dispose discard queued events and invalidate an active batch at its
-next async boundary. Backend failures are recorded and do not poison later
-output or prevent backend disposal. An active native call must still settle
-before the same output pump can complete teardown.
+Commercial WAD files stay developer-local and ignored. Synthetic fixtures are
+source-generated. The app does not embed, wrap, download or extract another
+Doom engine, and direct Flame 3D usage remains confined to `lib/adapter`.
 
-`WadSoundCatalog` caches immutable WAV encodings for WAD samples. Custom catalogs
-may provide an immutable encoding through `SoundDefinition.wavBytes`; mutable
-custom PCM without one continues to be encoded per request.
+The 20-float vertex ABI, dependency versions and replay/geometry hashes are
+explicit contracts. Run the project and content audits through
+`sh tool/ci_contracts.sh`; it also runs the ABI, geometry and replay tripwires.
+Use `dart run tool/test.dart` for synthetic app tests and add
+`--include-content` with a local `DOOM_WAD_PATH` for original-content
+acceptance. The local IWAD is never committed.
 
-The mixer uses classic sound priorities (smaller values win), replaces a
-sound from the same origin, and computes distance/pan from the listener.
-An optional `SpatialAudioBackend` updates active voices as actors and the
-listener move. These output decisions never consume gameplay RNG or enter the
-replay hash. Native backends without the optional capability retain their
-existing transport protocol.
-
-`MacOsAudioBackend` leases the transport by BinaryMessenger identity and channel
-name. Takeover dispatches the previous owner's native cleanup before publishing
-the new owner, including voices on channels the new mixer never reuses. A cleanup
-failure is reported through Flutter's error handler. Only the newest owner can
-send subsequent native commands or deliver completions.
-Transport playback IDs are unique across owners, even when logical mixer IDs
-restart from zero. Ownership is checked at dispatch, and no await precedes a
-native teardown dispatch. Flutter's MethodChannel FIFO ordering preserves that
-order. Weak owner references avoid retaining retired runtimes. The native
-protocol is unchanged.
-
-## Compatibility and verification
-
-`DoomGameHost` is the public custom-runtime entry point; production keeps the
-host `null` and uses the built-in Flame surface. The runtime host contract is
-intentionally complete; geometry copy helpers, preparation worker injection
-and optional WAV encoding remain additive. The 20-float vertex ABI and exact renderer
-dependency pins remain unchanged. Unused direct `meta` dependencies were removed;
-no dependency versions were upgraded.
-
-`_Compiler.run()` remains the geometry orchestration boundary. Packed mesh
-emission, plane/wall packing and animation transfer bookkeeping live in
-`compiler_packing.dart`; compiled-level reports, geometry hashes and the public
-compiler API remain unchanged.
-
-Geometry reports retain aggregate compile time for diagnostics without making
-stage timings part of the public report contract. The replay corpus in
-`test/replay_corpus_test.dart` runs in the VM contract gate and the Chrome Wasm
-job, while controlled load-order tests and the existing restart scenario pin
-stale-publication behavior and renderer resource counts.
-The single `tool/ci_contracts.sh` gate combines the project audit with the ABI,
-replay and geometry tripwires.
-
-Run `dart run tool/test.dart` for synthetic app tests without an IWAD, and add
-`--include-content` with a local `DOOM_WAD_PATH` for original-content acceptance.
-The test runner creates temporary empty placeholders for Flutter's declared
-shader and IWAD assets, then removes them. Package tests run directly with
-`dart test`. Native preparation is tested with real
-controller loads. Widget tests control the preparation completion explicitly;
-original-content setup runs outside the fake widget clock with
-`WidgetTester.runAsync`.
-
-Key regressions cover stable surface rebuilds, controller replacement/reentrancy,
-picker cancellation, independent runtime geometry, bounded preparation/audio
-queues, audio ownership and delayed replies, replay callbacks and repeated
-restart resource counts. See `VERIFICATION.md` for target-specific evidence.
-Flame 3D exposes no per-resource GPU disposal API; stable resource counts do not
-prove native GPU reclamation. Existing gameplay limitations remain separate
-from this architecture change.
+The macOS and web targets retain their existing Impeller/WebGPU requirements.
+Flame 3D does not expose per-resource GPU disposal, so stable resource counts
+are regression evidence rather than proof of native reclamation.

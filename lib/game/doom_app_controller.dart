@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:doom_core/doom_core.dart';
 
@@ -23,6 +24,8 @@ typedef PrepareDoomLevel =
       DoomContent content,
       LevelLoadToken token,
     );
+
+enum _ContentLoadMode { startup, selection }
 
 /// App-facing load state with an outer request fence and CPU generation fence.
 final class DoomAppController extends ChangeNotifier {
@@ -109,66 +112,25 @@ final class DoomAppController extends ChangeNotifier {
     if (_disposed) return;
     final int request = _beginLoad(showLoading: true);
     if (!_isCurrent(request)) return;
-    DoomContentLoadResult result;
-    try {
-      result = await _loadDeveloper();
-    } catch (_) {
-      if (_isCurrent(request)) {
-        _publish(
-          const DoomAppState.failure(
-            'Unexpected error while loading the configured developer IWAD.',
-          ),
-        );
-      }
-      return;
-    }
-    if (!_isCurrent(request)) {
-      return;
-    }
-    switch (result) {
-      case DoomContentLoaded(:final content):
-        await _load(content, request: request);
-      case DoomContentPathMissing(:final setupMessage, :final autoLoadFixture):
-        if (!autoLoadFixture) {
-          _publish(DoomAppState.failure(setupMessage));
-          return;
-        }
-        DoomContent fixture;
-        try {
-          fixture = _loadFixture();
-        } catch (_) {
-          if (_isCurrent(request)) {
-            _publish(
-              const DoomAppState.failure(
-                'Could not create the synthetic test map.',
-              ),
-            );
-          }
-          return;
-        }
-        await _load(fixture, request: request, setupMessage: setupMessage);
-      case DoomContentLoadFailure(:final message):
-        _publish(DoomAppState.failure(message));
-    }
+    final result = await _readContent(
+      request: request,
+      mode: _ContentLoadMode.startup,
+      read: _loadDeveloper,
+    );
+    if (result == null) return;
+    await _applyContentResult(
+      result,
+      request: request,
+      mode: _ContentLoadMode.startup,
+    );
   }
 
   Future<void> useFixtureFallback() async {
     if (_disposed) return;
     final int request = _beginLoad(showLoading: true);
     if (!_isCurrent(request)) return;
-    DoomContent fixture;
-    try {
-      fixture = _loadFixture();
-    } catch (_) {
-      if (_isCurrent(request)) {
-        _publish(
-          const DoomAppState.failure(
-            'Could not create the synthetic test map.',
-          ),
-        );
-      }
-      return;
-    }
+    final fixture = _tryLoadFixture(request);
+    if (fixture == null) return;
     await _load(
       fixture,
       request: request,
@@ -187,27 +149,20 @@ final class DoomAppController extends ChangeNotifier {
     if (_disposed) return;
     final DoomAppState retained = _state;
     final int request = _beginLoad();
-    DoomContentLoadResult result;
-    try {
-      result = _loadSelected(bytes, mapName: mapName, sourcePath: sourceLabel);
-    } catch (_) {
-      if (_isCurrent(request)) {
-        _publishSelectionFailure(
-          retained,
-          'Unexpected error while reading the selected IWAD.',
-        );
-      }
-      return;
-    }
-    if (!_isCurrent(request)) return;
-    switch (result) {
-      case DoomContentLoaded(:final content):
-        await _load(content, request: request, retainOnFailure: retained);
-      case DoomContentPathMissing():
-        _publishSelectionFailure(retained, 'No browser IWAD was selected.');
-      case DoomContentLoadFailure(:final message):
-        _publishSelectionFailure(retained, message);
-    }
+    final result = await _readContent(
+      request: request,
+      mode: _ContentLoadMode.selection,
+      retained: retained,
+      read: () =>
+          _loadSelected(bytes, mapName: mapName, sourcePath: sourceLabel),
+    );
+    if (result == null) return;
+    await _applyContentResult(
+      result,
+      request: request,
+      mode: _ContentLoadMode.selection,
+      retained: retained,
+    );
   }
 
   /// Owns the complete selection request, including the native chooser gap.
@@ -247,6 +202,77 @@ final class DoomAppController extends ChangeNotifier {
     final DoomAppState retained = _state;
     _invalidateLoad();
     _publishSelectionFailure(retained, message);
+  }
+
+  Future<DoomContentLoadResult?> _readContent({
+    required int request,
+    required _ContentLoadMode mode,
+    required FutureOr<DoomContentLoadResult> Function() read,
+    DoomAppState? retained,
+  }) async {
+    try {
+      final result = await read();
+      return _isCurrent(request) ? result : null;
+    } catch (_) {
+      if (!_isCurrent(request)) return null;
+      final String message = switch (mode) {
+        _ContentLoadMode.startup =>
+          'Unexpected error while loading the configured developer IWAD.',
+        _ContentLoadMode.selection =>
+          'Unexpected error while reading the selected IWAD.',
+      };
+      if (retained == null) {
+        _publish(DoomAppState.failure(message));
+      } else {
+        _publishSelectionFailure(retained, message);
+      }
+      return null;
+    }
+  }
+
+  Future<void> _applyContentResult(
+    DoomContentLoadResult result, {
+    required int request,
+    required _ContentLoadMode mode,
+    DoomAppState? retained,
+  }) async {
+    switch (result) {
+      case DoomContentLoaded(:final content):
+        await _load(content, request: request, retainOnFailure: retained);
+      case DoomContentPathMissing(:final setupMessage, :final autoLoadFixture):
+        if (mode == _ContentLoadMode.selection) {
+          _publishSelectionFailure(retained!, 'No browser IWAD was selected.');
+          return;
+        }
+        if (!autoLoadFixture) {
+          _publish(DoomAppState.failure(setupMessage));
+          return;
+        }
+        final fixture = _tryLoadFixture(request);
+        if (fixture == null) return;
+        await _load(fixture, request: request, setupMessage: setupMessage);
+      case DoomContentLoadFailure(:final message):
+        if (mode == _ContentLoadMode.selection) {
+          _publishSelectionFailure(retained!, message);
+        } else {
+          _publish(DoomAppState.failure(message));
+        }
+    }
+  }
+
+  DoomContent? _tryLoadFixture(int request) {
+    try {
+      return _loadFixture();
+    } catch (_) {
+      if (_isCurrent(request)) {
+        _publish(
+          const DoomAppState.failure(
+            'Could not create the synthetic test map.',
+          ),
+        );
+      }
+      return null;
+    }
   }
 
   Future<void> _load(

@@ -12,7 +12,7 @@
 // is precisely the wrong look. Doom's darkness is a palette remap, not a
 // multiply.
 //
-// Texture formats: flame_3d 0.3.0 has no R8 format, so all three lookups are
+// Texture formats: flame_3d 0.3.2 has no R8 format, so all three lookups are
 // RGBA8. The atlas packs the palette index in red and mask coverage in alpha.
 // The COLORMAP and PLAYPAL lookups store their payload in red / RGB.
 //

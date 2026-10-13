@@ -1,4 +1,4 @@
-/// The pinned flame_3d 0.3.0 interleaved vertex ABI, expressed once.
+/// The pinned flame_3d 0.3.2 interleaved vertex ABI, expressed once.
 ///
 /// flame_3d builds vertex buffers by concatenating [Vertex.storage], a fixed
 /// 20-float interleaved record. Every geometry producer in this project writes
@@ -25,7 +25,7 @@
 /// This is what lets one [PackedFlameSurface] draw an entire atlas page: each
 /// vertex carries its own sub-rectangle and sampling mode, so wall, flat and
 /// sprite geometry sharing a page merge into a single draw instead of one draw
-/// per texture. flame_3d 0.3.0 has no batching and insertion-sorts visible
+/// per texture. flame_3d 0.3.2 has no batching and insertion-sorts visible
 /// draws back-to-front, so surface count is the cost that matters most.
 ///
 /// The byte layout is unchanged, so the pipeline's vertex descriptor stays
@@ -97,7 +97,7 @@ abstract final class DoomVertexAbi {
   /// Sentinel meaning 'derive the COLORMAP row from light and distance'.
   static const double lightRowAutomatic = -1;
 
-  /// flame_3d 0.3.0 binds index buffers as uint16 only, so one surface can
+  /// flame_3d 0.3.2 binds index buffers as uint16 only, so one surface can
   /// address at most 65536 vertices.
   static const int maxVerticesPerSurface = 65535;
 

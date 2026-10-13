@@ -64,7 +64,7 @@ Mitigation, built into M2 rather than bolted on later:
 
 ## Renderer pin policy
 
-Flutter 3.44.4 / Dart 3.12.2, Flame 1.38.0, flame_3d 0.3.0, vector_math 2.2.0 —
+Flutter 3.47.7 / Dart 3.13.5, Flame 1.38.0, flame_3d 0.3.2, vector_math 2.4.0 —
 all exact. flame_3d is experimental with no semver guarantee, so all unstable
 surface area lives in `lib/adapter`. **Forking flame_3d is forbidden.** On an
 unfixable upstream or adapter blocker: stop and revisit the plan with the user.

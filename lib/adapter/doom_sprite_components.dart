@@ -227,7 +227,7 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
 
   @override
   void renderTree(Canvas canvas) {
-    // flame_3d 0.3.0 bypasses isVisible() when an AABB is fully inside the
+    // flame_3d 0.3.2 bypasses isVisible() when an AABB is fully inside the
     // frustum. Retained pooled actors therefore need a gate before Object3D's
     // culling fast path or their last PUFF/BEXP frame remains in the draw list.
     if (!_active) {

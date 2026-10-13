@@ -25,7 +25,7 @@ import 'vertex_abi.dart';
 ///
 /// flame_3d allocates one host-visible [GpuBuffer] per surface holding vertices
 /// followed by indices. Re-creating that buffer for a height change would
-/// orphan the old one, and flame_3d 0.3.0 exposes no per-resource disposal, so
+/// orphan the old one, and flame_3d 0.3.2 exposes no per-resource disposal, so
 /// orphaned buffers cannot be reclaimed on demand. Writing in place keeps the
 /// buffer count flat. Writing only the dirty range keeps a door on a merged
 /// atlas page from re-uploading megabytes of untouched wall geometry.
@@ -63,7 +63,7 @@ final class PackedFlameSurface extends Surface {
   }
 
   /// What this surface draws. Only used for diagnostics and scene grouping;
-  /// blend and depth state are per render pass in flame_3d 0.3.0, never per
+  /// blend and depth state are per render pass in flame_3d 0.3.2, never per
   /// material.
   final DoomSurfaceKind kind;
 
@@ -404,7 +404,7 @@ final class PackedFlameSurface extends Surface {
 
 /// What a surface represents in the Doom renderer.
 ///
-/// flame_3d 0.3.0 applies blend and depth state per render pass rather than per
+/// flame_3d 0.3.2 applies blend and depth state per render pass rather than per
 /// material, so this cannot switch GPU state. It drives scene grouping, draw
 /// ordering and diagnostics instead.
 enum DoomSurfaceKind {

@@ -37,7 +37,7 @@ export 'doom_sprite_components.dart'
 ///
 /// ## Merging strategy
 ///
-/// flame_3d 0.3.0 has no batching. Every visible object is inserted into a
+/// flame_3d 0.3.2 has no batching. Every visible object is inserted into a
 /// draw list that is insertion-sorted back-to-front each frame, so the cost is
 /// quadratic in visible object count. Meshes are therefore merged by (atlas
 /// page, surface kind) into as few surfaces as uint16 indices allow, giving one

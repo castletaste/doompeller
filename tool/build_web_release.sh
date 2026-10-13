@@ -7,7 +7,7 @@ if [[ -n "${DOOMPELLER_FLUTTER:-}" ]]; then
 elif command -v flutter >/dev/null 2>&1; then
   DOOMPELLER_FLUTTER="$(command -v flutter)"
 else
-  echo "error: Flutter 3.44.4 is required; set DOOMPELLER_FLUTTER or add flutter to PATH" >&2
+  echo "error: Flutter 3.47.7 is required; set DOOMPELLER_FLUTTER or add flutter to PATH" >&2
   exit 1
 fi
 if [[ -n "${DOOMPELLER_DART:-}" ]]; then
@@ -17,7 +17,7 @@ elif [[ -x "$(dirname "$DOOMPELLER_FLUTTER")/dart" ]]; then
 elif command -v dart >/dev/null 2>&1; then
   DOOMPELLER_DART="$(command -v dart)"
 else
-  echo "error: the Dart executable for Flutter 3.44.4 is required" >&2
+  echo "error: the Dart executable for Flutter 3.47.7 is required" >&2
   exit 1
 fi
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,8 +36,8 @@ if [[ ! -x "$DOOMPELLER_DART" ]]; then
   exit 1
 fi
 flutter_version="$("$DOOMPELLER_FLUTTER" --version --machine | sed -n 's/.*"frameworkVersion": *"\([^"]*\)".*/\1/p' | head -n 1)"
-if [[ "$flutter_version" != "3.44.4" ]]; then
-  echo "error: expected Flutter 3.44.4, found ${flutter_version:-unknown}" >&2
+if [[ "$flutter_version" != "3.47.7" ]]; then
+  echo "error: expected Flutter 3.47.7, found ${flutter_version:-unknown}" >&2
   exit 1
 fi
 if ! command -v naga >/dev/null 2>&1; then

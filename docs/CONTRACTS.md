@@ -525,7 +525,7 @@ seen from above, so floors keep a +Y normal and ceilings are emitted reversed.
 
 ### Atlas tiling scheme
 
-Pages are RGBA8 because flame_3d 0.3.0 has no R8 format: R is the palette
+Pages are RGBA8 because flame_3d 0.3.2 has no R8 format: R is the palette
 index, G and A are coverage, B is reserved. World textures tile; each vertex
 carries its own atlas sub-rect in floats 12..15 and `uvMode = uvModeRepeat`,
 and the shader wraps within that rect, so UVs past 1.0 are expected and a

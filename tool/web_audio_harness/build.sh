@@ -5,12 +5,12 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 output="${1:-/private/tmp/doompeller-web-audio-harness}"
 flutter_bin="${DOOMPELLER_FLUTTER:-$(command -v flutter || true)}"
 if [[ -z "$flutter_bin" || ! -x "$flutter_bin" ]]; then
-  echo "error: set DOOMPELLER_FLUTTER or add Flutter 3.44.4 to PATH" >&2
+  echo "error: set DOOMPELLER_FLUTTER or add Flutter 3.47.7 to PATH" >&2
   exit 1
 fi
 dart_bin="${DOOMPELLER_DART:-$(dirname "$flutter_bin")/dart}"
 if [[ ! -x "$dart_bin" ]]; then
-  echo "error: set DOOMPELLER_DART to the Dart executable for Flutter 3.44.4" >&2
+  echo "error: set DOOMPELLER_DART to the Dart executable for Flutter 3.47.7" >&2
   exit 1
 fi
 

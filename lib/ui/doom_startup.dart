@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Render a usable shell before asynchronous WebGPU initialization begins.
+/// Render a usable shell before asynchronous renderer initialization begins.
 final class DoomStartup extends StatefulWidget {
   const DoomStartup({super.key, required this.initialize, required this.child});
   final Future<void> Function() initialize;
@@ -66,7 +66,7 @@ final class _DoomStartupState extends State<DoomStartup> {
                         ),
                         const SizedBox(height: 12),
                         const Text(
-                          'Use a browser with WebGPU support and check your connection, then try again.',
+                          'Use a browser with WebGL 2 support and check your connection, then try again.',
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 20),

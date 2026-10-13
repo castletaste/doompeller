@@ -774,7 +774,7 @@ void main() {
       }
     });
 
-    test('vertex stride matches the 20-float Flame ABI', () {
+    test('vertex stride matches the 20-float renderer ABI', () {
       final MapBuilder b = MapBuilder('ABI');
       final int s = b.sector();
       b.solidLoop(<int>[0, 0, 256, 0, 256, 256, 0, 256], s);

@@ -179,7 +179,7 @@ Future<PreparedDoomLevel> _computeLevel(
 
 // compute runs this on a native isolate. On web it uses the calling event loop;
 // yielding between stages lets loading UI progress, but a stage is still CPU
-// synchronous there. No Flame, GPU or Flutter binding enters the worker.
+// synchronous there. No renderer, GPU or Flutter binding enters the worker.
 Future<PreparedDoomLevel> _prepareLevel(
   DoomLevelPreparationRequest request,
 ) async {

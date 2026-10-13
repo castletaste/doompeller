@@ -176,7 +176,15 @@ function tarBuffer(entries) {
       ? entry.contents
       : Buffer.from(entry.contents ?? '');
     const header = Buffer.alloc(512);
-    writeString(header, 0, 100, entry.name);
+    // ustar splits paths over 100 bytes into prefix and name, as Python's
+    // USTAR_FORMAT packer does for the real artifact.
+    let name = entry.name;
+    if (Buffer.byteLength(name) > 100) {
+      const split = name.lastIndexOf('/', name.length - 1);
+      writeString(header, 345, 155, name.slice(0, split));
+      name = name.slice(split + 1);
+    }
+    writeString(header, 0, 100, name);
     writeOctal(header, 100, 8, entry.mode ?? 0o644);
     writeOctal(header, 108, 8, 0);
     writeOctal(header, 116, 8, 0);
@@ -215,7 +223,14 @@ function validEntries() {
     {name: 'doom_music_worker.mjs', contents: 'export const worker = true;'},
     {name: 'doom_music_worker_loader.mjs', contents: 'export const loader = true;'},
     {name: 'doom_music_worklet.js', contents: 'registerProcessor("doom-music", class {});'},
-    {name: 'assets/assets/shaders/doom_palette.wgslbundle', contents: 'shader'},
+    {
+      name: 'assets/flutter_scene_generated/opengl_es/shaderbundle.doom_palette.0123abcd.shaderbundle',
+      contents: 'shader',
+    },
+    {
+      name: 'assets/packages/flutter_scene/flutter_scene_generated/opengl_es/shaderbundle.base.89abcdef.shaderbundle',
+      contents: 'shader',
+    },
     {name: APPROVED_IWAD_PATH, contents: testWad},
   ];
 }
@@ -261,7 +276,7 @@ test('trusted header constant stays byte-identical to the production source', ()
 test('sanitizes an archive while preserving the one approved hidden WAD', () => {
   withArtifact(validEntries(), ({source, destination}) => {
     const result = sanitize(source, destination);
-    assert.equal(result.fileCount, 11);
+    assert.equal(result.fileCount, 12);
     assert.equal(result.iwadBytes, testWad.length);
     assert.equal(result.iwadSha256, testWadSha256);
     assert.deepEqual(
@@ -345,6 +360,18 @@ test('enforces required files, Wasm-only bootstrap, and bounded sizes', () => {
       assert.throws(() => sanitize(source, destination), /missing required/, name);
     });
   }
+  const palette =
+    'assets/flutter_scene_generated/opengl_es/shaderbundle.doom_palette.0123abcd.shaderbundle';
+  withArtifact(validEntries().filter((entry) => entry.name !== palette), ({source, destination}) => {
+    assert.throws(() => sanitize(source, destination), /exactly one file .* found 0/);
+  });
+  const stale = [
+    ...validEntries(),
+    {name: palette.replace('0123abcd', 'feedface'), contents: 'stale shader'},
+  ];
+  withArtifact(stale, ({source, destination}) => {
+    assert.throws(() => sanitize(source, destination), /exactly one file .* found 2/);
+  });
   const fallback = validEntries().map((entry) => entry.name === 'flutter_bootstrap.js'
     ? {...entry, contents: '{"compileTarget":"dart2js","renderer":"skwasm","useLocalCanvasKit":true}'}
     : entry);

@@ -43,6 +43,18 @@ void main(List<String> arguments) {
     if (stale.existsSync()) stale.deleteSync();
   }
 
+  // flutter_scene's generated asset directories carry .gitignore files that
+  // Flutter copies like any other asset. They mean nothing in a deployment, and
+  // the artifact policy rejects hidden files.
+  final Directory assets = Directory('${output.path}/assets');
+  if (assets.existsSync()) {
+    for (final FileSystemEntity entity in assets.listSync(recursive: true)) {
+      if (entity is File && entity.uri.pathSegments.last == '.gitignore') {
+        entity.deleteSync();
+      }
+    }
+  }
+
   final String finalized = bootstrap.readAsStringSync();
   if (finalized.contains('"compileTarget":"dart2js"') ||
       File('${output.path}/main.dart.js').existsSync()) {

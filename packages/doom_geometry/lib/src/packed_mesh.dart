@@ -20,30 +20,28 @@ import 'wad_types.dart';
 ///
 /// ## Vertex ABI
 ///
-/// 20 floats per vertex, the same byte layout as flame_3d's Vertex.storage.
-/// This must stay identical to lib/adapter/vertex_abi.dart, which is the
-/// authority: it is pinned against a real flame_3d Vertex by a tripwire test.
+/// 20 floats per vertex. This must stay identical to
+/// lib/adapter/vertex_abi.dart, which is the authority: its tripwire test pins
+/// it against the GPU vertex layout and the palette shader's attributes.
 ///
 ///     [0..2]   position   x, y, z
 ///     [3..4]   texCoord   u, v
 ///     [5..8]   color      light, 1, 1, alpha
 ///     [9..11]  normal     x, y, z
 ///     [12..15] atlas rect u0, v0, u1, v1
-///     [16..19] params     fullBright, lightRow, uvMode, unused
+///     [16..19] params     fullBright, lightRow, uvMode, depthLayer (0)
 ///
-/// Two slots differ from flame_3d's nominal meaning, by design:
+/// Two slots carry renderer parameters rather than their usual meaning:
 ///
 /// The colour record carries lighting, not colour. The palette shader resolves
 /// real RGB through COLORMAP and PLAYPAL, so red holds the sector light level
 /// (fake contrast already applied), green and blue are written as 1, and alpha
 /// is reserved for geometry fades.
 ///
-/// Floats 12..19 are flame_3d's skinning joints and weights. Doompeller never
-/// skins anything, so instead each vertex carries its own atlas sub-rectangle
-/// and sampling mode. That is what lets a single surface draw an entire atlas
-/// page: wall, flat and sprite geometry sharing a page merge into one draw
-/// rather than one draw per texture, which matters because flame_3d 0.3.2 has
-/// no batching and sorts every visible draw.
+/// Floats 12..19 carry each vertex's own atlas sub-rectangle and sampling
+/// mode. That is what lets a single surface draw an entire atlas page: wall,
+/// flat and sprite geometry sharing a page merge into one draw rather than one
+/// draw per texture, and the draw count is the per-frame cost that matters.
 abstract final class DoomVertexAbi {
   static const int floatsPerVertex = 20;
   static const int positionOffset = 0;
@@ -51,10 +49,11 @@ abstract final class DoomVertexAbi {
   static const int colorOffset = 5;
   static const int normalOffset = 9;
 
-  /// flame_3d's joints slot; here the normalised atlas rect (u0, v0, u1, v1).
+  /// The normalised atlas rect (u0, v0, u1, v1).
   static const int atlasRectOffset = 12;
 
-  /// flame_3d's weights slot; here (fullBright, lightRow, uvMode, unused).
+  /// (fullBright, lightRow, uvMode, depthLayer); the compiler always leaves
+  /// the depth layer at 0.
   static const int paramsOffset = 16;
 
   /// Clamp sampling to the vertex's atlas rect. Sprites, so filtering cannot

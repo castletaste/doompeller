@@ -65,7 +65,7 @@ void main() {
       expect(
         scene.surfaceCount,
         1,
-        reason: 'flame_3d has no batching, so surface count is the draw cost',
+        reason: 'every surface is one draw, so surface count is the draw cost',
       );
       expect(diagnostics.surfacesCreated, 1);
       expect(diagnostics.triangles, 12);

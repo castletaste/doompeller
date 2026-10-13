@@ -1,6 +1,6 @@
 /// Pure Dart Doom WAD container, resource and map-lump parser.
 ///
-/// Nothing here imports dart:ui, dart:ffi, Flutter or Flame: the package turns
+/// Nothing here imports dart:ui, dart:ffi, Flutter or a renderer: the package turns
 /// WAD bytes into typed data and stops there. Hostile input surfaces as a
 /// [DoomFailure] rather than an untyped error, and every allocation is bounded
 /// by [DoomLimits].

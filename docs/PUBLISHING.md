@@ -8,9 +8,10 @@
 - Production branch: `main`
 - PR branch alias: `https://pr-N.castletaste-doompeller.pages.dev`
 
-GitHub Actions builds the static Flutter Wasm / Flame 3D WebGPU application.
+GitHub Actions builds the static Flutter Wasm / flutter_scene WebGL2 application.
 There is no server-side Doom engine or Pages Function. The pinned game stack
-remains Flutter 3.47.7, Flame 1.38.0, flame_3d 0.3.2 and naga-cli 30.0.1.
+is Flutter 3.47.7 and flutter_scene 0.24.3; the app's build hook compiles the
+shaders with the SDK's own impellerc, so CI installs no shader toolchain.
 The published bootstrap has only `dart2wasm` / `skwasm`, no dart2js fallback.
 
 CI downloads the exact Flutter 3.47.7 Linux x64 archive directly from the

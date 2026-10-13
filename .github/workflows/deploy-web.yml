@@ -56,18 +56,12 @@ jobs:
           flutter --version
           dart --version
           python3 --version
-          cargo --version
 
       - name: Install contract audit prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep
           rg --version
-
-      - name: Install naga-cli 30.0.1
-        run: |
-          cargo install naga-cli --version 30.0.1 --locked --force
-          test "$(naga --version)" = "30.0.1"
 
       - name: Restore exact shareware IWAD cache
         id: iwad-cache
@@ -122,11 +116,6 @@ jobs:
 
       - name: Resolve locked app dependencies
         run: flutter pub get --enforce-lockfile
-
-      - name: Generate declared shader assets for the clean checkout
-        run: |
-          flutter pub run flame_3d:build_shaders --with-web-gpu
-          dart run tool/verify_web_shader_bundle.dart assets/shaders/doom_palette.wgslbundle
 
       - name: Analyze app
         run: flutter analyze

@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import stat
 import tarfile
@@ -51,9 +52,20 @@ REQUIRED_FILES = {
     PurePosixPath("doom_music_worker.mjs"),
     PurePosixPath("doom_music_worker_loader.mjs"),
     PurePosixPath("doom_music_worklet.js"),
-    PurePosixPath("assets/assets/shaders/doom_palette.wgslbundle"),
     EXPECTED_WAD_PATH,
 }
+# flutter_scene names compiled shader bundles by content hash. Each pattern must
+# match exactly one file, so a missing or stale bundle fails the artifact.
+REQUIRED_PATTERNS = (
+    re.compile(
+        r"assets/flutter_scene_generated/opengl_es/"
+        r"shaderbundle\.doom_palette\.[0-9a-f]+\.shaderbundle"
+    ),
+    re.compile(
+        r"assets/packages/flutter_scene/flutter_scene_generated/opengl_es/"
+        r"shaderbundle\.base\.[0-9a-f]+\.shaderbundle"
+    ),
+)
 FORBIDDEN_NAMES = {
     "_routes.json",
     "_worker.js",
@@ -170,6 +182,13 @@ def _validate_bundle(directory: Path) -> list[tuple[PurePosixPath, Path]]:
     missing = sorted(REQUIRED_FILES - present, key=str)
     if missing:
         _fail(f"artifact is missing required files: {', '.join(map(str, missing))}")
+    for pattern in REQUIRED_PATTERNS:
+        matches = [p for p in present if pattern.fullmatch(p.as_posix())]
+        if len(matches) != 1:
+            _fail(
+                f"artifact needs exactly one file matching {pattern.pattern}, "
+                f"found {len(matches)}"
+            )
     if PurePosixPath("main.dart.js") in present:
         _fail("dart2js fallback must not be deployed")
 
@@ -213,7 +232,11 @@ def pack(source: Path, archive: Path) -> None:
         _fail(f"archive already exists: {archive}")
     with archive.open("xb") as raw:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w") as output:
+            # ustar stores long paths in the prefix field, which the preview
+            # sanitizer reads; PAX extension headers would be rejected there.
+            with tarfile.open(
+                fileobj=compressed, mode="w", format=tarfile.USTAR_FORMAT
+            ) as output:
                 for relative, path in files:
                     info = tarfile.TarInfo(relative.as_posix())
                     info.size = path.stat().st_size

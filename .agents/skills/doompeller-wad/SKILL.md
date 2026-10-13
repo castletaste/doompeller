@@ -5,7 +5,7 @@ description: "Implement or debug Doompeller's pure-Dart WAD layer: container par
 
 # Doompeller WAD
 
-`packages/doom_wad` is pure Dart: no `dart:ui`, `dart:ffi`, Flutter, or Flame. `docs/CONTRACTS.md` is the API contract.
+`packages/doom_wad` is pure Dart: no `dart:ui`, `dart:ffi`, Flutter, or a renderer. `docs/CONTRACTS.md` is the API contract.
 
 - Hostile input never throws untyped errors. Emit `DoomFormatFailure`, `DoomLimitFailure`, `DoomMissingLumpFailure`, or `DoomMapFailure`, and check `DoomLimits` before allocating. New parsing work needs its own limit and a typed-failure test.
 - Validate offsets and sizes against file bounds before reading. Names are 8 bytes NUL-padded, compared uppercase; `-` means no texture. `WadSet` resolves later entries first so a PWAD overrides an IWAD.

@@ -91,9 +91,14 @@ const REQUIRED_ROOT_FILES = new Set([
 ]);
 const REQUIRED_FILES = new Set([
   ...REQUIRED_ROOT_FILES,
-  'assets/assets/shaders/doom_palette.wgslbundle',
   APPROVED_IWAD_PATH,
 ]);
+// flutter_scene names compiled shader bundles by content hash. Each pattern must
+// match exactly one file, so a missing or stale bundle fails the artifact.
+const REQUIRED_PATTERNS = [
+  /^assets\/flutter_scene_generated\/opengl_es\/shaderbundle\.doom_palette\.[0-9a-f]+\.shaderbundle$/,
+  /^assets\/packages\/flutter_scene\/flutter_scene_generated\/opengl_es\/shaderbundle\.base\.[0-9a-f]+\.shaderbundle$/,
+];
 const FORBIDDEN_NAMES = new Set([
   '_routes.json',
   '_worker.js',
@@ -494,6 +499,12 @@ function sanitizeArtifactArchive(
   for (const required of REQUIRED_FILES) {
     const entry = byPath.get(required);
     if (entry === undefined) fail(`artifact is missing required file: ${required}`);
+  }
+  for (const pattern of REQUIRED_PATTERNS) {
+    const matches = entries.filter((entry) => pattern.test(entry.relativePath));
+    if (matches.length !== 1) {
+      fail(`artifact needs exactly one file matching ${pattern}, found ${matches.length}`);
+    }
   }
   const iwad = byPath.get(APPROVED_IWAD_PATH);
   if (iwad === undefined) fail(`artifact is missing approved IWAD: ${APPROVED_IWAD_PATH}`);

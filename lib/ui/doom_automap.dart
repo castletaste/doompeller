@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../game/doom_automap.dart';
 
-/// Classic north-up Doom automap, intentionally drawn outside Flame 3D.
+/// Classic north-up Doom automap, intentionally drawn outside the 3D scene.
 final class DoomAutomapOverlay extends StatelessWidget {
   const DoomAutomapOverlay({
     super.key,

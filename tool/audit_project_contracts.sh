@@ -19,19 +19,32 @@ need_line() {
 
 # Pure-Dart packages are deliberately usable without Flutter or a GPU runtime.
 if rg -n -g '*.dart' \
-  "^(import|export) ['\"](dart:(ui|ffi|js|js_interop|js_interop_unsafe|html)|package:(flutter|flame|flame_3d|web)(/|['\"]))" \
+  "^(import|export) ['\"](dart:(ui|ffi|js|js_interop|js_interop_unsafe|html)|package:(flutter|flutter_scene|flutter_gpu|flutter_gpu_shaders|hooks|flame|flame_3d|web)(/|['\"]))" \
   packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music
 then
   fail "pure-Dart package imports a forbidden platform library"
 fi
 
-# All direct flame_3d usage is quarantined in the adapter. Adapter tests may
-# import it to pin the real ABI, but product/game/WAD/geometry code may not.
-flame_hits=$(rg -l -g '*.dart' "package:flame_3d/" lib packages tool 2>/dev/null || true)
-outside_adapter=$(printf '%s\n' "$flame_hits" | rg -v "^lib/adapter/" || true)
+# All direct renderer usage is quarantined in the adapter. Adapter tests may
+# import it to pin the real vertex layout, but product/game/WAD/geometry code
+# and tools may not.
+renderer_hits=$(rg -l -g '*.dart' "package:(flutter_scene|flutter_gpu)/" lib packages tool 2>/dev/null || true)
+outside_adapter=$(printf '%s\n' "$renderer_hits" | rg -v "^lib/adapter/" || true)
 if [ -n "$outside_adapter" ]; then
   printf '%s\n' "$outside_adapter" >&2
-  fail "flame_3d import exists outside lib/adapter"
+  fail "flutter_scene or flutter_gpu import exists outside lib/adapter"
+fi
+# flutter_scene internals carry no compatibility promise. One adapter file
+# reaches them (caller-managed buffers and culling enums); a bump re-verifies it.
+internal_hits=$(rg -l -g '*.dart' "package:flutter_scene/src/" lib packages tool test 2>/dev/null || true)
+unexpected_internal=$(printf '%s\n' "$internal_hits" | rg -v "^lib/adapter/scene_gpu\.dart$" || true)
+if [ -n "$unexpected_internal" ]; then
+  printf '%s\n' "$unexpected_internal" >&2
+  fail "flutter_scene implementation import exists outside lib/adapter/scene_gpu.dart"
+fi
+# The previous renderer is gone; nothing may bring it back.
+if rg -n -g '*.dart' "^(import|export) ['\"]package:flame(_3d)?/" lib packages tool test; then
+  fail "Flame import found after the flutter_scene migration"
 fi
 
 # These are the prohibited ways to smuggle another engine or renderer into the
@@ -58,8 +71,9 @@ fi
 # Experimental rendering dependencies and ABI/replay pins are intentionally
 # exact. A change requires updating the corresponding tripwire corpus.
 need_line "^  flutter: 3\.47\.7$" pubspec.yaml
-need_line "^  flame: 1\.38\.0$" pubspec.yaml
-need_line "^  flame_3d: 0\.3\.2$" pubspec.yaml
+need_line "^  flutter_scene: 0\.24\.3$" pubspec.yaml
+need_line "^  flutter_gpu_shaders: 0\.5\.2$" pubspec.yaml
+need_line "^  hooks: 2\.0\.2$" pubspec.yaml
 need_line "^  vector_math: 2\.4\.0$" pubspec.yaml
 need_line "^  web: 1\.1\.1$" pubspec.yaml
 need_line "^    - \.local/doom/DOOM1\.WAD$" pubspec.yaml

@@ -9,7 +9,7 @@ import 'dart:typed_data';
 /// animation and upload rule run under `flutter test`, which has no GPU.
 ///
 /// Exactly one implementation is active at a time: constructing one makes it
-/// [instance], the same registration flame_3d's backend used.
+/// [instance].
 abstract base class DoomGpu {
   DoomGpu() {
     _instance = this;
@@ -65,8 +65,8 @@ enum DoomPixelFormat {
 
 /// A value whose GPU object is created on first access and then reused.
 ///
-/// Mirrors flame_3d's `Resource` so ownership stays obvious: the CPU-side
-/// object always exists, the GPU side appears when something draws it.
+/// Ownership stays obvious: the CPU-side object always exists, the GPU side
+/// appears when something draws it.
 abstract class DoomGpuResource<T> {
   T? _resource;
 

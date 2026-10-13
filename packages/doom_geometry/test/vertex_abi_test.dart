@@ -8,9 +8,9 @@ import 'support/synthetic_map.dart';
 
 /// Tripwire for the vertex ABI shared with lib/adapter.
 ///
-/// doom_geometry is pure Dart and cannot import flame_3d, so it cannot assert
-/// against a real Vertex the way the adapter's own tripwire does. What it CAN
-/// do is pin the field meanings it writes, so that if the adapter's layout ever
+/// doom_geometry is pure Dart and cannot import the renderer, so it cannot
+/// assert against the GPU layout the way the adapter's own tripwire does.
+/// What it CAN do is pin the field meanings it writes, so that if the adapter's layout ever
 /// moves, exactly one of these fails and names the field rather than the level
 /// rendering as garbage.
 ///

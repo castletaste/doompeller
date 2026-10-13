@@ -1,5 +1,5 @@
-// Developer-only live E1M1 replay through DoomRuntimeGame's ordinary Flame
-// fixed-tick update and retained renderer.
+// Developer-only live E1M1 replay through DoomRuntimeGame's ordinary
+// fixed-tick update, driven and drawn by the production scene surface.
 import 'dart:io';
 import 'dart:ui' show FramePhase, FrameTiming;
 

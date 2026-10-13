@@ -29,7 +29,7 @@ typedef DoomGameSurfaceBuilder =
 ///
 /// Keeping creation and presentation together prevents a runtime from being
 /// configured without a surface that can render it. Production uses `null`
-/// here and creates the built-in Flame surface.
+/// here and creates the built-in flutter_scene surface.
 final class DoomGameHost {
   const DoomGameHost({
     required this.runtimeFactory,

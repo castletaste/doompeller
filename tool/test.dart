@@ -4,10 +4,11 @@ import 'dart:io';
 /// Runs app tests in the checkout without bundling proprietary content.
 ///
 /// Flutter validates every manifest asset before starting a test. The release
-/// manifest intentionally names the developer-only IWAD and generated shader
-/// directory, so synthetic tests create empty, temporary placeholders for those
-/// two paths instead of copying the project or rewriting its manifest. The
-/// placeholders are removed before this process exits.
+/// manifest intentionally names the developer-only IWAD, so synthetic tests
+/// create an empty, temporary placeholder for it instead of copying the
+/// project or rewriting its manifest. The placeholder is removed before this
+/// process exits. The generated shader directories always exist: each tracks
+/// its own .gitignore.
 ///
 /// Use --include-content with DOOM_WAD_PATH for original-content acceptance.
 Future<void> main(List<String> arguments) async {
@@ -70,10 +71,6 @@ Future<void> main(List<String> arguments) async {
       manifestWad.renameSync(backup.path);
       movedManifestWad = backup;
     }
-    _ensureDirectory(
-      Directory('${root.path}/assets/shaders'),
-      createdDirectories,
-    );
     if (!manifestWad.existsSync()) {
       _ensureDirectory(manifestWad.parent, createdDirectories);
       manifestWad.writeAsBytesSync(const <int>[]);

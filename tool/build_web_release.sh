@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproducible Flutter Wasm + flame_3d WebGPU release build.
+# Reproducible Flutter Wasm + flutter_scene WebGL2 release build.
 set -euo pipefail
 
 if [[ -n "${DOOMPELLER_FLUTTER:-}" ]]; then
@@ -40,11 +40,6 @@ if [[ "$flutter_version" != "3.47.7" ]]; then
   echo "error: expected Flutter 3.47.7, found ${flutter_version:-unknown}" >&2
   exit 1
 fi
-if ! command -v naga >/dev/null 2>&1; then
-  echo "error: naga-cli is required for the WebGPU shader bundle" >&2
-  exit 1
-fi
-
 sha256_file() {
   if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 "$1" | awk '{print $1}'
@@ -55,11 +50,6 @@ sha256_file() {
     return 1
   fi
 }
-if [[ "$(naga --version)" != "30.0.1" ]]; then
-  echo "error: expected naga 30.0.1, found $(naga --version)" >&2
-  exit 1
-fi
-
 if [[ ! -f "$IWAD_SOURCE" ]]; then
   echo "error: default web IWAD not found: $IWAD_SOURCE" >&2
   exit 1
@@ -74,18 +64,6 @@ if [[ "$source_iwad_sha256" != "$EXPECTED_IWAD_SHA256" ]]; then
   echo "error: unexpected IWAD SHA-256: $source_iwad_sha256" >&2
   exit 1
 fi
-
-"$DOOMPELLER_FLUTTER" pub run flame_3d:build_shaders --with-web-gpu
-
-native_bundle="assets/shaders/doom_palette.shaderbundle"
-web_bundle="assets/shaders/doom_palette.wgslbundle"
-for bundle in "$native_bundle" "$web_bundle"; do
-  if [[ ! -s "$bundle" ]]; then
-    echo "error: missing generated shader bundle: $bundle" >&2
-    exit 1
-  fi
-done
-"$DOOMPELLER_DART" run tool/verify_web_shader_bundle.dart "$web_bundle"
 
 "$DOOMPELLER_FLUTTER" build web --wasm --release --no-web-resources-cdn
 "$DOOMPELLER_DART" run tool/finalize_wasm_web_build.dart build/web
@@ -115,13 +93,28 @@ required=(
   build/web/doom_music_worker.mjs
   build/web/doom_music_worker_loader.mjs
   build/web/doom_music_worklet.js
-  build/web/assets/assets/shaders/doom_palette.wgslbundle
   build/web/_headers
   build/web/assets/.local/doom/DOOM1.WAD
 )
 for file in "${required[@]}"; do
   if [[ ! -s "$file" ]]; then
     echo "error: missing or empty Wasm release artifact: $file" >&2
+    exit 1
+  fi
+done
+
+# hook/build.dart compiles the palette shaders for the web's GLSL ES target,
+# and flutter_scene ships its own base bundle. Both are named by content hash;
+# exactly one of each proves the build did not pick up a stale bundle.
+shader_bundles=(
+  'build/web/assets/flutter_scene_generated/opengl_es/shaderbundle.doom_palette.*.shaderbundle'
+  'build/web/assets/packages/flutter_scene/flutter_scene_generated/opengl_es/shaderbundle.base.*.shaderbundle'
+)
+for pattern in "${shader_bundles[@]}"; do
+  # shellcheck disable=SC2206 # The pattern is expanded here on purpose.
+  matches=($pattern)
+  if [[ ${#matches[@]} -ne 1 || ! -s "${matches[0]}" ]]; then
+    echo "error: expected exactly one shader bundle matching $pattern" >&2
     exit 1
   fi
 done
@@ -192,4 +185,4 @@ require_route_header '/assets/.local/doom/DOOM1.WAD' 'Cache-Control: public, max
 
 sh tool/audit_project_contracts.sh
 
-echo "Wasm/WebGPU release verified: $(wc -c < build/web/main.dart.wasm | tr -d ' ') bytes main.dart.wasm; $destination_iwad_bytes bytes bundled DOOM1.WAD"
+echo "Wasm/WebGL2 release verified: $(wc -c < build/web/main.dart.wasm | tr -d ' ') bytes main.dart.wasm; $destination_iwad_bytes bytes bundled DOOM1.WAD"

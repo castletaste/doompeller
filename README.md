@@ -1,6 +1,6 @@
 # Doompeller
 
-Doompeller is a native Dart + Flutter + Flame 3D reimplementation with a pure
+Doompeller is a native Dart + Flutter + flutter_scene reimplementation with a pure
 Dart WAD parser, geometry compiler, and deterministic 35 Hz gameplay core. It
 does not embed, wrap, download, or extract another Doom engine.
 
@@ -18,8 +18,12 @@ the app's assets, or provide the same verified `DOOM1.WAD` yourself:
 ```sh
 python3 tool/fetch_shareware.py
 flutter pub get --enforce-lockfile
-flutter pub run flame_3d:build_shaders
 ```
+
+The palette shaders are compiled by the app's build hook (`hook/build.dart`)
+during every `flutter run`, `flutter build` and `flutter test`, with the
+impellerc that ships in the pinned Flutter SDK. No separate shader toolchain is
+involved, and the generated bundles stay ignored under `flutter_scene_generated/`.
 
 The file stays ignored at `.local/doom/DOOM1.WAD`; it is bundled into the app
 and public site. The app starts E1M1 without a chooser. `DOOM_WAD_PATH` can
@@ -43,14 +47,15 @@ If a configured path is unreadable, invalid, not an IWAD, or lacks E1M1, the
 app shows an error. It will not silently switch content; the synthetic fallback
 requires an explicit button press.
 
-## Run in a WebGPU browser
+## Run in a browser
 
 The HTML startup screen shows loading and offers retry on errors or slow loading.
 Graphics and IWAD loading failures also have explicit retry actions. Browser
 focus loss pauses the game; returning to the tab leaves it paused. Controls hints
 hide on player movement and return after six idle seconds.
 
-The browser target is Flutter Wasm plus flame_3d's WebGPU backend. The release
+The browser target is Flutter Wasm plus flutter_scene's WebGL2 backend, so any
+browser with WebGL 2 runs it; WebGPU is not required. The release
 build packages `.local/doom/DOOM1.WAD` at
 `build/web/assets/.local/doom/DOOM1.WAD`, and startup loads E1M1 automatically.
 **SELECT LOCAL IWAD** remains available only from the pause menu for switching
@@ -64,18 +69,18 @@ Pause and browser blur freeze music; restarting a level restarts its track.
 If the browser cannot provide the music transport, the pause menu reports the
 failure while effects remain available.
 
-Build the reproducible release with Flutter 3.47.7, naga-cli 30.0.1 and
-ripgrep (`rg`) on PATH:
+Build the reproducible release with Flutter 3.47.7 and ripgrep (`rg`) on PATH:
 
 ```sh
 DOOMPELLER_FLUTTER="$(command -v flutter)" bash tool/build_web_release.sh
 ```
 
 The build removes Flutter's generated dart2js fallback and verifies the
-dart2wasm entrypoint, music worker/worklet, local CanvasKit assets, generated WGSL shader bundle,
+dart2wasm entrypoint, music worker/worklet, local CanvasKit assets, the compiled
+shader bundles,
 deployment headers, and the exact bundled `DOOM1.WAD` size and checksum.
 Deployment must preserve `web/_headers` so Wasm/worker resources run under
-COOP/COEP. The supported and tested runtime target is Wasm/WebGPU.
+COOP/COEP. The supported and tested runtime target is Wasm/WebGL2.
 
 ## Headless WAD report
 
@@ -85,14 +90,17 @@ does not extract or write any Doom content. With no path it reports the clean
 unit-test fixture; CI acceptance uses the original shareware WAD.
 
 ```sh
-dart run tool/wad_report.dart \
+dart tool/wad_report.dart \
   --map E1M1 .local/doom/DOOM1.WAD
 
 # Or use DOOM_WAD_PATH; --json is suitable for CI artifact parsing.
 DOOM_WAD_PATH=.local/doom/DOOM1.WAD \
-  dart run tool/wad_report.dart \
+  dart tool/wad_report.dart \
   --json
 ```
+
+The script runs directly rather than through `dart run`, which would first run
+the app package's shader build hook.
 
 The report includes container and map counts, resolved and missing texture/
 flat names, geometry gaps and fallbacks, atlas/surface vertex budgets, and
@@ -135,9 +143,9 @@ dart run tool/test.dart
 flutter build macos --release
 ```
 
-The default app test runner needs no IWAD. It runs in the checkout with temporary
-empty placeholders for the local-content asset and generated shader directory;
-they are removed after the run and the production manifest is unchanged. Resolve
+The default app test runner needs no IWAD. It runs in the checkout with a temporary
+empty placeholder for the local-content asset; it is removed after the run and
+the production manifest is unchanged. Resolve
 dependencies with `flutter pub get` first. Additional arguments are passed to
 `flutter test`.
 

@@ -47,15 +47,15 @@ void main() {
     FakeGpuBackend();
     final level = await fixture.fixtureLevel();
     final runtime = DoomRuntimeGame(level);
-    final app = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
-    );
+    final app = DoomAppController(initialState: DoomAppState.ready(level));
     await tester.pumpWidget(
       DoomApp(
         controller: app,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: (_, _) => const SizedBox.expand(),
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: (_, _) => const SizedBox.expand(),
+        ),
       ),
     );
     expect(runtime.advanceMicrosForTest(30000), 1);
@@ -76,19 +76,19 @@ void main() {
   ) async {
     final level = await fixture.fixtureLevel();
     final runtime = fixture.FakeRuntime();
-    final app = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
-    );
+    final app = DoomAppController(initialState: DoomAppState.ready(level));
     var builds = 0;
     await tester.pumpWidget(
       DoomApp(
         controller: app,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: (_, _) {
-          builds++;
-          return const SizedBox.expand();
-        },
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: (_, _) {
+            builds++;
+            return const SizedBox.expand();
+          },
+        ),
       ),
     );
     runtime.togglePause();
@@ -175,20 +175,20 @@ void main() {
   ) async {
     FakeGpuBackend();
     final level = await fixture.fixtureLevel();
-    final app = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
-    );
+    final app = DoomAppController(initialState: DoomAppState.ready(level));
     final runtimes = <DoomRuntimeGame>[];
     DoomApp buildApp(int build) => DoomApp(
       controller: app,
       autoStart: false,
-      runtimeFactory: (level) {
-        expect(build, greaterThanOrEqualTo(0));
-        final runtime = DoomRuntimeGame(level);
-        runtimes.add(runtime);
-        return runtime;
-      },
-      gameSurfaceBuilder: (_, _) => Text('Surface $build'),
+      gameHost: DoomGameHost(
+        runtimeFactory: (level) {
+          expect(build, greaterThanOrEqualTo(0));
+          final runtime = DoomRuntimeGame(level);
+          runtimes.add(runtime);
+          return runtime;
+        },
+        surfaceBuilder: (_, _) => Text('Surface $build'),
+      ),
     );
     await tester.pumpWidget(buildApp(0));
     final runtime = runtimes.single;
@@ -227,13 +227,15 @@ void main() {
         selectionErrorMessage: null,
         onLoadIwad: null,
         onContinue: (_) async {},
-        runtimeFactory: (input) {
-          inputs.add(input);
-          final runtime = DoomRuntimeGame(input);
-          runtimes.add(runtime);
-          return runtime;
-        },
-        gameSurfaceBuilder: (_, _) => const SizedBox.expand(),
+        gameHost: DoomGameHost(
+          runtimeFactory: (input) {
+            inputs.add(input);
+            final runtime = DoomRuntimeGame(input);
+            runtimes.add(runtime);
+            return runtime;
+          },
+          surfaceBuilder: (_, _) => const SizedBox.expand(),
+        ),
       ),
     );
     await tester.pumpWidget(view(first));

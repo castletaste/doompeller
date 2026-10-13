@@ -129,6 +129,9 @@ final class DoomHudSnapshot {
 }
 
 abstract interface class DoomRuntimeView {
+  /// Every runtime is owned by the host and must release its resources here.
+  void dispose();
+
   core.LevelExit? get levelExit;
 
   ValueListenable<DoomHudSnapshot> get hud;
@@ -160,24 +163,10 @@ abstract interface class DoomRuntimeView {
   void clearInput();
 
   void restartLevel();
-}
 
-/// Optional lifecycle contract for runtimes created by a UI runtime factory.
-/// The host calls this once; implementations also tolerate adapter teardown.
-abstract interface class DoomRuntimeLifecycle {
-  void dispose();
-}
-
-/// Optional audio lifecycle support, keeping custom runtime factories valid.
-abstract interface class DoomRuntimeAudio {
   void setAudioFocused(bool focused);
-
-  /// Death/intermission lock input while their final sound cues finish.
   void clearInputPreservingAudio();
-}
 
-/// Optional host controls; no browser imports or changes to simulation input.
-abstract interface class DoomRuntimeWebControls {
   ValueListenable<int> get movementRevision;
   set onPauseRequested(VoidCallback? callback);
   void setPaused(bool paused);

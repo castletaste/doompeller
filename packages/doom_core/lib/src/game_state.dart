@@ -68,6 +68,71 @@ final class _MoveOutcome {
 /// Integer-only 35 Hz game simulation. Its iteration order is spawn order;
 /// removal is deferred to the end of each tic so callbacks cannot reorder it.
 class GameState {
+  final MapRuntime _runtime;
+  final GameConfig config;
+  final int initialSeed;
+  final DoomRandom _random;
+  final List<Mobj> _mobjs = <Mobj>[];
+  final List<_TeleportDestination> _teleportDestinations =
+      <_TeleportDestination>[];
+  final List<SectorChange> _changes = <SectorChange>[];
+  final List<SoundEvent> _sounds = <SoundEvent>[];
+  final List<SwitchTextureChange> _switchChanges = <SwitchTextureChange>[];
+  final Map<int, _PressedSwitch> _pressedSwitches = <int, _PressedSwitch>{};
+  int _droppedSoundEvents = 0;
+  int _tic = 0;
+  int _nextId = 1;
+  late Mobj _playerMobj;
+  int _health = 100, _armor = 0, _bullets = 50, _shells = 0, _rockets = 0;
+  int _radiationSuitTics = 0;
+  int _invisibilityTics = 0;
+  int _invulnerabilityTics = 0;
+  int _lightAmplificationTics = 0;
+  bool _computerMap = false;
+  bool _berserk = false;
+  late final PlayerWeaponState _weapons;
+  final Set<Weapon> _ownedWeapons = <Weapon>{Weapon.fist, Weapon.pistol};
+  final Set<Key> _keys = <Key>{};
+  final Set<int> _foundSecrets = <int>{};
+  final Set<int> _activatedOnceLines = <int>{};
+  final List<Mobj?> _sectorSoundTargets;
+  final List<int> _soundVisitGenerations;
+  final List<int> _stairVisitGenerations;
+  final List<int> _topologyVisitGenerations;
+  final List<int> _soundQueueSectors = <int>[];
+  final List<int> _soundQueueBlocks = <int>[];
+  int _soundVisitGeneration = 0;
+  int _stairVisitGeneration = 0;
+  int _topologyVisitGeneration = 0;
+  int _secrets = 0;
+  int _killCount = 0;
+  int _totalKills = 0;
+  int _itemCount = 0;
+  int _totalItems = 0;
+  late final int _totalSecrets;
+  bool _levelComplete = false;
+  bool _secretExit = false;
+  int _bob = 0;
+  int _deathViewHeight = _livingViewHeight;
+  int _deathViewAngle = 0;
+  Mobj? _deathViewTarget;
+  bool _useHeld = false;
+
+  MobjView _view(Mobj m) => MobjView(
+    id: m.id,
+    x: m.x,
+    y: m.y,
+    z: m.z,
+    angle: m.angle,
+    sprite: m.spriteName,
+    frame: m.spriteFrame,
+    flags: m.flags,
+    health: m.health,
+    height: m.height,
+    fullBright: m.fullBright,
+    lightLevel: _runtime.sectors[m.sectorIndex].lightLevel,
+  );
+
   /// Output buffering is deliberately bounded: repeated weapon/pain/item
   /// sounds are expendable before door, platform, death, and exit cues. When
   /// all buffered events are critical, an incoming non-critical event is
@@ -75,11 +140,22 @@ class GameState {
   /// Every discard increments [droppedSoundEventCount], so loss is observable.
   static const int maxSoundJournalLength = 256;
 
-  GameState._(this._runtime, this.config, this.initialSeed)
-    : _random = DoomRandom(index: initialSeed) {
+  GameState._(MapRuntime runtime, this.config, this.initialSeed)
+    : _runtime = runtime,
+      _random = DoomRandom(index: initialSeed),
+      _sectorSoundTargets = List<Mobj?>.filled(runtime.sectors.length, null),
+      _soundVisitGenerations = List<int>.filled(runtime.sectors.length, 0),
+      _stairVisitGenerations = List<int>.filled(runtime.sectors.length, 0),
+      _topologyVisitGenerations = List<int>.filled(runtime.sectors.length, 0) {
     _totalSecrets = _runtime.sectors
         .where((SectorRuntime sector) => sector.special == 9)
         .length;
+    _weapons = PlayerWeaponState(
+      readAmmo: () =>
+          Ammo(bullets: _bullets, shells: _shells, rockets: _rockets),
+      fire: _fireWeapon,
+      raised: () => _emitPlayerSound('DSWPNUP'),
+    );
     _spawnMapThings();
   }
 
@@ -104,72 +180,6 @@ class GameState {
     }
     return state;
   }
-
-  final MapRuntime _runtime;
-  final GameConfig config;
-  final int initialSeed;
-  final DoomRandom _random;
-  final List<Mobj> _mobjs = <Mobj>[];
-  final List<_TeleportDestination> _teleportDestinations =
-      <_TeleportDestination>[];
-  final List<SectorChange> _changes = <SectorChange>[];
-  final List<SoundEvent> _sounds = <SoundEvent>[];
-  final List<SwitchTextureChange> _switchChanges = <SwitchTextureChange>[];
-  final Map<int, _PressedSwitch> _pressedSwitches = <int, _PressedSwitch>{};
-  int _droppedSoundEvents = 0;
-  int _tic = 0;
-  int _nextId = 1;
-  late Mobj _playerMobj;
-  int _health = 100, _armor = 0, _bullets = 50, _shells = 0, _rockets = 0;
-  int _radiationSuitTics = 0;
-  int _invisibilityTics = 0;
-  int _invulnerabilityTics = 0;
-  int _lightAmplificationTics = 0;
-  bool _computerMap = false;
-  bool _berserk = false;
-  late final PlayerWeaponState _weapons = PlayerWeaponState(
-    readAmmo: () => Ammo(bullets: _bullets, shells: _shells, rockets: _rockets),
-    fire: _fireWeapon,
-    raised: () => _emitPlayerSound('DSWPNUP'),
-  );
-  final Set<Weapon> _ownedWeapons = <Weapon>{Weapon.fist, Weapon.pistol};
-  final Set<Key> _keys = <Key>{};
-  final Set<int> _foundSecrets = <int>{};
-  final Set<int> _activatedOnceLines = <int>{};
-  late final List<Mobj?> _sectorSoundTargets = List<Mobj?>.filled(
-    _runtime.sectors.length,
-    null,
-  );
-  late final List<int> _soundVisitGenerations = List<int>.filled(
-    _runtime.sectors.length,
-    0,
-  );
-  late final List<int> _stairVisitGenerations = List<int>.filled(
-    _runtime.sectors.length,
-    0,
-  );
-  late final List<int> _topologyVisitGenerations = List<int>.filled(
-    _runtime.sectors.length,
-    0,
-  );
-  final List<int> _soundQueueSectors = <int>[];
-  final List<int> _soundQueueBlocks = <int>[];
-  int _soundVisitGeneration = 0;
-  int _stairVisitGeneration = 0;
-  int _topologyVisitGeneration = 0;
-  int _secrets = 0;
-  int _killCount = 0;
-  int _totalKills = 0;
-  int _itemCount = 0;
-  int _totalItems = 0;
-  late final int _totalSecrets;
-  bool _levelComplete = false;
-  bool _secretExit = false;
-  int _bob = 0;
-  int _deathViewHeight = _livingViewHeight;
-  int _deathViewAngle = 0;
-  Mobj? _deathViewTarget;
-  bool _useHeld = false;
 
   int get tic => _tic;
   Iterable<MobjView> get mobjs =>
@@ -280,6 +290,162 @@ class GameState {
         flashFrame: _weapons.flashFrame,
       ),
     );
+  }
+
+  int hashState() {
+    int h = 0x811c9dc5;
+    void add(int value) {
+      for (int i = 0; i < 4; i++) {
+        h ^= (value >> (i * 8)) & 0xff;
+        h = (h * 0x01000193) & 0xffffffff;
+      }
+    }
+
+    add(_tic);
+    add(_random.index);
+    add(config.skill.index);
+    add(config.maxCatchUpTics);
+    add(config.monsters ? 1 : 0);
+    add(config.maxSoundPropagationVisits);
+    add(config.maxStairBuildVisits);
+    if (config.maxDonutBuildVisits != 65535) {
+      add(0x444f4e55); // "DONU": preserve the default replay schema.
+      add(config.maxDonutBuildVisits);
+    }
+    add(_nextId);
+    add(_useHeld ? 1 : 0);
+    add(_health);
+    add(_armor);
+    add(_bullets);
+    add(_shells);
+    add(_weapons.current.index);
+    add(_weapons.pending?.index ?? -1);
+    add(_weapons.phase.index);
+    add(_weapons.stateIndex);
+    add(_weapons.frame);
+    add(_weapons.tics);
+    add(_weapons.y);
+    for (final Weapon weapon in const <Weapon>[
+      Weapon.fist,
+      Weapon.pistol,
+      Weapon.shotgun,
+      Weapon.chaingun,
+    ]) {
+      add(_ownedWeapons.contains(weapon) ? 1 : 0);
+    }
+    if (_rockets != 0 ||
+        _ownedWeapons.contains(Weapon.rocketLauncher) ||
+        _ownedWeapons.contains(Weapon.chainsaw) ||
+        _weapons.current == Weapon.rocketLauncher ||
+        _weapons.current == Weapon.chainsaw ||
+        _weapons.pending == Weapon.rocketLauncher ||
+        _weapons.pending == Weapon.chainsaw) {
+      add(0x45585750); // "EXWP": extended E1 weapon inventory follows.
+      add(_rockets);
+      add(_ownedWeapons.contains(Weapon.rocketLauncher) ? 1 : 0);
+      add(_ownedWeapons.contains(Weapon.chainsaw) ? 1 : 0);
+    }
+    if (_radiationSuitTics != 0 ||
+        _invisibilityTics != 0 ||
+        _invulnerabilityTics != 0 ||
+        _lightAmplificationTics != 0 ||
+        _computerMap ||
+        _berserk) {
+      add(0x50575253); // "PWRS": active level-scoped powers follow.
+      add(_radiationSuitTics);
+      add(_invisibilityTics);
+      add(_invulnerabilityTics);
+      add(_lightAmplificationTics);
+      add(_computerMap ? 1 : 0);
+      add(_berserk ? 1 : 0);
+    }
+    for (final Key key in Key.values) {
+      add(_keys.contains(key) ? 1 : 0);
+    }
+    add(_secrets);
+    add(_levelComplete ? 1 : 0);
+    add(_secretExit ? 1 : 0);
+    for (int i = 0; i < _runtime.map.linedefs.length; i++) {
+      add(_activatedOnceLines.contains(i) ? 1 : 0);
+    }
+    // Preserve the established replay schema for the overwhelmingly common
+    // no-button state, while making every active future-affecting button timer
+    // distinguishable. The sentinel prevents aliasing with preceding words.
+    if (_pressedSwitches.isNotEmpty) {
+      add(0x53574954); // "SWIT"
+      add(_pressedSwitches.length);
+      for (final int line in _pressedSwitches.keys.toList()..sort()) {
+        final _PressedSwitch pressed = _pressedSwitches[line]!;
+        add(line);
+        add(pressed.sidedef);
+        add(pressed.slot.index);
+        add(pressed.remaining);
+      }
+    }
+    for (final SectorRuntime s in _runtime.sectors) {
+      add(s.floorHeight);
+      add(s.ceilingHeight);
+      add(s.lightLevel);
+      if (s.floorFlat != s.staticData.floorFlat ||
+          s.special != s.staticData.special) {
+        add(0x464d4f44); // "FMOD": mutable floor model follows.
+        add(stableReplayIdentity(s.floorFlat));
+        add(s.special);
+      }
+      add(s.activeMover == null ? 0 : 1);
+      for (final int word in s.activeMover?.hashWords ?? const <int>[]) {
+        add(word);
+      }
+      add(_foundSecrets.contains(s.index) ? 1 : 0);
+      add(_sectorSoundTargets[s.index]?.id ?? 0);
+    }
+    final List<Mobj> stableMobjs = List<Mobj>.of(_mobjs)
+      ..sort((Mobj a, Mobj b) => a.id.compareTo(b.id));
+    for (final Mobj m in stableMobjs) {
+      add(m.id);
+      add(m.info.id.replayIdentity);
+      add(m.x);
+      add(m.y);
+      add(m.z);
+      add(m.angle);
+      add(m.health);
+      add(m.state.index);
+      add(
+        m.frameState < 0
+            ? -1
+            : MobjStateTable.state(m.frameState)!.replayIdentity,
+      );
+      // MF_DROPOFF is canonical static player metadata. It was absent from
+      // the original E1M1 pin and cannot vary during play, so omit only that
+      // player bit from the compatibility hash while retaining every mutable
+      // flag (including power-up shadow state).
+      add(identical(m, _playerMobj) ? m.flags & ~MobjFlags.dropOff : m.flags);
+      add(m.spriteFrame);
+      add(m.momX);
+      add(m.momY);
+      add(m.momZ);
+      add(m.sectorIndex);
+      add(m.floorZ);
+      add(m.ceilingZ);
+      add(m.dropOffZ);
+      add(m.height);
+      add(m.stateTics);
+      add(m.reactionTime);
+      add(m.threshold);
+      add(m.moveDir);
+      add(m.moveCount);
+      add(m.target?.id ?? 0);
+      add(m.owner?.id ?? 0);
+      add(m.ambush ? 1 : 0);
+      add(m.removed ? 1 : 0);
+    }
+    // _bob is a pure function of already-hashed tic and player momentum.
+    // Death-view height, angle and target are renderer-only camera state and
+    // cannot influence a future tic, so they are excluded with the journals.
+    // _changes, _sounds and _switchChanges are output journals: consuming them cannot affect simulation
+    // state or future tics, so including it would make replay hashes depend on
+    // renderer polling rather than seed + TicCmd stream.
+    return h;
   }
 
   void runTic(TicCmd cmd) {
@@ -2788,21 +2954,6 @@ class GameState {
     }
   }
 
-  MobjView _view(Mobj m) => MobjView(
-    id: m.id,
-    x: m.x,
-    y: m.y,
-    z: m.z,
-    angle: m.angle,
-    sprite: m.spriteName,
-    frame: m.spriteFrame,
-    flags: m.flags,
-    health: m.health,
-    height: m.height,
-    fullBright: m.fullBright,
-    lightLevel: _runtime.sectors[m.sectorIndex].lightLevel,
-  );
-
   void _emitPlayerSound(String soundId) {
     _appendSound(
       SoundEvent(
@@ -2901,162 +3052,6 @@ class GameState {
       _sounds.add(event);
     }
     _droppedSoundEvents++;
-  }
-
-  int hashState() {
-    int h = 0x811c9dc5;
-    void add(int value) {
-      for (int i = 0; i < 4; i++) {
-        h ^= (value >> (i * 8)) & 0xff;
-        h = (h * 0x01000193) & 0xffffffff;
-      }
-    }
-
-    add(_tic);
-    add(_random.index);
-    add(config.skill.index);
-    add(config.maxCatchUpTics);
-    add(config.monsters ? 1 : 0);
-    add(config.maxSoundPropagationVisits);
-    add(config.maxStairBuildVisits);
-    if (config.maxDonutBuildVisits != 65535) {
-      add(0x444f4e55); // "DONU": preserve the default replay schema.
-      add(config.maxDonutBuildVisits);
-    }
-    add(_nextId);
-    add(_useHeld ? 1 : 0);
-    add(_health);
-    add(_armor);
-    add(_bullets);
-    add(_shells);
-    add(_weapons.current.index);
-    add(_weapons.pending?.index ?? -1);
-    add(_weapons.phase.index);
-    add(_weapons.stateIndex);
-    add(_weapons.frame);
-    add(_weapons.tics);
-    add(_weapons.y);
-    for (final Weapon weapon in const <Weapon>[
-      Weapon.fist,
-      Weapon.pistol,
-      Weapon.shotgun,
-      Weapon.chaingun,
-    ]) {
-      add(_ownedWeapons.contains(weapon) ? 1 : 0);
-    }
-    if (_rockets != 0 ||
-        _ownedWeapons.contains(Weapon.rocketLauncher) ||
-        _ownedWeapons.contains(Weapon.chainsaw) ||
-        _weapons.current == Weapon.rocketLauncher ||
-        _weapons.current == Weapon.chainsaw ||
-        _weapons.pending == Weapon.rocketLauncher ||
-        _weapons.pending == Weapon.chainsaw) {
-      add(0x45585750); // "EXWP": extended E1 weapon inventory follows.
-      add(_rockets);
-      add(_ownedWeapons.contains(Weapon.rocketLauncher) ? 1 : 0);
-      add(_ownedWeapons.contains(Weapon.chainsaw) ? 1 : 0);
-    }
-    if (_radiationSuitTics != 0 ||
-        _invisibilityTics != 0 ||
-        _invulnerabilityTics != 0 ||
-        _lightAmplificationTics != 0 ||
-        _computerMap ||
-        _berserk) {
-      add(0x50575253); // "PWRS": active level-scoped powers follow.
-      add(_radiationSuitTics);
-      add(_invisibilityTics);
-      add(_invulnerabilityTics);
-      add(_lightAmplificationTics);
-      add(_computerMap ? 1 : 0);
-      add(_berserk ? 1 : 0);
-    }
-    for (final Key key in Key.values) {
-      add(_keys.contains(key) ? 1 : 0);
-    }
-    add(_secrets);
-    add(_levelComplete ? 1 : 0);
-    add(_secretExit ? 1 : 0);
-    for (int i = 0; i < _runtime.map.linedefs.length; i++) {
-      add(_activatedOnceLines.contains(i) ? 1 : 0);
-    }
-    // Preserve the established replay schema for the overwhelmingly common
-    // no-button state, while making every active future-affecting button timer
-    // distinguishable. The sentinel prevents aliasing with preceding words.
-    if (_pressedSwitches.isNotEmpty) {
-      add(0x53574954); // "SWIT"
-      add(_pressedSwitches.length);
-      for (final int line in _pressedSwitches.keys.toList()..sort()) {
-        final _PressedSwitch pressed = _pressedSwitches[line]!;
-        add(line);
-        add(pressed.sidedef);
-        add(pressed.slot.index);
-        add(pressed.remaining);
-      }
-    }
-    for (final SectorRuntime s in _runtime.sectors) {
-      add(s.floorHeight);
-      add(s.ceilingHeight);
-      add(s.lightLevel);
-      if (s.floorFlat != s.staticData.floorFlat ||
-          s.special != s.staticData.special) {
-        add(0x464d4f44); // "FMOD": mutable floor model follows.
-        add(stableReplayIdentity(s.floorFlat));
-        add(s.special);
-      }
-      add(s.activeMover == null ? 0 : 1);
-      for (final int word in s.activeMover?.hashWords ?? const <int>[]) {
-        add(word);
-      }
-      add(_foundSecrets.contains(s.index) ? 1 : 0);
-      add(_sectorSoundTargets[s.index]?.id ?? 0);
-    }
-    final List<Mobj> stableMobjs = List<Mobj>.of(_mobjs)
-      ..sort((Mobj a, Mobj b) => a.id.compareTo(b.id));
-    for (final Mobj m in stableMobjs) {
-      add(m.id);
-      add(m.info.id.replayIdentity);
-      add(m.x);
-      add(m.y);
-      add(m.z);
-      add(m.angle);
-      add(m.health);
-      add(m.state.index);
-      add(
-        m.frameState < 0
-            ? -1
-            : MobjStateTable.state(m.frameState)!.replayIdentity,
-      );
-      // MF_DROPOFF is canonical static player metadata. It was absent from
-      // the original E1M1 pin and cannot vary during play, so omit only that
-      // player bit from the compatibility hash while retaining every mutable
-      // flag (including power-up shadow state).
-      add(identical(m, _playerMobj) ? m.flags & ~MobjFlags.dropOff : m.flags);
-      add(m.spriteFrame);
-      add(m.momX);
-      add(m.momY);
-      add(m.momZ);
-      add(m.sectorIndex);
-      add(m.floorZ);
-      add(m.ceilingZ);
-      add(m.dropOffZ);
-      add(m.height);
-      add(m.stateTics);
-      add(m.reactionTime);
-      add(m.threshold);
-      add(m.moveDir);
-      add(m.moveCount);
-      add(m.target?.id ?? 0);
-      add(m.owner?.id ?? 0);
-      add(m.ambush ? 1 : 0);
-      add(m.removed ? 1 : 0);
-    }
-    // _bob is a pure function of already-hashed tic and player momentum.
-    // Death-view height, angle and target are renderer-only camera state and
-    // cannot influence a future tic, so they are excluded with the journals.
-    // _changes, _sounds and _switchChanges are output journals: consuming them cannot affect simulation
-    // state or future tics, so including it would make replay hashes depend on
-    // renderer polling rather than seed + TicCmd stream.
-    return h;
   }
 }
 

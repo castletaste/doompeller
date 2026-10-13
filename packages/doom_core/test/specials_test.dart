@@ -643,7 +643,10 @@ double donutLookupMicros(GameState game) {
       game_state_internal.activateDonutForTesting(game, 0);
     }
     watch.stop();
-    if (watch.elapsedMicroseconds >= 10000 || iterations >= 1048576) {
+    // A short microbenchmark is dominated by VM scheduling and timer
+    // quantisation on a busy CI host. Run each sample long enough that the
+    // ratio measures the indexed lookup rather than one unlucky timeslice.
+    if (watch.elapsedMicroseconds >= 50000 || iterations >= 1048576) {
       return watch.elapsedMicroseconds / iterations;
     }
     iterations *= 2;
@@ -1586,7 +1589,7 @@ void main() {
       final Map<int, List<double>> samples = <int, List<double>>{
         for (final int sectors in sizes) sectors: <double>[],
       };
-      for (var sample = 0; sample < 5; sample++) {
+      for (var sample = 0; sample < 7; sample++) {
         final Iterable<int> order = sample.isEven ? sizes : sizes.reversed;
         for (final int sectors in order) {
           samples[sectors]!.add(donutLookupMicros(games[sectors]!));
@@ -1594,9 +1597,18 @@ void main() {
       }
       final Map<int, double> medians = <int, double>{
         for (final int sectors in sizes)
-          sectors: (samples[sectors]!..sort())[2],
+          sectors: (List<double>.of(samples[sectors]!)
+            ..sort())[samples[sectors]!.length ~/ 2],
       };
-      final double ratio = medians[16000]! / medians[100]!;
+      // Compare measurements from the same sample round. The package test
+      // runner executes files in parallel, so independently selected medians
+      // can pair a busy-host sample for one size with a quiet sample for the
+      // other even though both look reasonable on their own.
+      final List<double> pairedRatios = <double>[
+        for (var sample = 0; sample < samples[100]!.length; sample++)
+          samples[16000]![sample] / samples[100]![sample],
+      ]..sort();
+      final double ratio = pairedRatios[pairedRatios.length ~/ 2];
       // Kept in the test output because this is a performance regression
       // contract, and the absolute samples help diagnose a noisy host.
       print(

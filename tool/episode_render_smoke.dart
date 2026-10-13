@@ -33,9 +33,11 @@ Future<void> main() async {
     DoomApp(
       controller: controller,
       autoStart: false,
-      runtimeFactory: (level) => runtime = DoomRuntimeGame(level),
-      gameSurfaceBuilder: (_, game) =>
-          GameWidget<DoomRuntimeGame>(game: game as DoomRuntimeGame),
+      gameHost: DoomGameHost(
+        runtimeFactory: (level) => runtime = DoomRuntimeGame(level),
+        surfaceBuilder: (_, game) =>
+            GameWidget<DoomRuntimeGame>(game: game as DoomRuntimeGame),
+      ),
     ),
   );
   var failures = 0;

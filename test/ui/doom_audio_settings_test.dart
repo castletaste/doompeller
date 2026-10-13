@@ -125,10 +125,7 @@ void main() {
       addTearDown(first.dispose);
       addTearDown(second.dispose);
       final controller = DoomAppController(
-        initialState: DoomAppState.ready(
-          await fixtureLevel(),
-          phase: DoomAppPhase.fixtureReady,
-        ),
+        initialState: DoomAppState.ready(await fixtureLevel()),
       );
       addTearDown(controller.dispose);
       final runtime = FakeRuntime();
@@ -138,14 +135,16 @@ void main() {
         controller: controller,
         autoStart: false,
         audioSession: session,
-        runtimeFactory: (_) {
-          created++;
-          return runtime;
-        },
-        gameSurfaceBuilder: (context, value) {
-          surfaces++;
-          return testSurface(context, value);
-        },
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) {
+            created++;
+            return runtime;
+          },
+          surfaceBuilder: (context, value) {
+            surfaces++;
+            return testSurface(context, value);
+          },
+        ),
       );
       await tester.pumpWidget(app(first));
       await tester.pump();

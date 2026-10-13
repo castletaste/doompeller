@@ -20,13 +20,26 @@ import 'doom_status_bar.dart';
 import 'doom_intermission.dart';
 import 'doom_touch_controls.dart';
 
-/// Creates a runtime owned by the level host. Custom runtimes can implement
-/// [DoomRuntimeLifecycle] to release their resources when the host unmounts.
-/// Used when a level is mounted or replaced. Changing the factory alone does
-/// not reset gameplay; use a new host key to explicitly replace a live runtime.
+/// Creates a runtime owned by the level host. The runtime releases its
+/// resources when the host unmounts and is recreated when a level is replaced.
 typedef DoomRuntimeFactory = DoomRuntimeView Function(PreparedDoomLevel level);
 typedef DoomGameSurfaceBuilder =
     Widget Function(BuildContext context, DoomRuntimeView runtime);
+
+/// The complete pair of callbacks needed to mount a custom runtime.
+///
+/// Keeping creation and presentation together prevents a runtime from being
+/// configured without a surface that can render it. Production uses `null`
+/// here and creates the built-in Flame surface.
+final class DoomGameHost {
+  const DoomGameHost({
+    required this.runtimeFactory,
+    required this.surfaceBuilder,
+  });
+
+  final DoomRuntimeFactory runtimeFactory;
+  final DoomGameSurfaceBuilder surfaceBuilder;
+}
 
 /// Production runtime boundary. Direct [DoomRuntimeGame] construction remains
 /// silent by default for tests and non-UI tools.
@@ -67,8 +80,7 @@ final class DoomGameView extends StatefulWidget {
     required this.selectionErrorMessage,
     required this.onLoadIwad,
     required this.onContinue,
-    this.runtimeFactory,
-    this.gameSurfaceBuilder,
+    this.gameHost,
     this.touchControlsEnabled = false,
     this.onTouchDetected,
     this.onTouchControlsChanged,
@@ -85,8 +97,7 @@ final class DoomGameView extends StatefulWidget {
   final String? selectionErrorMessage;
   final VoidCallback? onLoadIwad;
   final Future<void> Function(core.LevelExit) onContinue;
-  final DoomRuntimeFactory? runtimeFactory;
-  final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final DoomGameHost? gameHost;
   final bool touchControlsEnabled;
   final VoidCallback? onTouchDetected;
   final ValueChanged<bool>? onTouchControlsChanged;
@@ -146,22 +157,19 @@ final class _DoomGameViewState extends State<DoomGameView>
         !identical(oldWidget.audioSession, widget.audioSession)) {
       _detachInputListeners();
       _clearDeviceInput(rebuild: false);
-      if (_runtime case final DoomRuntimeLifecycle owned) owned.dispose();
+      _runtime.dispose();
       _createRuntime();
       _showControls = true;
       _advancing = false;
-    } else if (!identical(
-          oldWidget.gameSurfaceBuilder,
-          widget.gameSurfaceBuilder,
-        ) ||
+    } else if (!identical(oldWidget.gameHost, widget.gameHost) ||
         !identical(oldWidget.onTouchDetected, widget.onTouchDetected)) {
       _createSurface();
     }
   }
 
   void _createRuntime() {
-    _runtime = widget.runtimeFactory != null
-        ? widget.runtimeFactory!(widget.level)
+    _runtime = widget.gameHost != null
+        ? widget.gameHost!.runtimeFactory(widget.level)
         : createProductionDoomRuntime(
             widget.level,
             audioBackend: widget.audioSession?.acquireLevel(),
@@ -178,7 +186,7 @@ final class _DoomGameViewState extends State<DoomGameView>
     _surface = _DoomInputSurface(
       runtime: _runtime,
       focusNode: _gameFocusNode,
-      surfaceBuilder: widget.gameSurfaceBuilder,
+      surfaceBuilder: widget.gameHost?.surfaceBuilder,
       onRetry: widget.onRetry,
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
@@ -198,15 +206,13 @@ final class _DoomGameViewState extends State<DoomGameView>
     _gameFocusNode
       ..removeListener(_handleFocusChange)
       ..dispose();
-    if (_runtime case final DoomRuntimeLifecycle owned) owned.dispose();
+    _runtime.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_runtime case final DoomRuntimeAudio audio) {
-      audio.setAudioFocused(state == AppLifecycleState.resumed);
-    }
+    _runtime.setAudioFocused(state == AppLifecycleState.resumed);
     if (state != AppLifecycleState.resumed) {
       if (_webInput) _pause();
       _clearDeviceInput();
@@ -226,10 +232,8 @@ final class _DoomGameViewState extends State<DoomGameView>
     _browserLease?.dispose();
     _browserLease = null;
     _hintTimer?.cancel();
-    if (_runtime case final DoomRuntimeWebControls controls) {
-      controls.onPauseRequested = null;
-      controls.movementRevision.removeListener(_handleMovement);
-    }
+    _runtime.onPauseRequested = null;
+    _runtime.movementRevision.removeListener(_handleMovement);
     _runtime.hud.removeListener(_handleHudInputState);
     _runtime.automap.removeListener(_handleMapInputState);
   }
@@ -261,8 +265,8 @@ final class _DoomGameViewState extends State<DoomGameView>
   void _clearDeviceInput({bool rebuild = true, bool preserveAudio = false}) {
     _mousePointer = null;
     _weaponScroll.clear();
-    if (preserveAudio && _runtime is DoomRuntimeAudio) {
-      (_runtime as DoomRuntimeAudio).clearInputPreservingAudio();
+    if (preserveAudio) {
+      _runtime.clearInputPreservingAudio();
     } else {
       _runtime.clearInput();
     }
@@ -316,11 +320,9 @@ final class _DoomGameViewState extends State<DoomGameView>
   void _connectBrowser() {
     _browserLease?.dispose();
     _browserLease = null;
-    if (_runtime case final DoomRuntimeWebControls controls) {
-      controls.movementRevision.removeListener(_handleMovement);
-      controls.onPauseRequested = _webInput ? _pause : null;
-      if (_webInput) controls.movementRevision.addListener(_handleMovement);
-    }
+    _runtime.movementRevision.removeListener(_handleMovement);
+    _runtime.onPauseRequested = _webInput ? _pause : null;
+    if (_webInput) _runtime.movementRevision.addListener(_handleMovement);
     if (!_webInput) return;
     _browserLease = widget.browserInput!.acquire(
       onTurn: (dx) {
@@ -343,16 +345,16 @@ final class _DoomGameViewState extends State<DoomGameView>
     _browserLease?.release();
     final hud = _runtime.hud.value;
     if (hud.health <= 0 || hud.levelComplete) return;
-    if (_webInput && _runtime is DoomRuntimeWebControls) {
-      (_runtime as DoomRuntimeWebControls).setPaused(true);
+    if (_webInput) {
+      _runtime.setPaused(true);
     } else if (!hud.paused) {
       _runtime.togglePause();
     }
   }
 
   void _resume() {
-    if (_webInput && _runtime is DoomRuntimeWebControls) {
-      (_runtime as DoomRuntimeWebControls).setPaused(false);
+    if (_webInput) {
+      _runtime.setPaused(false);
       if (!widget.touchControlsEnabled) _browserLease?.capture();
     } else {
       _runtime.togglePause();
@@ -384,11 +386,9 @@ final class _DoomGameViewState extends State<DoomGameView>
 
   void _cycleScroll(double dy) {
     if (!_webInput || _hudInputBlocked || _advancing) return;
-    if (_runtime case final DoomRuntimeWebControls controls) {
-      final steps = _weaponScroll.add(dy);
-      for (var i = 0; i < steps.abs(); i++) {
-        controls.cycleWeapon(steps.sign);
-      }
+    final steps = _weaponScroll.add(dy);
+    for (var i = 0; i < steps.abs(); i++) {
+      _runtime.cycleWeapon(steps.sign);
     }
   }
 

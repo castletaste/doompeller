@@ -15,6 +15,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/runtime_noops.dart';
+
 Future<PreparedDoomLevel> fixtureLevel() async {
   final content = DoomContentSource(
     environment: const <String, String>{},
@@ -31,27 +33,12 @@ Future<PreparedDoomLevel> fixtureLevel() async {
   );
 }
 
-final class FakeRuntime implements DoomRuntimeView {
-  @override
-  void dispose() {}
-
-  @override
-  void setAudioFocused(bool focused) {}
-
-  @override
-  void clearInputPreservingAudio() => clearInput();
-
+final class FakeRuntime with DoomRuntimeNoopInput implements DoomRuntimeView {
   @override
   final ValueNotifier<int> movementRevision = ValueNotifier<int>(0);
 
   @override
   VoidCallback? onPauseRequested;
-
-  @override
-  void setPaused(bool paused) => togglePause();
-
-  @override
-  void cycleWeapon(int direction) {}
 
   @override
   core.LevelExit? levelExit;
@@ -81,9 +68,6 @@ final class FakeRuntime implements DoomRuntimeView {
   final DoomInputState input = DoomInputState();
 
   @override
-  void addPointerYaw(double deltaX) {}
-
-  @override
   void clearInput() {
     clearInputCalls++;
     input.clear();
@@ -94,25 +78,6 @@ final class FakeRuntime implements DoomRuntimeView {
     restartCalls++;
     notifier.value = const DoomHudSnapshot.initial();
   }
-
-  @override
-  void setPointerAttack(bool pressed, {bool cancelled = false}) {}
-
-  @override
-  void setTouchMovement(
-    int pointer, {
-    required int forward,
-    required int side,
-  }) {}
-
-  @override
-  void pressTouchControl(int pointer, DoomControl control) {}
-
-  @override
-  void releaseTouchPointer(int pointer, {bool cancelled = false}) {}
-
-  @override
-  void clearTouchInput() {}
 
   @override
   void triggerUse() => input.triggerUse();
@@ -142,12 +107,6 @@ final class FakeRuntime implements DoomRuntimeView {
       diagnostics: old.diagnostics,
     );
   }
-
-  @override
-  void toggleAutomap() {}
-
-  @override
-  void zoomAutomap({required bool inwards}) {}
 }
 
 Widget testSurface(BuildContext context, DoomRuntimeView runtime) =>

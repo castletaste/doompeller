@@ -20,10 +20,19 @@ The controller fences content reads, file-picker results and episode transitions
 by request generation. Choosers have their own generation, so dismissing one
 does not invalidate an existing load. A displaced pending preparation that is
 still current for another controller reports a retryable failure.
-`LevelLoadCoordinator` separately fences CPU preparation
-and synchronous assembly. Both fences tolerate disposal and synchronous listener
-reentrancy. A failed episode transition keeps the completed map available for a
-retry; an obsolete result cannot replace the current level.
+`LevelLoadCoordinator` fences CPU preparation and publication. Its generation
+checks tolerate disposal and synchronous listener reentrancy. A failed episode
+transition keeps the completed map available for a retry; an obsolete result
+cannot replace the current level.
+
+Generation ownership is deliberately layered:
+
+| Fence | Owner | Invalidated by | Responsibility |
+| --- | --- | --- | --- |
+| Request generation | `DoomAppController` | a newer start, import, fallback or transition | Reject stale source results and app-state publication |
+| Picker generation | `DoomAppController` | a newer browser chooser | Reject late chooser results without cancelling a level load |
+| Load generation | `LevelLoadCoordinator` | a newer CPU load or cancel | Issue `LevelLoadToken`s and publish only the newest prepared value |
+| Admission | `DoomLevelPreparer` | replacement of its pending request | Keep one active worker and one latest pending request; it reuses the coordinator token rather than inventing another generation |
 
 `DoomLevelPreparer` admits one active worker and one replaceable pending request.
 A native `compute` worker receives only content and immutable configuration:
@@ -45,6 +54,12 @@ are shared as read-only data. Restart mutates only the runtime's copy. Direct
 `DoomScene.fromCompiledLevel` callers retain the existing buffer ownership
 contract; they supply the mutable geometry that the scene will update.
 
+`DoomRuntimeGame` remains the runtime facade, while its replay delivery, audio
+bridge, presentation synchronization and lifecycle helpers live in adjacent
+part files. The facade owns the prepared level, scene and disposed flag; the
+lifecycle part only contains the restart/dispose methods, so there is one owner
+for runtime state.
+
 ## Simulation and presentation
 
 `GameState` orchestrates each tic and owns map/actor state. Actor tuning and
@@ -52,6 +67,11 @@ special classification are separate tables; sector movers and the player weapon
 state machine own their local state. Their inputs are narrow callbacks or values,
 not access to the entire game. Actor iteration, RNG calls, integer arithmetic
 and replay hash word order remain unchanged.
+
+The read-only observables and replay hash remain grouped near the concrete
+`GameState` implementation. Keeping them as ordinary members avoids a second
+storage base or runtime type hierarchy while preserving one public simulation
+object.
 
 The runtime owns device input, replay progress and the scene. `DoomDeviceInput`
 tracks keyboard, mouse and touch owners independently, including pending
@@ -63,15 +83,16 @@ animation ranges once, then updates retained buffers through dirty ranges.
 Automap heights and player discovery publish together once per tic.
 
 The game view owns the runtime, focus, lifecycle observer and optional frame
-probe. Disposal is explicit and idempotent through `DoomRuntimeLifecycle`, also
-used by Flame removal. Legacy injected `DoomRuntimeView` implementations remain
-valid without that optional interface.
+probe. `DoomRuntimeView` includes the lifecycle, audio and browser hooks, so every
+runtime has one complete host contract and disposal remains explicit and
+idempotent through Flame removal.
 
 The game surface has stable widget identity across gameplay publications.
-Factories create runtimes when a level is mounted or replaced; changing a
-callback closure does not restart gameplay. A new host key explicitly replaces
-a live runtime. Surface builder changes update the existing runtime's view, and
-a directly embedded game view handles level replacement itself.
+`DoomGameHost` keeps custom runtime creation and its surface builder as one
+complete configuration, so a mounted custom runtime cannot omit its renderer.
+Factories create runtimes when a level is mounted or replaced; changing the
+host updates the existing runtime's surface without restarting gameplay. A
+directly embedded game view handles level replacement itself.
 HUD, overlays and automap listen within their own subtrees. The game view
 selects only input-blocked and map-open transitions, so movement and HUD values
 do not rebuild the game surface or touch panel. Equal HUD snapshots suppress
@@ -125,6 +146,10 @@ request and one replaceable pending request. The AudioContext sample rate is
 checked before enabling music. A music failure remains visible in the pause
 panel and leaves PCM effects usable.
 
+The session and worker share one latest-wins pending-value primitive, while
+their retire and acknowledgement protocols remain separate. This keeps the
+storage rule uniform without merging the two lifecycle state machines.
+
 The runtime selects `D_E1Mx`, `D_INTER`, or `D_VICTOR` from the current content.
 Restart retires the old song and resets the score. Pause and browser blur
 suspend the audio clock and preserve the bounded music queue; effects are
@@ -168,17 +193,31 @@ protocol is unchanged.
 
 ## Compatibility and verification
 
-Public entrypoints keep their original exports and constructors. The geometry
-copy helpers, optional runtime lifecycle, preparation worker injection and
-optional WAV encoding are additive. The 20-float vertex ABI and exact renderer
+`DoomGameHost` is the public custom-runtime entry point; production keeps the
+host `null` and uses the built-in Flame surface. The runtime host contract is
+intentionally complete; geometry copy helpers, preparation worker injection
+and optional WAV encoding remain additive. The 20-float vertex ABI and exact renderer
 dependency pins remain unchanged. Unused direct `meta` dependencies were removed;
 no dependency versions were upgraded.
 
+`_Compiler.run()` remains the geometry orchestration boundary. Packed mesh
+emission, plane/wall packing and animation transfer bookkeeping live in
+`compiler_packing.dart`; compiled-level reports, geometry hashes and the public
+compiler API remain unchanged.
+
+Geometry reports retain aggregate compile time for diagnostics without making
+stage timings part of the public report contract. The replay corpus in
+`test/replay_corpus_test.dart` runs in the VM contract gate and the Chrome Wasm
+job, while controlled load-order tests and the existing restart scenario pin
+stale-publication behavior and renderer resource counts.
+The single `tool/ci_contracts.sh` gate combines the project audit with the ABI,
+replay and geometry tripwires.
+
 Run `dart run tool/test.dart` for synthetic app tests without an IWAD, and add
 `--include-content` with a local `DOOM_WAD_PATH` for original-content acceptance.
-The test runner creates a temporary source projection, preserving Flutter's
-standard shader assets without changing the production asset manifest. Package
-tests run directly with `dart test`. Native preparation is tested with real
+The test runner creates temporary empty placeholders for Flutter's declared
+shader and IWAD assets, then removes them. Package tests run directly with
+`dart test`. Native preparation is tested with real
 controller loads. Widget tests control the preparation completion explicitly;
 original-content setup runs outside the fake widget clock with
 `WidgetTester.runAsync`.

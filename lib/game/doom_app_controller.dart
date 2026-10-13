@@ -4,6 +4,7 @@ import 'package:doom_core/doom_core.dart';
 import 'content_source.dart';
 import 'browser_wad_selection.dart';
 import 'doom_app_state.dart';
+import 'generation_fence.dart';
 import 'level_load_coordinator.dart';
 import 'level_preparer.dart';
 
@@ -56,12 +57,17 @@ final class DoomAppController extends ChangeNotifier {
   final LoadFixtureContent _loadFixture;
   final LoadSelectedContent _loadSelected;
   final PrepareDoomLevel _prepare;
-  final LevelLoadCoordinator<PreparedDoomLevel, PreparedDoomLevel>
-  _coordinator = LevelLoadCoordinator<PreparedDoomLevel, PreparedDoomLevel>();
+  final LevelLoadCoordinator<PreparedDoomLevel> _coordinator =
+      LevelLoadCoordinator<PreparedDoomLevel>();
 
   DoomAppState _state;
-  int _requestGeneration = 0;
-  int _pickerGeneration = 0;
+  // Fences app-level source reads and publication decisions. It is separate
+  // from the coordinator generation because a request can be superseded
+  // before it starts CPU preparation.
+  final GenerationFence _requestFence = GenerationFence();
+  // Fences browser chooser results only; opening or dismissing a chooser does
+  // not cancel the current level preparation.
+  final GenerationFence _pickerFence = GenerationFence();
   bool _disposed = false;
   int? _transitionRequest;
 
@@ -73,13 +79,13 @@ final class DoomAppController extends ChangeNotifier {
     if (_disposed ||
         !identical(_state.level, from) ||
         exit.mapName != from.map.name ||
-        _transitionRequest == _requestGeneration) {
+        _transitionRequest == _requestFence.current) {
       return;
     }
     final String? next = DoomEpisode.nextMap(exit.mapName, secret: exit.secret);
     if (next == null) return;
     final DoomAppState retained = _state;
-    final int request = ++_requestGeneration;
+    final int request = _beginLoad();
     _transitionRequest = request;
     final DoomContent content = DoomContent(
       wads: from.content.wads,
@@ -101,9 +107,7 @@ final class DoomAppController extends ChangeNotifier {
 
   Future<void> start() async {
     if (_disposed) return;
-    final int request = ++_requestGeneration;
-    _coordinator.cancel();
-    _publish(const DoomAppState.loading());
+    final int request = _beginLoad(showLoading: true);
     if (!_isCurrent(request)) return;
     DoomContentLoadResult result;
     try {
@@ -150,9 +154,7 @@ final class DoomAppController extends ChangeNotifier {
 
   Future<void> useFixtureFallback() async {
     if (_disposed) return;
-    final int request = ++_requestGeneration;
-    _coordinator.cancel();
-    _publish(const DoomAppState.loading());
+    final int request = _beginLoad(showLoading: true);
     if (!_isCurrent(request)) return;
     DoomContent fixture;
     try {
@@ -184,8 +186,7 @@ final class DoomAppController extends ChangeNotifier {
   }) async {
     if (_disposed) return;
     final DoomAppState retained = _state;
-    final int request = ++_requestGeneration;
-    _coordinator.cancel();
+    final int request = _beginLoad();
     DoomContentLoadResult result;
     try {
       result = _loadSelected(bytes, mapName: mapName, sourcePath: sourceLabel);
@@ -220,11 +221,11 @@ final class DoomAppController extends ChangeNotifier {
     // Opening or cancelling a chooser does not cancel an existing level load.
     // A later chooser still supersedes an earlier chooser, while any explicit
     // load invalidates both through the main request generation.
-    final request = _requestGeneration;
-    final pickerRequest = ++_pickerGeneration;
+    final request = _requestFence.current;
+    final pickerRequest = _pickerFence.issue();
     bool current() =>
         _isCurrent(request) &&
-        _pickerGeneration == pickerRequest &&
+        _pickerFence.isCurrent(pickerRequest) &&
         isOwnerActive();
     try {
       final selection = await picker();
@@ -244,8 +245,7 @@ final class DoomAppController extends ChangeNotifier {
   void reportSelectedIwadFailure(String message) {
     if (_disposed) return;
     final DoomAppState retained = _state;
-    _requestGeneration++;
-    _coordinator.cancel();
+    _invalidateLoad();
     _publishSelectionFailure(retained, message);
   }
 
@@ -261,7 +261,6 @@ final class DoomAppController extends ChangeNotifier {
     if (!_isCurrent(request)) return;
     final outcome = await _coordinator.load(
       prepare: (token) => _prepare(content, token),
-      assemble: (prepared) => prepared,
     );
     if (!_isCurrent(request)) {
       return;
@@ -271,9 +270,6 @@ final class DoomAppController extends ChangeNotifier {
         _publish(
           DoomAppState.ready(
             entryLoadout == null ? level : level.withEntryLoadout(entryLoadout),
-            phase: content.isFixture
-                ? DoomAppPhase.fixtureReady
-                : DoomAppPhase.developerIwadReady,
             setupMessage: setupMessage,
           ),
         );
@@ -295,20 +291,32 @@ final class DoomAppController extends ChangeNotifier {
     }
   }
 
-  bool _isCurrent(int request) => !_disposed && request == _requestGeneration;
+  bool _isCurrent(int request) =>
+      !_disposed && _requestFence.isCurrent(request);
+
+  int _beginLoad({bool showLoading = false}) {
+    final int request = _requestFence.issue();
+    _coordinator.cancel();
+    if (showLoading) {
+      _publish(const DoomAppState.loading());
+    }
+    return request;
+  }
+
+  void _invalidateLoad() {
+    _requestFence.invalidate();
+    _coordinator.cancel();
+  }
 
   void _publishSelectionFailure(DoomAppState retained, String message) {
     final level = retained.level;
-    if (level == null ||
-        (retained.phase != DoomAppPhase.fixtureReady &&
-            retained.phase != DoomAppPhase.developerIwadReady)) {
+    if (level == null) {
       _publish(DoomAppState.failure(message));
       return;
     }
     _publish(
       DoomAppState.ready(
         level,
-        phase: retained.phase,
         setupMessage: retained.setupMessage,
         errorMessage: message,
       ),
@@ -326,8 +334,9 @@ final class DoomAppController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _requestGeneration++;
-    _coordinator.detachActive();
+    _requestFence.close();
+    _pickerFence.close();
+    _coordinator.cancel();
     super.dispose();
   }
 }

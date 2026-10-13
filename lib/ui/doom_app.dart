@@ -10,6 +10,7 @@ import 'doom_game_view.dart';
 export 'doom_status_bar.dart' show DoomStatusBar;
 export 'doom_game_view.dart'
     show
+        DoomGameHost,
         DoomRuntimeFactory,
         DoomGameSurfaceBuilder,
         createProductionDoomRuntime;
@@ -21,8 +22,7 @@ final class DoomApp extends StatefulWidget {
     super.key,
     this.controller,
     this.autoStart = true,
-    this.runtimeFactory,
-    this.gameSurfaceBuilder,
+    this.gameHost,
     this.wadPicker,
     this.audioSession,
     this.browserInput,
@@ -30,8 +30,7 @@ final class DoomApp extends StatefulWidget {
 
   final DoomAppController? controller;
   final bool autoStart;
-  final DoomRuntimeFactory? runtimeFactory;
-  final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final DoomGameHost? gameHost;
   final DoomWadPicker? wadPicker;
   final DoomAudioSession? audioSession;
   final DoomBrowserInput? browserInput;
@@ -131,8 +130,7 @@ final class _DoomAppState extends State<DoomApp> {
         mouseSensitivity: _mouseSensitivity,
         onSensitivityChanged: (value) =>
             setState(() => _mouseSensitivity = value),
-        runtimeFactory: widget.runtimeFactory,
-        gameSurfaceBuilder: widget.gameSurfaceBuilder,
+        gameHost: widget.gameHost,
         touchControlsEnabled:
             _touchControlsOverride ??
             (_touchDetected || _browserInput.touchPrimary),
@@ -157,8 +155,7 @@ final class _DoomAppBody extends StatelessWidget {
     required this.touchControlsEnabled,
     required this.onTouchDetected,
     required this.onTouchControlsChanged,
-    this.runtimeFactory,
-    this.gameSurfaceBuilder,
+    this.gameHost,
     this.onLoadIwad,
   });
 
@@ -170,8 +167,7 @@ final class _DoomAppBody extends StatelessWidget {
   final bool touchControlsEnabled;
   final VoidCallback onTouchDetected;
   final ValueChanged<bool> onTouchControlsChanged;
-  final DoomRuntimeFactory? runtimeFactory;
-  final DoomGameSurfaceBuilder? gameSurfaceBuilder;
+  final DoomGameHost? gameHost;
   final VoidCallback? onLoadIwad;
 
   @override
@@ -186,12 +182,6 @@ final class _DoomAppBody extends StatelessWidget {
           onFallback: controller.useFixtureFallback,
           onRetry: controller.start,
         ),
-        DoomAppReady()
-            when runtimeFactory != null && gameSurfaceBuilder == null =>
-          const DoomRuntimeConfigurationError(
-            message:
-                'A custom Doom runtime requires a custom game surface builder.',
-          ),
         DoomAppReady(:final level) => DoomGameView(
           key: ValueKey(level),
           level: level,
@@ -205,8 +195,7 @@ final class _DoomAppBody extends StatelessWidget {
           selectionErrorMessage: state.errorMessage,
           onLoadIwad: onLoadIwad,
           onContinue: (exit) => controller.advanceLevel(level, exit),
-          runtimeFactory: runtimeFactory,
-          gameSurfaceBuilder: gameSurfaceBuilder,
+          gameHost: gameHost,
           touchControlsEnabled: touchControlsEnabled,
           onTouchDetected: onTouchDetected,
           onTouchControlsChanged: onTouchControlsChanged,

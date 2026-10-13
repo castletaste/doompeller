@@ -10,7 +10,7 @@ void main() {
     final content = DoomContentSource(
       environment: const <String, String>{},
     ).loadFixture();
-    final coordinator = LevelLoadCoordinator<PreparedDoomLevel, String>();
+    final coordinator = LevelLoadCoordinator<PreparedDoomLevel>();
     late PreparedDoomLevel prepared;
 
     final outcome = await coordinator.load(
@@ -18,10 +18,9 @@ void main() {
         prepared = await DoomLevelPreparer(seed: 7).prepare(content, token);
         return prepared;
       },
-      assemble: (level) => level.map.name,
     );
 
-    expect(outcome, isA<LevelPublished<String>>());
+    expect(outcome, isA<LevelPublished<PreparedDoomLevel>>());
     expect(prepared.map.name, 'MAP01');
     expect(prepared.geometry.report.fallbackSectors, isEmpty);
     expect(prepared.geometry.report.geometryHash, 0x50a4e123);
@@ -40,23 +39,20 @@ void main() {
     final content = DoomContentSource(
       environment: const <String, String>{},
     ).loadFixture();
-    final coordinator = LevelLoadCoordinator<PreparedDoomLevel, String>();
-    var assembled = false;
+    final coordinator = LevelLoadCoordinator<PreparedDoomLevel>();
+    var discarded = false;
 
     final pending = coordinator.load(
       prepare: (token) async {
         await Future<void>.delayed(Duration.zero);
         return DoomLevelPreparer().prepare(content, token);
       },
-      assemble: (level) {
-        assembled = true;
-        return level.map.name;
-      },
+      discardPrepared: (_) => discarded = true,
     );
     coordinator.cancel();
 
-    expect(await pending, isA<LevelLoadStale<String>>());
-    expect(assembled, isFalse);
+    expect(await pending, isA<LevelLoadStale<PreparedDoomLevel>>());
+    expect(discarded, isFalse);
   });
 
   test(
@@ -78,12 +74,11 @@ void main() {
           return fixture;
         },
       );
-      final coordinator = LevelLoadCoordinator<PreparedDoomLevel, String>();
+      final coordinator = LevelLoadCoordinator<PreparedDoomLevel>();
       final outcomes = [
         for (var i = 0; i < 1000; i++)
           coordinator.load(
             prepare: (token) => preparer.prepare(content, token),
-            assemble: (_) => '$i',
           ),
       ];
       expect(calls, 1);
@@ -93,8 +88,14 @@ void main() {
       gates.last.complete();
       final results = await Future.wait(outcomes);
       expect(peak, 1);
-      expect(results.whereType<LevelLoadStale<String>>(), hasLength(999));
-      expect((results.last as LevelPublished<String>).level, '999');
+      expect(
+        results.whereType<LevelLoadStale<PreparedDoomLevel>>(),
+        hasLength(999),
+      );
+      expect(
+        (results.last as LevelPublished<PreparedDoomLevel>).level,
+        same(fixture),
+      );
     },
   );
 
@@ -114,29 +115,26 @@ void main() {
           return fixture;
         },
       );
-      final coordinator = LevelLoadCoordinator<PreparedDoomLevel, String>();
-      Future<LevelLoadOutcome<String>> load() => coordinator.load(
+      final coordinator = LevelLoadCoordinator<PreparedDoomLevel>();
+      Future<LevelLoadOutcome<PreparedDoomLevel>> load() => coordinator.load(
         prepare: (token) => preparer.prepare(content, token),
-        assemble: (level) => level.map.name,
       );
       final first = load();
       final pending = load();
       coordinator.cancel();
       gate.complete();
-      expect(await first, isA<LevelLoadStale<String>>());
-      expect(await pending, isA<LevelLoadStale<String>>());
+      expect(await first, isA<LevelLoadStale<PreparedDoomLevel>>());
+      expect(await pending, isA<LevelLoadStale<PreparedDoomLevel>>());
       expect(calls, 1);
-      expect(await load(), isA<LevelPublished<String>>());
+      expect(await load(), isA<LevelPublished<PreparedDoomLevel>>());
       expect(calls, 2);
     },
   );
 }
 
 Future<PreparedDoomLevel> _prepareFixture(DoomContent content) async {
-  final result =
-      await LevelLoadCoordinator<PreparedDoomLevel, PreparedDoomLevel>().load(
-        prepare: (token) => DoomLevelPreparer().prepare(content, token),
-        assemble: (level) => level,
-      );
+  final result = await LevelLoadCoordinator<PreparedDoomLevel>().load(
+    prepare: (token) => DoomLevelPreparer().prepare(content, token),
+  );
   return (result as LevelPublished<PreparedDoomLevel>).level;
 }

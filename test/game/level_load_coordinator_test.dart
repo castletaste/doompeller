@@ -6,46 +6,32 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   group('LevelLoadCoordinator', () {
     test('publishes only a complete current generation', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
+      final coordinator = LevelLoadCoordinator<int>();
 
-      final outcome = await coordinator.load(
-        prepare: (_) async => '123',
-        assemble: int.parse,
-      );
+      final outcome = await coordinator.load(prepare: (_) async => 123);
 
       expect(outcome, isA<LevelPublished<int>>());
-      expect(coordinator.activeLevel, 123);
     });
 
     test('a newer load fences an older result', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
+      final coordinator = LevelLoadCoordinator<String>();
       final firstGate = Completer<String>();
-      var staleAssembled = false;
       var staleDiscarded = false;
 
       final first = coordinator.load(
         prepare: (_) => firstGate.future,
-        assemble: (_) {
-          staleAssembled = true;
-          return 1;
-        },
         discardPrepared: (_) => staleDiscarded = true,
       );
-      final second = coordinator.load(
-        prepare: (_) async => '2',
-        assemble: int.parse,
-      );
-      expect(await second, isA<LevelPublished<int>>());
+      final second = coordinator.load(prepare: (_) async => '2');
+      expect(await second, isA<LevelPublished<String>>());
 
       firstGate.complete('1');
-      expect(await first, isA<LevelLoadStale<int>>());
-      expect(staleAssembled, isFalse);
+      expect(await first, isA<LevelLoadStale<String>>());
       expect(staleDiscarded, isTrue);
-      expect(coordinator.activeLevel, 2);
     });
 
     test('cancel makes checkpoints and eventual publication stale', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
+      final coordinator = LevelLoadCoordinator<String>();
       final gate = Completer<void>();
       late LevelLoadToken captured;
 
@@ -56,60 +42,65 @@ void main() {
           token.throwIfCancelled();
           return '9';
         },
-        assemble: int.parse,
       );
 
       coordinator.cancel();
       gate.complete();
 
       expect(captured.isCancelled, isTrue);
-      expect(await pending, isA<LevelLoadStale<int>>());
-      expect(coordinator.activeLevel, isNull);
+      expect(await pending, isA<LevelLoadStale<String>>());
     });
 
-    test('failure never replaces the active level', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
-      await coordinator.load(prepare: (_) async => '7', assemble: int.parse);
-
+    test('failure is reported for the current generation', () async {
+      final coordinator = LevelLoadCoordinator<String>();
       final outcome = await coordinator.load(
         prepare: (_) async => throw const FormatException('bad map'),
-        assemble: int.parse,
       );
 
-      expect(outcome, isA<LevelLoadFailed<int>>());
-      expect(coordinator.activeLevel, 7);
+      expect(outcome, isA<LevelLoadFailed<String>>());
     });
 
-    test('re-entrant cancellation during assembly cannot publish', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
+    test('replacement publishes the newest prepared value', () async {
+      final coordinator = LevelLoadCoordinator<String>();
+      final first = await coordinator.load(prepare: (_) async => '1');
+      final second = await coordinator.load(prepare: (_) async => '2');
 
-      final outcome = await coordinator.load(
-        prepare: (_) async => '5',
-        assemble: (prepared) {
-          coordinator.cancel();
-          return int.parse(prepared);
-        },
-      );
-
-      expect(outcome, isA<LevelLoadStale<int>>());
-      expect(coordinator.activeLevel, isNull);
+      expect((first as LevelPublished<String>).level, '1');
+      expect((second as LevelPublished<String>).level, '2');
     });
 
-    test('replacement callback sees only previously published level', () async {
-      final coordinator = LevelLoadCoordinator<String, int>();
-      final replaced = <int>[];
-      await coordinator.load(prepare: (_) async => '1', assemble: int.parse);
+    test(
+      'controlled completion order keeps only the newest generation',
+      () async {
+        for (final List<int> completionOrder in <List<int>>[
+          <int>[2, 1, 0],
+          <int>[0, 1, 2],
+        ]) {
+          final coordinator = LevelLoadCoordinator<int>();
+          final gates = <Completer<int>>[
+            Completer<int>(),
+            Completer<int>(),
+            Completer<int>(),
+          ];
+          var discarded = 0;
+          final futures = <Future<LevelLoadOutcome<int>>>[
+            for (var i = 0; i < gates.length; i++)
+              coordinator.load(
+                prepare: (_) => gates[i].future,
+                discardPrepared: (_) => discarded++,
+              ),
+          ];
 
-      await coordinator.load(
-        prepare: (_) async => '2',
-        assemble: int.parse,
-        onReplaced: replaced.add,
-      );
+          for (final int index in completionOrder) {
+            gates[index].complete(index);
+          }
 
-      expect(replaced, <int>[1]);
-      expect(coordinator.activeLevel, 2);
-      expect(coordinator.detachActive(), 2);
-      expect(coordinator.activeLevel, isNull);
-    });
+          final outcomes = await Future.wait(futures);
+          expect(outcomes.whereType<LevelPublished<int>>(), hasLength(1));
+          expect(outcomes.whereType<LevelLoadStale<int>>(), hasLength(2));
+          expect(discarded, 2);
+        }
+      },
+    );
   });
 }

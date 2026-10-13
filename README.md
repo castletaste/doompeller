@@ -135,10 +135,11 @@ dart run tool/test.dart
 flutter build macos --release
 ```
 
-The default app test runner needs no IWAD. It creates a temporary source copy
-with the local-content asset omitted, preserving Flutter's standard test shader
-assets and leaving the production manifest unchanged. Resolve dependencies with
-`flutter pub get` first. Additional arguments are passed to `flutter test`.
+The default app test runner needs no IWAD. It runs in the checkout with temporary
+empty placeholders for the local-content asset and generated shader directory;
+they are removed after the run and the production manifest is unchanged. Resolve
+dependencies with `flutter pub get` first. Additional arguments are passed to
+`flutter test`.
 
 Original-content acceptance is explicit and reads your local file directly:
 

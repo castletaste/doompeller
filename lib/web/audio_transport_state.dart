@@ -111,16 +111,16 @@ final class MusicAdmissionState<T> {
   int? retireInFlight;
   int? pendingRetireEpoch;
   int? configurationInFlight;
-  ({int epoch, T value})? _pendingConfiguration;
+  final _LatestPending<T> _pendingConfiguration = _LatestPending<T>();
 
-  T? get pendingConfiguration => _pendingConfiguration?.value;
+  T? get pendingConfiguration => _pendingConfiguration.value;
 
   void replaceConfiguration(int epoch, T value) {
-    _pendingConfiguration = (epoch: epoch, value: value);
+    _pendingConfiguration.replace(epoch, value);
   }
 
   void discardPendingConfiguration() {
-    _pendingConfiguration = null;
+    _pendingConfiguration.clear();
   }
 
   void queueRetire(int epoch) {
@@ -144,9 +144,8 @@ final class MusicAdmissionState<T> {
         configurationInFlight != null) {
       return null;
     }
-    final pending = _pendingConfiguration;
+    final pending = _pendingConfiguration.takeEntry();
     if (pending == null) return null;
-    _pendingConfiguration = null;
     configurationInFlight = pending.epoch;
     return pending.value;
   }
@@ -163,21 +162,45 @@ final class MusicAdmissionState<T> {
     retireInFlight = null;
     pendingRetireEpoch = null;
     configurationInFlight = null;
-    _pendingConfiguration = null;
+    _pendingConfiguration.clear();
   }
 }
 
 final class PendingMusicConfigurations<T> {
+  final _LatestPending<T> _pending = _LatestPending<T>();
+
+  void replace(int epoch, T value) {
+    _pending.replace(epoch, value);
+  }
+
+  T? take() {
+    return _pending.takeEntry()?.value;
+  }
+
+  int? abandonThrough(int epoch) {
+    return _pending.abandonThrough(epoch);
+  }
+
+  void clear() => _pending.clear();
+}
+
+/// Latest-wins admission storage shared by the session and music worker.
+///
+/// The two owners still expose different acknowledgement protocols, but they
+/// now share the same replacement, take and abandon semantics.
+final class _LatestPending<T> {
   ({int epoch, T value})? _pending;
+
+  T? get value => _pending?.value;
 
   void replace(int epoch, T value) {
     _pending = (epoch: epoch, value: value);
   }
 
-  T? take() {
+  ({int epoch, T value})? takeEntry() {
     final pending = _pending;
     _pending = null;
-    return pending?.value;
+    return pending;
   }
 
   int? abandonThrough(int epoch) {

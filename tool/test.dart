@@ -1,9 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// Runs app tests with Flutter's standard shader assets and without bundling
-/// proprietary content. Use --include-content with DOOM_WAD_PATH for acceptance.
-/// Resolve dependencies in the checkout before invoking this runner.
+/// Runs app tests in the checkout without bundling proprietary content.
+///
+/// Flutter validates every manifest asset before starting a test. The release
+/// manifest intentionally names the developer-only IWAD and generated shader
+/// directory, so synthetic tests create empty, temporary placeholders for those
+/// two paths instead of copying the project or rewriting its manifest. The
+/// placeholders are removed before this process exits.
+///
+/// Use --include-content with DOOM_WAD_PATH for original-content acceptance.
 Future<void> main(List<String> arguments) async {
   final includeContent = arguments.contains('--include-content');
   final testArguments = arguments
@@ -28,7 +34,7 @@ Future<void> main(List<String> arguments) async {
   final flutter =
       Platform.environment['FLUTTER'] ??
       flutterRoot.resolve('../../bin/flutter').toFilePath();
-  final environment = <String, String>{};
+  File? requestedWad;
   if (includeContent) {
     final configured = Platform.environment['DOOM_WAD_PATH'];
     final wad = File(
@@ -43,59 +49,43 @@ Future<void> main(List<String> arguments) async {
       exitCode = 1;
       return;
     }
-    environment['DOOM_WAD_PATH'] = wad.path;
+    requestedWad = wad;
   }
 
-  final scratch = Directory(
-    Directory.systemTemp
-        .createTempSync('doompeller-tests-')
-        .resolveSymbolicLinksSync(),
-  );
+  final created = <File>[];
+  final createdDirectories = <Directory>[];
+  final manifestWad = File('${root.path}/.local/doom/DOOM1.WAD');
+  File? movedManifestWad;
   try {
-    // Copy code and configuration, including uncommitted work, so test tools
-    // cannot rewrite the production manifest or publish local content.
-    for (final name in ['lib', 'test', 'tool', 'packages', 'shaders', 'docs']) {
-      final source = Directory('${root.path}/$name');
-      if (source.existsSync()) {
-        _copyDirectory(source, Directory('${scratch.path}/$name'));
+    // Never let a developer's original WAD enter the synthetic test asset
+    // bundle. Move it aside for the duration of the run and restore it in the
+    // finally block. Content tests read the moved path directly when needed.
+    if (manifestWad.existsSync()) {
+      final backup = File('${manifestWad.path}.test-backup');
+      if (backup.existsSync()) {
+        throw StateError(
+          'A previous test run left ${backup.path}; restore it before testing.',
+        );
       }
+      manifestWad.renameSync(backup.path);
+      movedManifestWad = backup;
     }
-    for (final name in [
-      'pubspec.lock',
-      'analysis_options.yaml',
-      'dart_test.yaml',
-    ]) {
-      final source = File('${root.path}/$name');
-      if (source.existsSync()) source.copySync('${scratch.path}/$name');
-    }
-    final manifest = File('${root.path}/pubspec.yaml').readAsStringSync();
-    const localAsset = '    - .local/doom/DOOM1.WAD';
-    if (!manifest.split('\n').contains(localAsset)) {
-      throw StateError(
-        'Update the test manifest projection after changing local IWAD packaging.',
-      );
-    }
-    File('${scratch.path}/pubspec.yaml').writeAsStringSync(
-      manifest.split('\n').where((line) => line != localAsset).join('\n'),
+    _ensureDirectory(
+      Directory('${root.path}/assets/shaders'),
+      createdDirectories,
     );
-    Directory('${scratch.path}/assets/shaders').createSync(recursive: true);
-    Directory('${scratch.path}/.dart_tool').createSync();
-    for (final entry in packages.cast<Map<String, dynamic>>()) {
-      final original = packageConfig.uri.resolve(entry['rootUri'] as String);
-      final relative = original.toFilePath().startsWith('${root.path}/')
-          ? original.toFilePath().substring(root.path.length + 1)
-          : null;
-      entry['rootUri'] = relative == null
-          ? original.toString()
-          : scratch.uri.resolve(relative).toString();
+    if (!manifestWad.existsSync()) {
+      _ensureDirectory(manifestWad.parent, createdDirectories);
+      manifestWad.writeAsBytesSync(const <int>[]);
+      created.add(manifestWad);
     }
-    File(
-      '${scratch.path}/.dart_tool/package_config.json',
-    ).writeAsStringSync(jsonEncode(config));
-    final graph = File('${root.path}/.dart_tool/package_graph.json');
-    if (graph.existsSync()) {
-      graph.copySync('${scratch.path}/.dart_tool/package_graph.json');
-    }
+    final environment = <String, String>{
+      if (requestedWad != null)
+        'DOOM_WAD_PATH':
+            requestedWad.path == manifestWad.path && movedManifestWad != null
+            ? movedManifestWad.path
+            : requestedWad.path,
+    };
     final process = await Process.start(
       flutter,
       [
@@ -104,26 +94,38 @@ Future<void> main(List<String> arguments) async {
         if (!includeContent) ...['--exclude-tags', 'content'],
         ...testArguments,
       ],
-      workingDirectory: scratch.path,
+      workingDirectory: root.path,
       environment: environment,
       mode: ProcessStartMode.inheritStdio,
     );
     exitCode = await process.exitCode;
   } finally {
-    scratch.deleteSync(recursive: true);
+    for (final file in created.reversed) {
+      if (file.existsSync()) file.deleteSync();
+    }
+    if (movedManifestWad != null && movedManifestWad.existsSync()) {
+      movedManifestWad.renameSync(manifestWad.path);
+    }
+    for (final directory in createdDirectories.reversed) {
+      if (directory.existsSync() && directory.listSync().isEmpty) {
+        directory.deleteSync();
+      }
+    }
   }
 }
 
-void _copyDirectory(Directory source, Directory destination) {
-  destination.createSync(recursive: true);
-  for (final entry in source.listSync(followLinks: false)) {
-    final name = entry.uri.pathSegments.where((part) => part.isNotEmpty).last;
-    if (['.dart_tool', 'build', '.local', 'coverage'].contains(name)) continue;
-    final target = '${destination.path}/$name';
-    if (entry is Directory) {
-      _copyDirectory(entry, Directory(target));
-    } else if (entry is File) {
-      entry.copySync(target);
-    }
+void _ensureDirectory(Directory directory, List<Directory> created) {
+  if (directory.existsSync()) return;
+  final missing = <Directory>[];
+  var current = directory;
+  while (!current.existsSync()) {
+    missing.add(current);
+    final parent = current.parent;
+    if (parent.path == current.path) break;
+    current = parent;
+  }
+  for (final item in missing.reversed) {
+    item.createSync();
+    created.add(item);
   }
 }

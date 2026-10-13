@@ -59,6 +59,45 @@ void main() {
   );
 
   test(
+    'outer request and coordinator generations reject older prepared output',
+    () async {
+      final source = DoomContentSource(environment: const <String, String>{});
+      final content = source.loadFixture();
+      final firstEntered = Completer<void>();
+      final releaseFirst = Completer<void>();
+      final generations = <int>[];
+      var calls = 0;
+      final controller = DoomAppController(
+        loadDeveloper: () async => DoomContentLoaded(content),
+        prepare: (value, token) async {
+          generations.add(token.generation);
+          if (calls++ == 0) {
+            firstEntered.complete();
+            await releaseFirst.future;
+          }
+          token.throwIfCancelled();
+          return DoomLevelPreparer(seed: calls).prepare(value, token);
+        },
+      );
+      addTearDown(controller.dispose);
+
+      final first = controller.start();
+      await firstEntered.future;
+      final second = controller.start();
+      await second;
+      expect(controller.state.level?.seed, 2);
+
+      releaseFirst.complete();
+      await first;
+
+      expect(generations, hasLength(2));
+      expect(generations[1], greaterThan(generations[0]));
+      expect(controller.state.level?.seed, 2);
+      expect(controller.state.phase, DoomAppPhase.fixtureReady);
+    },
+  );
+
+  test(
     'absent bundled default fails instead of silently using fixture',
     () async {
       final controller = DoomAppController(

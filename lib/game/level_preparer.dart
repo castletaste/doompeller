@@ -78,7 +78,9 @@ typedef DoomLevelWorker =
 
 /// Owns one active CPU job and one replaceable pending request. Sharing this
 /// preparer across controller replacements bounds native isolate admission.
-/// Cancellation fences publication; an active worker is allowed to finish.
+/// It does not create a second generation fence: each pending request carries
+/// the [LevelLoadToken] issued by its coordinator. Cancellation fences
+/// publication; an active worker is allowed to finish.
 final class DoomLevelPreparer {
   DoomLevelPreparer({
     this.limits = DoomLimits.defaults,

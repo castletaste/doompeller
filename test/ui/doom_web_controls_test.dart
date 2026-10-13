@@ -20,7 +20,7 @@ void main() {
     final level = await fixtureLevel();
     final runtime = DoomRuntimeGame(level);
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     final input = DoomBrowserInput(driver: driver);
     addTearDown(controller.dispose);
@@ -30,8 +30,10 @@ void main() {
         controller: controller,
         autoStart: false,
         browserInput: input,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
     await tester.pump();

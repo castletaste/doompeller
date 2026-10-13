@@ -64,6 +64,18 @@ need_line "^    - \.local/doom/DOOM1\.WAD$" pubspec.yaml
 need_line "<key>FLTEnableImpeller</key>" macos/Runner/Info.plist
 need_line "<key>FLTEnableFlutterGPU</key>" macos/Runner/Info.plist
 
+# ABI and replay/geometry hash pins are intentionally loud. A change to one of
+# these values requires updating the tripwire corpus and its review contract,
+# rather than silently changing every recorded result.
+need_line "static const int floatsPerVertex = 20;" lib/adapter/vertex_abi.dart
+need_line "static const int floatsPerVertex = 20;" packages/doom_geometry/lib/src/packed_mesh.dart
+need_line "var hash = 0x811C9DC5;" packages/doom_geometry/lib/src/compiler_packing.dart
+need_line "int h = 0x811c9dc5;" packages/doom_core/lib/src/game_state.dart
+test -f test/adapter/vertex_abi_test.dart || fail "vertex ABI tripwire test is missing"
+test -f test/integration/geometry_adapter_abi_test.dart ||
+  fail "geometry/adapter ABI tripwire test is missing"
+test -f test/replay_corpus_test.dart || fail "replay corpus test is missing"
+
 # Commercial content must never enter the index or any commit. This checks
 # names; the generated fixture is source code and has no WAD file on disk.
 tracked_wads=$(git ls-files | rg -i "\.(wad|iwad|pwad|deh)$" || true)

@@ -33,6 +33,27 @@ Future<PreparedDoomLevel> fixtureLevel() async {
 
 final class FakeRuntime implements DoomRuntimeView {
   @override
+  void dispose() {}
+
+  @override
+  void setAudioFocused(bool focused) {}
+
+  @override
+  void clearInputPreservingAudio() => clearInput();
+
+  @override
+  final ValueNotifier<int> movementRevision = ValueNotifier<int>(0);
+
+  @override
+  VoidCallback? onPauseRequested;
+
+  @override
+  void setPaused(bool paused) => togglePause();
+
+  @override
+  void cycleWeapon(int direction) {}
+
+  @override
   core.LevelExit? levelExit;
 
   final ValueNotifier<DoomHudSnapshot> notifier =
@@ -177,8 +198,10 @@ void main() {
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => FakeRuntime(),
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => FakeRuntime(),
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
 
@@ -200,7 +223,6 @@ void main() {
       final controller = DoomAppController(
         initialState: DoomAppState.ready(
           level,
-          phase: DoomAppPhase.fixtureReady,
           setupMessage: 'Set DOOM_WAD_PATH to your legally obtained DOOM.WAD.',
         ),
       );
@@ -211,8 +233,10 @@ void main() {
         DoomApp(
           controller: controller,
           autoStart: false,
-          runtimeFactory: (_) => FakeRuntime(),
-          gameSurfaceBuilder: testSurface,
+          gameHost: DoomGameHost(
+            runtimeFactory: (_) => FakeRuntime(),
+            surfaceBuilder: testSurface,
+          ),
         ),
       );
 
@@ -227,15 +251,17 @@ void main() {
     final level = await fixtureLevel();
     final runtime = FakeRuntime();
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
         wadPicker: () async =>
             BrowserWadSelection(name: 'broken.wad', bytes: Uint8List(12)),
       ),
@@ -269,15 +295,17 @@ void main() {
     final level = await fixtureLevel();
     final runtime = FakeRuntime();
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
 
@@ -334,15 +362,17 @@ void main() {
       diagnostics: DoomFrameDiagnosticsSnapshot(),
     );
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
 
@@ -383,15 +413,17 @@ void main() {
       diagnostics: DoomFrameDiagnosticsSnapshot(),
     );
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
 
@@ -409,15 +441,17 @@ void main() {
     final level = await fixtureLevel();
     final runtime = FakeRuntime();
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.pumpWidget(
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
     final focus = tester.widget<Focus>(
@@ -446,35 +480,5 @@ void main() {
     expect(runtime.clearInputCalls, beforeLifecycle + 1);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
-  });
-
-  testWidgets('custom runtime without surface shows explicit error', (
-    tester,
-  ) async {
-    final level = await fixtureLevel();
-    final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
-    );
-    addTearDown(controller.dispose);
-
-    await tester.pumpWidget(
-      DoomApp(
-        controller: controller,
-        autoStart: false,
-        runtimeFactory: (_) => FakeRuntime(),
-      ),
-    );
-
-    expect(
-      find.byKey(const Key('runtime-configuration-error')),
-      findsOneWidget,
-    );
-    expect(
-      find.text(
-        'A custom Doom runtime requires a custom game surface builder.',
-      ),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
   });
 }

@@ -11,7 +11,6 @@ sealed class DoomAppState {
   const factory DoomAppState.failure(String message) = DoomAppFailure;
   const factory DoomAppState.ready(
     PreparedDoomLevel level, {
-    required DoomAppPhase phase,
     String? setupMessage,
     String? errorMessage,
   }) = DoomAppReady;
@@ -20,7 +19,7 @@ sealed class DoomAppState {
   PreparedDoomLevel? get level => null;
   String? get errorMessage => null;
   String? get setupMessage => null;
-  bool get isFixture => phase == DoomAppPhase.fixtureReady;
+  bool get isFixture => level?.content.isFixture ?? false;
 }
 
 final class DoomAppLoading extends DoomAppState {
@@ -38,23 +37,12 @@ final class DoomAppFailure extends DoomAppState {
 }
 
 final class DoomAppReady extends DoomAppState {
-  const DoomAppReady(
-    this.level, {
-    required DoomAppPhase phase,
-    this.setupMessage,
-    this.errorMessage,
-  }) : assert(
-         phase == DoomAppPhase.fixtureReady ||
-             phase == DoomAppPhase.developerIwadReady,
-       ),
-       _phase = phase;
+  const DoomAppReady(this.level, {this.setupMessage, this.errorMessage});
 
-  final DoomAppPhase _phase;
   @override
-  DoomAppPhase get phase => switch (_phase) {
-    DoomAppPhase.fixtureReady || DoomAppPhase.developerIwadReady => _phase,
-    _ => throw StateError('A ready state requires a ready phase.'),
-  };
+  DoomAppPhase get phase => level.content.isFixture
+      ? DoomAppPhase.fixtureReady
+      : DoomAppPhase.developerIwadReady;
   @override
   final PreparedDoomLevel level;
   @override

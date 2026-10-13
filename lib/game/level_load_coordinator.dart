@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'generation_fence.dart';
+
 /// Checkpoint passed through asynchronous CPU preparation.
 ///
 /// Work that can stop cheaply should call [throwIfCancelled] between parser,
@@ -54,84 +56,59 @@ final class LevelLoadFailed<T> extends LevelLoadOutcome<T> {
   final StackTrace stackTrace;
 }
 
-/// Generation-fenced, two-phase level loader.
+/// Generation-fenced CPU level loader.
 ///
 /// [prepare] performs all asynchronous CPU work: parsing, resource decoding and
-/// geometry compilation. [assemble] is deliberately synchronous. flame_3d
-/// allocates buffers lazily on first draw, so a synchronous assembly followed
-/// immediately by publication cannot be cancelled halfway through a native GPU
-/// upload and leave an unreachable buffer behind.
+/// geometry compilation. Publication is the only operation after preparation;
+/// the app creates its runtime from the published value in the widget layer.
 ///
 /// Starting another load or calling [cancel] invalidates older generations.
-/// Stale prepared data is handed to [discardPrepared] and never reaches
-/// [assemble]. A failure never replaces [activeLevel].
+/// Stale prepared data is handed to [discardPrepared].
 ///
 /// This cannot prove deterministic GPU reclamation when a published level is
 /// replaced: flame_3d 0.3.0 exposes no resource disposal API. The app therefore
 /// keeps replacement rare and measures settled RSS across reload soaks.
-final class LevelLoadCoordinator<Prepared, Level> {
-  int _generation = 0;
-  Level? _activeLevel;
+final class LevelLoadCoordinator<T> {
+  // Owns CPU preparation publication. The controller's request generation is
+  // checked before and after this coordinator, while this generation is the
+  // only source of LevelLoadToken identities. The controller remains the
+  // owner of the published level.
+  final GenerationFence _fence = GenerationFence();
 
-  int get generation => _generation;
-  Level? get activeLevel => _activeLevel;
-  bool get hasActiveLevel => _activeLevel != null;
+  int get generation => _fence.current;
 
-  Future<LevelLoadOutcome<Level>> load({
-    required Future<Prepared> Function(LevelLoadToken token) prepare,
-    required Level Function(Prepared prepared) assemble,
-    void Function(Prepared prepared)? discardPrepared,
-    void Function(Level previous)? onReplaced,
+  Future<LevelLoadOutcome<T>> load({
+    required Future<T> Function(LevelLoadToken token) prepare,
+    void Function(T prepared)? discardPrepared,
   }) async {
-    final int loadGeneration = ++_generation;
+    final int loadGeneration = _fence.issue();
     final token = LevelLoadToken._(
       loadGeneration,
-      () => _generation == loadGeneration,
+      () => _fence.isCurrent(loadGeneration),
     );
 
     try {
-      final Prepared prepared = await prepare(token);
+      final T prepared = await prepare(token);
       if (!token.isCurrent) {
         discardPrepared?.call(prepared);
-        return LevelLoadStale<Level>(loadGeneration);
+        return LevelLoadStale<T>(loadGeneration);
       }
 
-      // This callback must stay synchronous. No other event-loop turn can
-      // invalidate the token between the check and publication.
-      final Level level = assemble(prepared);
-      if (!token.isCurrent) {
-        // Defensive against a re-entrant assemble callback that calls cancel.
-        return LevelLoadStale<Level>(loadGeneration);
-      }
-
-      final Level? previous = _activeLevel;
-      _activeLevel = level;
-      if (previous != null && !identical(previous, level)) {
-        onReplaced?.call(previous);
-      }
-      return LevelPublished<Level>(loadGeneration, level);
+      return LevelPublished<T>(loadGeneration, prepared);
     } on LevelLoadCancelled {
-      return LevelLoadStale<Level>(loadGeneration);
+      return LevelLoadStale<T>(loadGeneration);
     } catch (error, stackTrace) {
       // A stale failure belongs to an obsolete generation; it must not surface
       // as the current load's error UI.
       if (!token.isCurrent) {
-        return LevelLoadStale<Level>(loadGeneration);
+        return LevelLoadStale<T>(loadGeneration);
       }
-      return LevelLoadFailed<Level>(loadGeneration, error, stackTrace);
+      return LevelLoadFailed<T>(loadGeneration, error, stackTrace);
     }
   }
 
-  /// Invalidates in-flight CPU work. The currently published level stays live.
+  /// Invalidates in-flight CPU work. The controller's published level stays live.
   void cancel() {
-    _generation++;
-  }
-
-  /// Drops the logical active level without claiming GPU resource reclamation.
-  Level? detachActive() {
-    final Level? previous = _activeLevel;
-    _activeLevel = null;
-    _generation++;
-    return previous;
+    _fence.invalidate();
   }
 }

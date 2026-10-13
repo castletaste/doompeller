@@ -587,7 +587,7 @@ void main() {
     final surfaceFocusNode = FocusNode(debugLabel: 'Automap test surface');
     final keyGame = _AutomapKeyGame(runtime);
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(level, phase: DoomAppPhase.fixtureReady),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(() {
       surfaceFocusNode.dispose();
@@ -598,12 +598,14 @@ void main() {
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: (_, _) => GameWidget<_AutomapKeyGame>(
-          key: const Key('doom-game-widget'),
-          game: keyGame,
-          focusNode: surfaceFocusNode,
-          backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: (_, _) => GameWidget<_AutomapKeyGame>(
+            key: const Key('doom-game-widget'),
+            game: keyGame,
+            focusNode: surfaceFocusNode,
+            backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
+          ),
         ),
       ),
     );

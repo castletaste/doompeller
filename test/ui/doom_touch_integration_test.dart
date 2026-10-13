@@ -48,10 +48,7 @@ void main() {
     FakeGpuBackend();
     final runtime = DoomRuntimeGame(level);
     final controller = DoomAppController(
-      initialState: DoomAppState.ready(
-        level,
-        phase: DoomAppPhase.developerIwadReady,
-      ),
+      initialState: DoomAppState.ready(level),
     );
     addTearDown(controller.dispose);
     await tester.binding.setSurfaceSize(const Size(390, 780));
@@ -60,8 +57,10 @@ void main() {
       DoomApp(
         controller: controller,
         autoStart: false,
-        runtimeFactory: (_) => runtime,
-        gameSurfaceBuilder: (_, _) => const ColoredBox(color: Colors.black),
+        gameHost: DoomGameHost(
+          runtimeFactory: (_) => runtime,
+          surfaceBuilder: (_, _) => const ColoredBox(color: Colors.black),
+        ),
       ),
     );
     await tester.pump();

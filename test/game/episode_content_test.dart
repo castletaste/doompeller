@@ -48,10 +48,7 @@ void main() {
 
   DoomAppController controller({PrepareDoomLevel? prepare}) =>
       DoomAppController(
-        initialState: DoomAppState.ready(
-          first,
-          phase: DoomAppPhase.developerIwadReady,
-        ),
+        initialState: DoomAppState.ready(first),
         loadDeveloper: () async => DoomContentLoaded(content),
         prepare: prepare,
       );
@@ -160,10 +157,7 @@ void main() {
       final startGate = Completer<DoomContentLoadResult>();
       late LevelLoadToken transitionToken;
       final app = DoomAppController(
-        initialState: DoomAppState.ready(
-          first,
-          phase: DoomAppPhase.developerIwadReady,
-        ),
+        initialState: DoomAppState.ready(first),
         loadDeveloper: () => startGate.future,
         prepare: (content, token) async {
           if (content.mapName == 'E1M2') {
@@ -244,9 +238,11 @@ void main() {
       DoomApp(
         controller: app,
         autoStart: false,
-        runtimeFactory: (level) =>
-            identical(level, first) ? runtime : FakeRuntime(),
-        gameSurfaceBuilder: testSurface,
+        gameHost: DoomGameHost(
+          runtimeFactory: (level) =>
+              identical(level, first) ? runtime : FakeRuntime(),
+          surfaceBuilder: testSurface,
+        ),
       ),
     );
     await tester.pumpAndSettle();

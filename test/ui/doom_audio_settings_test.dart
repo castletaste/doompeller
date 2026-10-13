@@ -8,7 +8,7 @@ import 'package:doompeller/ui/doom_game_overlays.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../widget_test.dart' show FakeRuntime, fixtureLevel, testSurface;
+import '../support/game_host.dart' show FakeRuntime, fixtureLevel, testSurface;
 import '../adapter/fake_gpu_backend.dart';
 
 final class _Session extends DoomAudioSession {

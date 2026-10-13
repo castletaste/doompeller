@@ -58,12 +58,11 @@ jobs:
           python3 --version
           cargo --version
 
-      - name: Install and check contract audit prerequisites
+      - name: Install contract audit prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep
           rg --version
-          sh tool/audit_project_contracts.sh
 
       - name: Install naga-cli 30.0.1
         run: |
@@ -132,6 +131,9 @@ jobs:
       - name: Analyze app
         run: flutter analyze
 
+      - name: Run architecture contract gate
+        run: sh tool/ci_contracts.sh
+
       - name: Test app with original shareware IWAD
         run: dart run tool/test.dart --include-content
 
@@ -139,6 +141,7 @@ jobs:
         run: >-
           flutter test --platform chrome --wasm
           test/e1m1_collision_wasm_regression_test.dart
+          test/replay_corpus_test.dart
 
       - name: Build and verify Wasm-only release
         run: DOOMPELLER_FLUTTER="$(command -v flutter)" bash tool/build_web_release.sh

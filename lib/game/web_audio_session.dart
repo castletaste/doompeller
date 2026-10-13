@@ -11,13 +11,15 @@ import '../web/audio_transport_state.dart';
 import 'audio_session.dart';
 import 'sound_playback.dart';
 
-const int _opl2SampleRate = 49716;
-const int _musicBlockFrames = 4096;
-const int _musicQueueBlocks = 8;
+part 'web_music_transport.dart';
 
 /// Browser implementation shared by every level view in one app lifetime.
 final class WebAudioSession extends DoomAudioSession {
   WebAudioSession() {
+    _musicTransport = _WebMusicTransport(
+      onMessage: _setMusicMessage,
+      onError: _setError,
+    );
     unawaited(_initializeContext());
   }
 
@@ -29,11 +31,8 @@ final class WebAudioSession extends DoomAudioSession {
   web.AudioContext? _context;
   web.GainNode? _musicGain;
   web.GainNode? _effectsGain;
-  web.AudioWorkletNode? _musicNode;
-  web.Worker? _musicWorker;
   web.AbortController? _listeners;
-  Timer? _telemetryTimer;
-  Map<Object?, Object?> _latestMusicStats = const <Object?, Object?>{};
+  late final _WebMusicTransport _musicTransport;
 
   double _musicVolume = 1;
   double _effectsVolume = 1;
@@ -43,40 +42,33 @@ final class WebAudioSession extends DoomAudioSession {
   bool _paused = false;
   bool _levelFocused = true;
   bool _documentFocused = true;
-  bool _statsPending = false;
   bool _notificationScheduled = false;
   int _levelGeneration = 0;
-  int _musicEpoch = 0;
-  int _retirePosts = 0;
-  int _configurationPosts = 0;
   final AudioContextCommandState _contextCommands = AudioContextCommandState();
-  final AudioTransportLifecycleState _musicLifecycle =
-      AudioTransportLifecycleState();
-  final MusicAdmissionState<_MusicConfiguration> _musicAdmission =
-      MusicAdmissionState<_MusicConfiguration>();
 
   /// Read-only state used by the local production-transport QA harness.
   WebAudioDiagnostics get diagnostics {
     final context = _context;
+    final music = _musicTransport.diagnostics;
     return WebAudioDiagnostics(
       contextState: context?.state ?? 'unavailable',
       contextSampleRate: context?.sampleRate,
       activeEffects: _voices.length,
       cachedEffects: _pcmBuffers.length,
       levelGeneration: _levelGeneration,
-      musicEpoch: _musicEpoch,
-      retireInFlight: _musicAdmission.retireInFlight,
-      pendingRetireEpoch: _musicAdmission.pendingRetireEpoch,
-      configurationInFlight: _musicAdmission.configurationInFlight,
-      retirePosts: _retirePosts,
-      configurationPosts: _configurationPosts,
-      hasPendingConfiguration: _musicAdmission.pendingConfiguration != null,
+      musicEpoch: music.musicEpoch,
+      retireInFlight: music.retireInFlight,
+      pendingRetireEpoch: music.pendingRetireEpoch,
+      configurationInFlight: music.configurationInFlight,
+      retirePosts: music.retirePosts,
+      configurationPosts: music.configurationPosts,
+      hasPendingConfiguration: music.hasPendingConfiguration,
       resumePending: _contextCommands.resumePending,
       suspendPending: _contextCommands.suspendPending,
-      queuedMusicBlocks: (_latestMusicStats['queuedBlocks'] as num?)?.toInt(),
-      playedMusicFrames: (_latestMusicStats['playedFrames'] as num?)?.toInt(),
-      musicUnderruns: (_latestMusicStats['underruns'] as num?)?.toInt(),
-      musicAvailable: _musicLifecycle.available,
+      queuedMusicBlocks: music.queuedMusicBlocks,
+      playedMusicFrames: music.playedMusicFrames,
+      musicUnderruns: music.musicUnderruns,
+      musicAvailable: music.musicAvailable,
       errorMessage: _errorMessage,
       disposed: _disposed,
     );
@@ -84,10 +76,7 @@ final class WebAudioSession extends DoomAudioSession {
 
   /// Causes a real uncaught worker failure in QA builds only.
   void debugCrashMusicWorker() {
-    if (!const bool.fromEnvironment('DOOMPELLER_AUDIO_HARNESS')) {
-      throw UnsupportedError('The audio harness is not enabled.');
-    }
-    _musicWorker?.postMessage(<String, Object?>{'type': 'debugCrash'}.jsify());
+    _musicTransport.debugCrashMusicWorker();
   }
 
   @override
@@ -100,7 +89,7 @@ final class WebAudioSession extends DoomAudioSession {
   bool get controlsAvailable => true;
 
   @override
-  bool get musicAvailable => _musicLifecycle.available;
+  bool get musicAvailable => _musicTransport.available;
 
   @override
   String? get errorMessage => _errorMessage;
@@ -143,7 +132,7 @@ final class WebAudioSession extends DoomAudioSession {
         (rate) => rate == null
             ? web.AudioContext()
             : web.AudioContext(web.AudioContextOptions(sampleRate: rate)),
-        nativeRate: _opl2SampleRate,
+        nativeRate: _WebMusicTransport.sampleRate,
       );
       if (_disposed) {
         _ignorePromise(context.close());
@@ -159,134 +148,10 @@ final class WebAudioSession extends DoomAudioSession {
       _effectsGain = effectsGain;
       _installDocumentListeners();
       _contextReady.complete();
-      unawaited(_initializeMusic(context, musicGain));
+      unawaited(_musicTransport.initialize(context, musicGain));
     } on Object catch (error, stackTrace) {
       if (!_contextReady.isCompleted) _contextReady.complete();
       _setError('Web Audio could not be initialized.', error, stackTrace);
-    }
-  }
-
-  Future<void> _initializeMusic(
-    web.AudioContext context,
-    web.GainNode musicGain,
-  ) async {
-    final int transportGeneration = _musicLifecycle.beginInitialization();
-    if (context.sampleRate.round() != _opl2SampleRate) {
-      _failMusic(
-        'Music needs a $_opl2SampleRate Hz AudioContext; the browser provided '
-        '${context.sampleRate.round()} Hz.',
-      );
-      return;
-    }
-    web.Worker? worker;
-    web.AudioWorkletNode? node;
-    try {
-      await context.audioWorklet
-          .addModule(Uri.base.resolve('doom_music_worklet.js').toString())
-          .toDart;
-      if (_disposed) return;
-
-      node = web.AudioWorkletNode(
-        context,
-        'doompeller-music-output',
-        web.AudioWorkletNodeOptions(
-          numberOfInputs: 0,
-          numberOfOutputs: 1,
-          outputChannelCount: <JSNumber>[2.toJS].toJS,
-        ),
-      );
-      node.connect(musicGain);
-      _musicNode = node;
-      node.onprocessorerror = ((web.Event _) {
-        _disableMusic('The browser audio output processor failed.');
-      }).toJS;
-      node.port.onmessage = ((web.MessageEvent event) {
-        _onMusicMessage(event.data);
-      }).toJS;
-      node.port.onmessageerror = ((web.Event _) {
-        _disableMusic('The music output channel received an invalid message.');
-      }).toJS;
-      node.port.start();
-
-      final Completer<void> workerReady = Completer<void>();
-      worker = web.Worker(
-        Uri.base.resolve('doom_music_worker_loader.mjs').toString().toJS,
-        web.WorkerOptions(type: 'module'),
-      );
-      _musicWorker = worker;
-      worker.onmessage = ((web.MessageEvent event) {
-        final Map<Object?, Object?>? message = _messageMap(event.data);
-        if (message?['type'] == 'ready' && !workerReady.isCompleted) {
-          workerReady.complete();
-        } else {
-          if (message?['type'] == 'fault' &&
-              message?['fatal'] == true &&
-              !workerReady.isCompleted) {
-            workerReady.completeError(
-              message?['message']?.toString() ?? 'The music worker failed.',
-            );
-          }
-          _onMusicMessage(event.data);
-        }
-      }).toJS;
-      worker.onerror = ((web.ErrorEvent event) {
-        final message = event.message.isEmpty
-            ? 'The music worker failed.'
-            : 'The music worker failed: ${event.message}';
-        if (!workerReady.isCompleted) workerReady.completeError(message);
-        _disableMusic(message);
-      }).toJS;
-      worker.onmessageerror = ((web.Event _) {
-        const message = 'The music worker received an invalid message.';
-        if (!workerReady.isCompleted) workerReady.completeError(message);
-        _disableMusic(message);
-      }).toJS;
-
-      await workerReady.future.timeout(const Duration(seconds: 10));
-      if (_disposed ||
-          !identical(_musicNode, node) ||
-          !identical(_musicWorker, worker) ||
-          !_musicLifecycle.completeInitialization(transportGeneration)) {
-        return;
-      }
-      final channel = web.MessageChannel();
-      node.port.postMessage(
-        <String, Object?>{'type': 'attach', 'port': channel.port1}.jsify(),
-        <JSObject>[channel.port1].toJS,
-      );
-      worker.postMessage(
-        <String, Object?>{
-          'type': 'attach',
-          'port': channel.port2,
-          'blockFrames': _musicBlockFrames,
-          'queueBlocks': _musicQueueBlocks,
-        }.jsify(),
-        <JSObject>[channel.port2].toJS,
-      );
-      _errorMessage = null;
-      _telemetryTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-        if (_disposed || _statsPending) return;
-        final currentNode = _musicNode;
-        if (currentNode == null) return;
-        _statsPending = true;
-        currentNode.port.postMessage(
-          <String, Object?>{'type': 'stats'}.jsify(),
-        );
-      });
-      _notifyListeners();
-      _sendPendingRetire();
-    } on Object catch (error, stackTrace) {
-      node?.disconnect();
-      worker?.terminate();
-      if (_disposed) return;
-      if (identical(_musicNode, node)) _musicNode = null;
-      if (identical(_musicWorker, worker)) _musicWorker = null;
-      _setError(
-        'OPL2 music is unavailable in this browser.',
-        error,
-        stackTrace,
-      );
-      _failMusic(_errorMessage!);
     }
   }
 
@@ -435,50 +300,8 @@ final class WebAudioSession extends DoomAudioSession {
     required Uint8List genMidi,
   }) {
     if (!_owns(generation)) return;
-    const DoomLimits limits = DoomLimits.defaults;
-    if (mus.lengthInBytes > limits.maxMusicBytes ||
-        genMidi.lengthInBytes > limits.maxGenMidiBytes) {
-      _errorMessage = 'The selected WAD music exceeds the safe size limit.';
-      _retireMusic();
-      _notifyListeners();
-      return;
-    }
-    final int epoch = ++_musicEpoch;
-    final config = _MusicConfiguration(
-      epoch: epoch,
-      track: track,
-      mus: Uint8List.fromList(mus),
-      genMidi: Uint8List.fromList(genMidi),
-    );
-    _musicAdmission.replaceConfiguration(epoch, config);
-    _queueMusicRetire(epoch);
-    _sendPendingConfiguration();
+    _musicTransport.configure(track: track, mus: mus, genMidi: genMidi);
     _tryResume();
-  }
-
-  void _sendPendingConfiguration() {
-    if (_disposed || !_musicLifecycle.available) return;
-    final worker = _musicWorker;
-    final config = _musicAdmission.takeConfiguration(
-      transportReady: worker != null,
-    );
-    if (worker == null || config == null) return;
-    _configurationPosts++;
-    final JSUint8Array mus = config.mus.toJS;
-    final JSUint8Array genMidi = config.genMidi.toJS;
-    worker.postMessage(
-      <String, Object?>{
-        'type': 'configure',
-        'epoch': config.epoch,
-        'track': config.track,
-        'mus': mus,
-        'genMidi': genMidi,
-      }.jsify(),
-      <JSObject>[
-        _ArrayBufferView._(mus).buffer,
-        _ArrayBufferView._(genMidi).buffer,
-      ].toJS,
-    );
   }
 
   void _setPaused(int generation, bool paused) {
@@ -497,7 +320,7 @@ final class WebAudioSession extends DoomAudioSession {
 
   void _stopMusic(int generation) {
     if (!_owns(generation)) return;
-    _retireMusic();
+    _musicTransport.retire();
   }
 
   Future<void> _disposeLevel(int generation) async {
@@ -505,91 +328,13 @@ final class WebAudioSession extends DoomAudioSession {
     _levelGeneration++;
     _dropEffects(complete: true);
     _pcmBuffers.clear();
-    _retireMusic();
+    _musicTransport.retire();
   }
 
   bool _owns(int generation) => !_disposed && generation == _levelGeneration;
 
   void _retireMusic() {
-    final int epoch = ++_musicEpoch;
-    _musicAdmission.discardPendingConfiguration();
-    _queueMusicRetire(epoch);
-  }
-
-  void _queueMusicRetire(int epoch) {
-    _musicAdmission.queueRetire(epoch);
-    _sendPendingRetire();
-  }
-
-  void _sendPendingRetire() {
-    if (_disposed || !_musicLifecycle.available) return;
-    final node = _musicNode;
-    final int? epoch = _musicAdmission.takeRetire(transportReady: node != null);
-    if (node == null || epoch == null) return;
-    _retirePosts++;
-    node.port.postMessage(
-      <String, Object?>{'type': 'retire', 'epoch': epoch}.jsify(),
-    );
-  }
-
-  void _onMusicMessage(JSAny? data) {
-    if (_disposed || !_musicLifecycle.acceptsMessages) return;
-    final Map<Object?, Object?>? message = _messageMap(data);
-    if (message == null) return;
-    switch (message['type']) {
-      case 'retired':
-        final int? epoch = (message['epoch'] as num?)?.toInt();
-        _musicAdmission.acknowledgeRetire(epoch);
-        _sendPendingRetire();
-        _sendPendingConfiguration();
-      case 'configured':
-        final int? epoch = (message['epoch'] as num?)?.toInt();
-        _musicAdmission.acknowledgeConfiguration(epoch);
-        if (epoch == _musicEpoch) {
-          _errorMessage = null;
-          _notifyListeners();
-        }
-        _sendPendingConfiguration();
-      case 'fault':
-        final String messageText =
-            message['message']?.toString() ?? 'The OPL2 music worker failed.';
-        if (message['fatal'] == true) {
-          _disableMusic(messageText);
-        } else {
-          final int? epoch = (message['epoch'] as num?)?.toInt();
-          _musicAdmission.acknowledgeConfiguration(epoch);
-          if (epoch == _musicEpoch) {
-            _errorMessage = messageText;
-            _notifyListeners();
-          }
-          _sendPendingConfiguration();
-        }
-      case 'stats':
-        _statsPending = false;
-        _latestMusicStats = Map<Object?, Object?>.unmodifiable(message);
-        if (const bool.fromEnvironment('DOOMPELLER_FRAME_PROBE')) {
-          final Object? workerValue = message['worker'];
-          final Map<Object?, Object?> worker =
-              workerValue is Map<Object?, Object?>
-              ? workerValue
-              : const <Object?, Object?>{};
-          web.console.log(
-            'doompeller-web-audio: '
-                    'epoch=${message['epoch']} '
-                    'queued=${message['queuedBlocks']} '
-                    'played=${message['playedFrames']} '
-                    'underruns=${message['underruns']} '
-                    'rendered=${worker['renderedFrames']} '
-                    'loop=${worker['loopCount']}'
-                .toJS,
-          );
-        }
-    }
-  }
-
-  static Map<Object?, Object?>? _messageMap(JSAny? data) {
-    final Object? value = data?.dartify();
-    return value is Map<Object?, Object?> ? value : null;
+    _musicTransport.retire();
   }
 
   void _applyContextState() {
@@ -673,31 +418,6 @@ final class WebAudioSession extends DoomAudioSession {
     }
   }
 
-  void _failMusic(String message) {
-    _musicLifecycle.disable();
-    _errorMessage = message;
-    _statsPending = false;
-    _latestMusicStats = const <Object?, Object?>{};
-    _notifyListeners();
-  }
-
-  void _disableMusic(String message) {
-    if (_disposed) return;
-    _musicLifecycle.disable();
-    _errorMessage = message;
-    _statsPending = false;
-    _latestMusicStats = const <Object?, Object?>{};
-    _musicAdmission.clear();
-    _telemetryTimer?.cancel();
-    _telemetryTimer = null;
-    _musicWorker?.terminate();
-    _musicWorker = null;
-    _musicNode?.port.close();
-    _musicNode?.disconnect();
-    _musicNode = null;
-    _notifyListeners();
-  }
-
   void _setError(String message, Object error, StackTrace stackTrace) {
     _errorMessage = message;
     FlutterError.reportError(
@@ -708,6 +428,11 @@ final class WebAudioSession extends DoomAudioSession {
         context: ErrorDescription(message),
       ),
     );
+    _notifyListeners();
+  }
+
+  void _setMusicMessage(String? message) {
+    _errorMessage = message;
     _notifyListeners();
   }
 
@@ -728,23 +453,12 @@ final class WebAudioSession extends DoomAudioSession {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
-    _musicLifecycle.dispose();
     _levelGeneration++;
-    _musicEpoch++;
-    _telemetryTimer?.cancel();
-    _statsPending = false;
-    _latestMusicStats = const <Object?, Object?>{};
     _listeners?.abort();
     _dropEffects(complete: true);
-    _musicAdmission.clear();
+    _musicTransport.dispose();
     _contextCommands.clear();
     _context?.onstatechange = null;
-    _musicNode?.port.postMessage(
-      <String, Object?>{'type': 'retire', 'epoch': _musicEpoch}.jsify(),
-    );
-    _musicNode?.port.close();
-    _musicNode?.disconnect();
-    _musicWorker?.terminate();
     _musicGain?.disconnect();
     _effectsGain?.disconnect();
     final context = _context;
@@ -853,20 +567,6 @@ final class _ActiveVoice {
     panner.disconnect();
     gain.disconnect();
   }
-}
-
-final class _MusicConfiguration {
-  const _MusicConfiguration({
-    required this.epoch,
-    required this.track,
-    required this.mus,
-    required this.genMidi,
-  });
-
-  final int epoch;
-  final String track;
-  final Uint8List mus;
-  final Uint8List genMidi;
 }
 
 /// Immutable snapshot; reading it does not request or mutate browser state.

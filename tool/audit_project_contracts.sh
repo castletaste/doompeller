@@ -5,7 +5,7 @@ PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$PROJECT_ROOT"
 
 fail() {
-  echo "AUDIT FAIL: $1" >&2
+  echo "PROJECT AUDIT FAIL: $1" >&2
   exit 1
 }
 
@@ -14,11 +14,13 @@ command -v rg >/dev/null 2>&1 || fail "ripgrep (rg) is required"
 need_line() {
   pattern=$1
   file=$2
-  rg -q "$pattern" "$file" || fail "missing expected pin/config in $file: $pattern"
+  rg -q "$pattern" "$file" || fail "missing expected project pin in $file: $pattern"
 }
 
 # Pure-Dart packages are deliberately usable without Flutter or a GPU runtime.
-if rg -n -g '*.dart' "^(import|export) ['\"](dart:(ui|ffi|js|js_interop|js_interop_unsafe|html)|package:(flutter|flame|flame_3d|web)(/|['\"]))" packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music
+if rg -n -g '*.dart' \
+  "^(import|export) ['\"](dart:(ui|ffi|js|js_interop|js_interop_unsafe|html)|package:(flutter|flame|flame_3d|web)(/|['\"]))" \
+  packages/doom_wad packages/doom_geometry packages/doom_core packages/doom_music
 then
   fail "pure-Dart package imports a forbidden platform library"
 fi
@@ -35,14 +37,13 @@ fi
 # These are the prohibited ways to smuggle another engine or renderer into the
 # app. Documentation may mention the words; executable imports/APIs may not.
 if rg -n -g '*.dart' \
-  "^(import|export) ['\"](dart:ffi|package:(ffi|webview_flutter)/)|DynamicLibrary\.|WebViewController\(" \
+  "^(import|export) ['\"](dart:ffi|package:(ffi|webview_flutter)/)|DynamicLibrary\\.|WebViewController\\(" \
   lib packages tool
 then
   fail "FFI, WebView, or native dynamic loading found"
 fi
 
-# Browser APIs are confined to content input, pointer capture, and the audio session/worker.
-# Music synthesis itself stays pure Dart in doom_music.
+# Browser APIs are confined to content input, pointer capture, and audio.
 js_hits=$(rg -l -g '*.dart' "^(import|export) ['\"]dart:js(_interop(_unsafe)?)?['\"]" lib packages tool 2>/dev/null || true)
 outside_web_bridges=$(printf '%s\n' "$js_hits" |
   rg -v "^lib/(game/(browser_wad_picker_web|content_source_platform_web|browser_pointer_web|web_audio_session)|web/doom_music_worker)\.dart$" || true)
@@ -54,7 +55,8 @@ if rg -n -g '*.dart' "WebAssembly\." lib packages tool; then
   fail "direct WebAssembly API usage found"
 fi
 
-# The experimental rendering stack is exact-pinned.
+# Experimental rendering dependencies and ABI/replay pins are intentionally
+# exact. A change requires updating the corresponding tripwire corpus.
 need_line "^  flutter: 3\.44\.4$" pubspec.yaml
 need_line "^  flame: 1\.38\.0$" pubspec.yaml
 need_line "^  flame_3d: 0\.3\.0$" pubspec.yaml
@@ -63,66 +65,18 @@ need_line "^  web: 1\.1\.1$" pubspec.yaml
 need_line "^    - \.local/doom/DOOM1\.WAD$" pubspec.yaml
 need_line "<key>FLTEnableImpeller</key>" macos/Runner/Info.plist
 need_line "<key>FLTEnableFlutterGPU</key>" macos/Runner/Info.plist
-
-# ABI and replay/geometry hash pins are intentionally loud. A change to one of
-# these values requires updating the tripwire corpus and its review contract,
-# rather than silently changing every recorded result.
 need_line "static const int floatsPerVertex = 20;" lib/adapter/vertex_abi.dart
 need_line "static const int floatsPerVertex = 20;" packages/doom_geometry/lib/src/packed_mesh.dart
 need_line "var hash = 0x811C9DC5;" packages/doom_geometry/lib/src/compiler_packing.dart
 need_line "int h = 0x811c9dc5;" packages/doom_core/lib/src/game_state.dart
-test -f test/adapter/vertex_abi_test.dart || fail "vertex ABI tripwire test is missing"
+test -f test/adapter/vertex_abi_test.dart ||
+  fail "vertex ABI tripwire test is missing"
 test -f test/integration/geometry_adapter_abi_test.dart ||
   fail "geometry/adapter ABI tripwire test is missing"
 test -f test/replay_corpus_test.dart || fail "replay corpus test is missing"
 
-# Commercial content must never enter the index or any commit. This checks
-# names; the generated fixture is source code and has no WAD file on disk.
-tracked_wads=$(git ls-files | rg -i "\.(wad|iwad|pwad|deh)$" || true)
-if [ -n "$tracked_wads" ]; then
-  printf '%s\n' "$tracked_wads" >&2
-  fail "commercial-content extension is tracked"
-fi
-history_wads=$(git log --all --name-only --format= | rg -i "\.(wad|iwad|pwad|deh)$" || true)
-if [ -n "$history_wads" ]; then
-  printf '%s\n' "$history_wads" >&2
-  fail "commercial-content extension appears in Git history"
-fi
-
-git check-ignore -q .local/doom/DOOM.WAD ||
-  fail ".local/doom/DOOM.WAD is not ignored"
-git check-ignore -q sample.wad || fail "lowercase WAD extension is not ignored"
-git check-ignore -q sample.WAD || fail "uppercase WAD extension is not ignored"
-
-if git ls-files --error-unmatch assets/shaders/doom_palette.shaderbundle >/dev/null 2>&1
-then
-  fail "compiled shader bundle is tracked instead of reproducibly built"
-fi
-git check-ignore -q assets/shaders/doom_palette.shaderbundle ||
-  fail "compiled shader bundle is not ignored"
-if git ls-files --error-unmatch assets/shaders/doom_palette.wgslbundle >/dev/null 2>&1
-then
-  fail "compiled WebGPU shader bundle is tracked instead of reproducibly built"
-fi
-git check-ignore -q assets/shaders/doom_palette.wgslbundle ||
-  fail "compiled WebGPU shader bundle is not ignored"
-need_line "Cross-Origin-Opener-Policy: same-origin" web/_headers
-need_line "Cross-Origin-Embedder-Policy: credentialless" web/_headers
-need_line "^/assets/\.local/doom/DOOM1\.WAD$" web/_headers
-need_line "finalize_wasm_web_build\.dart build/web" tool/build_web_release.sh
-
-if [ -f build/web/flutter_bootstrap.js ]; then
-  need_line '"compileTarget":"dart2wasm"' build/web/flutter_bootstrap.js
-  if rg -q '"compileTarget":"dart2js"' build/web/flutter_bootstrap.js ||
-    [ -e build/web/main.dart.js ]
-  then
-    fail "generated web release still contains a dart2js fallback"
-  fi
-fi
-
-# When a release executable exists, reject characteristic symbols of a linked
-# Doom engine. Absence of symbols is only a smoke check; source rules above are
-# the stronger proof.
+# If a release executable exists, reject characteristic symbols of a linked
+# Doom engine. Source rules above remain the stronger proof.
 APP_BINARY=build/macos/Build/Products/Release/doompeller.app/Contents/MacOS/doompeller
 if [ -x "$APP_BINARY" ] && command -v nm >/dev/null 2>&1; then
   if nm -gj "$APP_BINARY" 2>/dev/null |
@@ -132,4 +86,4 @@ if [ -x "$APP_BINARY" ] && command -v nm >/dev/null 2>&1; then
   fi
 fi
 
-echo "AUDIT PASS: layering, native-stack, pins, and content hygiene"
+echo "PROJECT AUDIT PASS: layering, native-stack, dependency pins, and ABI contracts"

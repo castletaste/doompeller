@@ -13,7 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:doompeller/game/doom_hud.dart';
 import 'package:doompeller/ui/doom_app.dart';
 
-import '../widget_test.dart' show FakeRuntime, testSurface;
+import '../support/game_host.dart' show FakeRuntime, testSurface;
 
 import '../support/local_iwad.dart';
 

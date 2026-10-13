@@ -14,7 +14,7 @@ import '../adapter/fake_gpu_backend.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../widget_test.dart' as fixture;
+import '../support/game_host.dart' as fixture;
 
 void main() {
   test(

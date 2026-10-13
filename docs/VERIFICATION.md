@@ -41,10 +41,25 @@ identical frame; the previous build failed at startup. A scripted keyboard
 walk renders correctly; clicking first makes headless Chrome request Pointer
 Lock and close the target, in both builds.
 
+Physical GPU, Apple M2 Pro, Chromium 152 (Electron), 1280×800 at DPR 2,
+idle E1M1 start view, 8-second windows on the published Cloudflare previews:
+
+| Build | Backend | Frames / s | Frame interval p50 / p99 / max | Main thread busy |
+| --- | --- | --- | --- | --- |
+| #13 preview (flame_3d 0.3.2) | WebGPU (Metal) | 120 | 8.32 / 10.22 / 10.32 ms | 10.5% |
+| #14 preview (flutter_scene 0.24.3) | WebGL2 | 120 | 8.32 / 10.32 / 10.34 ms | 10.7% |
+
+Both are capped by the 120 Hz display. Intervals are `requestAnimationFrame`
+deltas and busy time is the complement of `requestIdleCallback` idle time, not
+Flutter `FrameTiming`. A turning run with synthetic key events measured 120
+frames / s and 11.2% busy, but the view change could not be confirmed, so it is
+not counted. This browser also exposes WebGPU on secure origins; running
+without WebGPU was shown only in headless Chrome.
+
 Not verified here: any macOS run (the Metal bundle builds via the hook, but
 seams, cutouts, sky, depth order and palette need a live Impeller check),
-physical-GPU frame times, and memory over repeated level loads. SwiftShader
-frame rates are not evidence.
+low-end GPUs, and memory over repeated level loads. SwiftShader frame rates are
+not evidence.
 
 # Flutter 3.47.7 toolchain verification — 2026-10-13
 

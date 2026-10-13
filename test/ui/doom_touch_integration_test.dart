@@ -66,7 +66,7 @@ void main() {
     await tester.pump();
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
-      runtime.onRemove();
+      runtime.dispose();
     });
     return runtime;
   }

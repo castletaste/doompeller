@@ -2,7 +2,7 @@
 //
 // This exists to prove, in a real macOS window, that the pinned stack actually
 // works: Impeller Metal is active, the custom palette shader bundle loads and
-// links, and a PackedFlameSurface draws with a moving plane uploading in place.
+// links, and a PackedSurface draws with a moving plane uploading in place.
 //
 // It is a harness, not the game. lib/game owns the real app.
 import 'dart:io';
@@ -11,7 +11,6 @@ import 'dart:ui' as ui;
 
 import 'package:doompeller/adapter/adapter.dart';
 import 'package:doompeller/game/content_source.dart';
-import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -92,6 +91,7 @@ class RendererSmokeApp extends StatefulWidget {
 
 class _RendererSmokeAppState extends State<RendererSmokeApp> {
   late final RendererSmokeGame _game;
+  bool _loaded = false;
   bool _resultWritten = false;
 
   @override
@@ -102,6 +102,9 @@ class _RendererSmokeAppState extends State<RendererSmokeApp> {
       content: widget.content,
       onComplete: _writeResultAndExit,
     );
+    _game.load().then((_) {
+      if (mounted) setState(() => _loaded = true);
+    });
     final target = Platform.environment['DOOMPELLER_CAPTURE'];
     if (target != null && target.isNotEmpty) {
       final delayMillis = int.tryParse(
@@ -181,7 +184,9 @@ class _RendererSmokeAppState extends State<RendererSmokeApp> {
       backgroundColor: Colors.black,
       body: RepaintBoundary(
         key: captureKey,
-        child: GameWidget(game: _game),
+        child: _loaded
+            ? DoomSceneSurface(host: _game)
+            : const SizedBox.expand(),
       ),
     ),
   );

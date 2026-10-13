@@ -2,7 +2,6 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:doom_core/doom_core.dart';
 import 'package:doom_geometry/doom_geometry.dart';
@@ -268,25 +267,19 @@ PreparedDoomLevel _withThings(PreparedDoomLevel original, List<Thing> things) {
 }
 
 void _expectInactiveRenderTreeIsSkipped(ActorSpriteComponent component) {
-  final ui.PictureRecorder recorder = ui.PictureRecorder();
-  final ui.Canvas canvas = ui.Canvas(recorder);
   expect(
-    () => component.renderTree(canvas),
-    returnsNormally,
-    reason: 'inactive retained billboard must not reach Flame 3D draw submit',
+    component.visible,
+    isFalse,
+    reason: 'inactive retained billboard must not reach the GPU scene',
   );
-  recorder.endRecording();
 }
 
 void _expectHiddenWeaponRenderTreeIsSkipped(
   ViewLockedWeaponSpriteComponent component,
 ) {
-  final ui.PictureRecorder recorder = ui.PictureRecorder();
-  final ui.Canvas canvas = ui.Canvas(recorder);
   expect(
-    () => component.renderTree(canvas),
-    returnsNormally,
-    reason: 'hidden weapon flash must not reach Flame 3D draw submit',
+    component.visible,
+    isFalse,
+    reason: 'hidden weapon flash must not reach the GPU scene',
   );
-  recorder.endRecording();
 }

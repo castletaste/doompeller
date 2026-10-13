@@ -1,0 +1,10 @@
+{
+  "DoomPaletteVertex": {
+    "type": "vertex",
+    "file": "shaders/doom_palette.vert"
+  },
+  "DoomPaletteFragment": {
+    "type": "fragment",
+    "file": "shaders/doom_palette.frag"
+  }
+}

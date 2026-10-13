@@ -11,7 +11,6 @@ import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_hud.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart' show DoomStatusBar;
-import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -331,11 +330,7 @@ final class _E1m1ReplayAppState extends State<_E1m1ReplayApp> {
       body: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          GameWidget<DoomRuntimeGame>(
-            game: widget.runtime,
-            autofocus: true,
-            backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
-          ),
+          DoomSceneSurface(host: widget.runtime),
           Positioned(
             top: 12,
             left: 12,

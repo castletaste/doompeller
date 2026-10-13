@@ -3,21 +3,20 @@ import 'dart:math' as math;
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/graphics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show KeyEventResult;
+import 'package:vector_math/vector_math.dart';
 
 import '../game/content_source.dart';
 import 'doom_runtime_game.dart';
 import 'doom_scene.dart';
 import 'doom_camera.dart';
+import 'doom_scene_host.dart';
 import 'frame_histogram.dart';
 import 'render_diagnostics.dart';
 import 'renderer_smoke_trajectory.dart';
-
-/// Initializes the pinned GPU backend before a FlameGame3D is constructed.
-Future<void> initializeDoomRenderer() => GpuBackend.initialize();
 
 enum RendererSmokeMap { fixture, scaleFixture, developerIwad }
 
@@ -72,20 +71,35 @@ typedef RendererSmokeComplete = void Function(Map<String, Object?> result);
 /// WAD performance harness kept inside the renderer boundary.
 ///
 /// Fixture and developer-IWAD modes traverse the production WAD -> resources
-/// -> geometry -> packed surfaces -> palette material -> Flame 3D path. Direct
+/// -> geometry -> packed surfaces -> palette material -> flutter_scene path. Direct
 /// plane mutations deliberately call the same [DoomScene] dynamic APIs used by
 /// the production runtime, but do not prove gameplay special activation.
-final class RendererSmokeGame extends FlameGame3D {
+final class RendererSmokeGame implements DoomSceneHost {
   RendererSmokeGame({
     this.config = const RendererSmokeConfig(),
     this.content,
     this.onComplete,
-  }) : super(
-         camera: DoomCameraComponent(
-           position: Vector3(384, 96, -384),
-           target: Vector3(384, 48, -256),
-         ),
-       );
+  });
+
+  @override
+  final DoomCamera camera = DoomCamera(
+    position: Vector3(384, 96, -384),
+    target: Vector3(384, 48, -256),
+  );
+
+  /// The loaded scene. Mount a surface only after [load] completes.
+  @override
+  DoomScene get scene =>
+      _scene ?? (throw StateError('RendererSmokeGame.load() has not run'));
+
+  @override
+  Color backgroundColor() => const Color(0xFF000000);
+
+  @override
+  KeyEventResult onKeyEvent(
+    KeyEvent event,
+    Set<LogicalKeyboardKey> keysPressed,
+  ) => KeyEventResult.ignored;
 
   final RendererSmokeConfig config;
   final DoomContent? content;
@@ -123,9 +137,9 @@ final class RendererSmokeGame extends FlameGame3D {
   bool _measuring = false;
   bool _completed = false;
 
-  @override
-  Future<void> onLoad() async {
-    await super.onLoad();
+  /// Prepares content, geometry and the scene. Must complete before the
+  /// scene surface mounts.
+  Future<void> load() async {
     final selectedContent =
         content ?? await resolveRendererSmokeContent(config);
     final set = selectedContent.wads;
@@ -215,7 +229,6 @@ final class RendererSmokeGame extends FlameGame3D {
         if (_doorPlane != null) _doorPlane!.sector,
       },
     );
-    world.add(scene.root);
     _applyCameraTrajectory(0);
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
     _lastDynamicUploads = diagnostics.dynamicUploads;
@@ -234,7 +247,6 @@ final class RendererSmokeGame extends FlameGame3D {
 
   @override
   void update(double dt) {
-    super.update(dt);
     final scene = _scene;
     final level = _level;
     if (scene == null || level == null || _completed) {
@@ -295,7 +307,8 @@ final class RendererSmokeGame extends FlameGame3D {
   }
 
   void _samplePreviousFrame() {
-    final int draws = world.context.drawCount;
+    // Mounted objects that draw this frame, before engine frustum culling.
+    final int draws = scene.root.children.where((o) => o.visible).length;
     _lastDraws = draws;
     final int uploads = diagnostics.dynamicUploads;
     final int uploadBytes = diagnostics.dynamicUploadBytes;
@@ -386,7 +399,7 @@ final class RendererSmokeGame extends FlameGame3D {
         ...render.toJson(),
         'active_surfaces': scene.surfaceCount,
         'draws': <String, Object?>{
-          'metric': 'flame3d_render_context_submitted_draws',
+          'metric': 'scene_visible_objects',
           'samples': _drawSamples,
           'mean_per_frame': _drawSamples == 0 ? 0 : _drawSum / _drawSamples,
           'max_per_frame': _maxDraws,
@@ -423,7 +436,7 @@ final class RendererSmokeGame extends FlameGame3D {
           'Flutter FrameTiming.totalSpan',
           'Flutter FrameTiming.buildDuration',
           'Flutter FrameTiming.rasterDuration',
-          'Flame3D submitted draws',
+          'mounted scene objects drawn per frame (before engine culling)',
           'Doompeller CPU-side GPU buffer requests and uploads',
         ],
         'does_not_measure': <String>[

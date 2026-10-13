@@ -1,94 +1,90 @@
+import 'dart:io';
 import 'dart:typed_data';
-import 'dart:ui' show Color;
 
 import 'package:doompeller/adapter/adapter.dart';
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/resources.dart';
+import 'package:doompeller/adapter/scene_gpu.dart';
+import 'package:flutter_scene/gpu.dart' as gpu;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('DoomVertexAbi pin', () {
     // THE TRIPWIRE.
     //
-    // Doompeller writes flame_3d's interleaved vertex record by hand instead of
-    // allocating Vertex objects. That is only safe while our layout and
-    // flame_3d's agree exactly. If a flame_3d bump reorders, resizes or
-    // reinterprets the record, this test fails and the renderer must be
-    // re-verified before the pin moves.
-    test('matches Vertex.storage float-for-float', () {
-      final vertex = Vertex(
-        position: Vector3(1.5, -2.25, 3.75),
-        texCoord: Vector2(0.125, 0.875),
-        color: const Color.fromARGB(255, 51, 102, 153),
-        normal: Vector3(0, 1, 0),
-        joints: Vector4(1, 2, 3, 4),
-        weights: Vector4(0.1, 0.2, 0.3, 0.4),
-      );
+    // Geometry producers write the vertex record by hand, the GPU reads it
+    // through doomVertexLayout, and the palette vertex shader names each
+    // attribute. All three must agree float for float. If any side changes,
+    // this fails and the renderer must be re-verified.
+    const Map<String, (int, int, String)> fields = {
+      // name: (float offset, components, GLSL type)
+      'position': (DoomVertexAbi.positionOffset, 3, 'vec3'),
+      'tex_coord': (DoomVertexAbi.texCoordOffset, 2, 'vec2'),
+      'color': (DoomVertexAbi.colorOffset, 4, 'vec4'),
+      'normal': (DoomVertexAbi.normalOffset, 3, 'vec3'),
+      'atlas_rect': (DoomVertexAbi.atlasRectOffset, 4, 'vec4'),
+      'params': (DoomVertexAbi.paramsOffset, 4, 'vec4'),
+    };
 
-      final ours = DoomVertexAbi.allocate(1);
-      DoomVertexAbi.writeFlameVertex(
-        ours,
-        0,
-        x: 1.5,
-        y: -2.25,
-        z: 3.75,
-        u: 0.125,
-        v: 0.875,
-        color: const Color.fromARGB(255, 51, 102, 153),
-        nx: 0,
-        ny: 1,
-        nz: 0,
-        joint0: 1,
-        joint1: 2,
-        joint2: 3,
-        joint3: 4,
-        weight0: 0.1,
-        weight1: 0.2,
-        weight2: 0.3,
-        weight3: 0.4,
-      );
-
-      expect(
-        vertex.storage.length,
-        DoomVertexAbi.floatsPerVertex,
-        reason: 'flame_3d changed its vertex float count',
-      );
-      expect(
-        ours,
-        orderedEquals(vertex.storage),
-        reason: 'flame_3d changed its vertex field order or packing',
-      );
-    });
-
-    test('matches the byte layout a Surface would upload', () {
-      final vertex = Vertex(
-        position: Vector3(4, 5, 6),
-        texCoord: Vector2(0.25, 0.5),
-        normal: Vector3(1, 0, 0),
-      );
-      final surface = Surface(
-        vertices: [vertex],
-        indices: const [0, 0, 0],
-        calculateNormals: false,
-      );
-
-      expect(surface.verticesBytes, DoomVertexAbi.bytesPerVertex);
-      expect(
-        DoomVertexAbi.bytesPerVertex,
-        80,
-        reason: 'the vertex stride is baked into the compiled shader bundle',
-      );
-    });
-
-    test('offsets address the documented fields', () {
+    test('the record is 20 contiguous floats with documented offsets', () {
+      expect(DoomVertexAbi.floatsPerVertex, 20);
+      expect(DoomVertexAbi.bytesPerVertex, 80);
       expect(DoomVertexAbi.positionOffset, 0);
       expect(DoomVertexAbi.texCoordOffset, 3);
       expect(DoomVertexAbi.colorOffset, 5);
       expect(DoomVertexAbi.normalOffset, 9);
-      expect(DoomVertexAbi.jointsOffset, 12);
-      expect(DoomVertexAbi.weightsOffset, 16);
-      expect(DoomVertexAbi.atlasRectOffset, DoomVertexAbi.jointsOffset);
-      expect(DoomVertexAbi.paramsOffset, DoomVertexAbi.weightsOffset);
+      expect(DoomVertexAbi.atlasRectOffset, 12);
+      expect(DoomVertexAbi.paramsOffset, 16);
+      var next = 0;
+      for (final (offset, components, _) in fields.values) {
+        expect(offset, next, reason: 'fields must tile the record');
+        next += components;
+      }
+      expect(next, DoomVertexAbi.floatsPerVertex);
+    });
+
+    test('the GPU layout reads every field at its ABI offset', () {
+      final buffers = doomVertexLayout.buffers;
+      expect(buffers, hasLength(2));
+      final vertex = buffers.first;
+      expect(vertex.strideInBytes, DoomVertexAbi.bytesPerVertex);
+      expect(vertex.stepMode, gpu.VertexStepMode.vertex);
+      expect(vertex.attributes.map((a) => a.name), fields.keys);
+      for (final attribute in vertex.attributes) {
+        final (offset, components, _) = fields[attribute.name]!;
+        expect(attribute.offsetInBytes, offset * 4, reason: attribute.name);
+        expect(
+          attribute.format.bytesPerElement,
+          components * 4,
+          reason: attribute.name,
+        );
+      }
+
+      // flutter_scene's per-node instance record: model columns and colour.
+      final instance = buffers.last;
+      expect(instance.stepMode, gpu.VertexStepMode.instance);
+      expect(instance.strideInBytes, 80);
+      expect(instance.attributes.map((a) => a.name), const [
+        'model_transform_0',
+        'model_transform_1',
+        'model_transform_2',
+        'model_transform_3',
+        'instance_color',
+      ]);
+    });
+
+    test('the vertex shader declares the same attributes in order', () {
+      final shader = File('shaders/doom_palette.vert').readAsStringSync();
+      final declared = RegExp(r'^in (vec[234]) (\w+);', multiLine: true)
+          .allMatches(shader)
+          .map((m) => (m.group(2)!, m.group(1)!))
+          .toList();
+      expect(declared, [
+        for (final MapEntry(:key, :value) in fields.entries) (key, value.$3),
+        ('model_transform_0', 'vec4'),
+        ('model_transform_1', 'vec4'),
+        ('model_transform_2', 'vec4'),
+        ('model_transform_3', 'vec4'),
+        ('instance_color', 'vec4'),
+      ]);
     });
   });
 

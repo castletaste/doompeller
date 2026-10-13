@@ -12,13 +12,20 @@
 // is precisely the wrong look. Doom's darkness is a palette remap, not a
 // multiply.
 //
-// Texture formats: flame_3d 0.3.2 has no R8 format, so all three lookups are
-// RGBA8. The atlas packs the palette index in red and mask coverage in alpha.
-// The COLORMAP and PLAYPAL lookups store their payload in red / RGB.
+// Texture formats: all three lookups are RGBA8, the one format every
+// flutter_scene backend uploads and samples identically. The atlas packs the
+// palette index in red and mask coverage in alpha. The COLORMAP and PLAYPAL
+// lookups store their payload in red / RGB.
 //
-// Sampling: the backend binds a nearest / clamp-to-edge sampler. Repeating is
-// therefore done in the shader with fract() inside the vertex's atlas rect,
-// which is also what keeps one atlas page from bleeding into its neighbours.
+// Sampling: the adapter binds a nearest / clamp-to-edge sampler without mips.
+// Repeating is therefore done in the shader with fract() inside the vertex's
+// atlas rect, which is also what keeps one atlas page from bleeding into its
+// neighbours.
+//
+// Output: flutter_scene renders linear HDR and its resolve pass encodes sRGB.
+// With linear tone mapping at exposure 1 (lib/adapter/scene_gpu.dart), decoding
+// the PLAYPAL byte here makes that encode return the identical byte. This was
+// checked for every PLAYPAL x COLORMAP x index combination.
 
 in vec2 fragTexCoord;
 in vec4 fragAtlasRect;
@@ -28,7 +35,7 @@ in float fragLight;
 in float fragAlpha;
 in float fragViewDepth;
 
-out vec4 outColor;
+out vec4 frag_color;
 
 uniform sampler2D indexAtlas;
 uniform sampler2D colorMapLut;
@@ -50,13 +57,17 @@ float texelCenter(float index, float size) {
   return (index + 0.5) / size;
 }
 
+// The IEC 61966-2-1 decode, the inverse of the resolve pass LinearToSRGB.
+vec3 SRGBToLinearExact(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)),
+             step(0.04045, c));
+}
+
 void main() {
-  // Keep vertexNormal live through shader optimization so flame_3d's reflected
-  // vertex descriptor retains the pinned floats 9..11. Geometry never emits a
-  // NaN normal, so this guard has no visual effect on valid content.
-  // Naga's GLSL frontend does not lower isnan(), while IEEE NaN remains the
-  // only floating value unequal to itself. Spell the same no-op guard with
-  // comparisons so both Impeller and WebGPU retain the normal attribute.
+  // Keep the normal attribute live through shader optimization so the
+  // declared vertex layout always matches the compiled shader. Geometry never
+  // emits a NaN normal, so this guard has no visual effect on valid content;
+  // IEEE NaN is the only floating value unequal to itself.
   if (fragNormal.x != fragNormal.x ||
       fragNormal.y != fragNormal.y ||
       fragNormal.z != fragNormal.z) {
@@ -158,8 +169,8 @@ void main() {
   // paletteColor is used verbatim. Do not tint it.
   float alpha = fuzz ? 1.0 : clamp(fragAlpha, 0.0, 1.0);
 
-  // The render pass blends with premultiplied alpha, so premultiply here. With
-  // the normal alpha of 1.0 this is an identity operation and the palette RGB
-  // reaches the framebuffer bit-exact.
-  outColor = vec4(paletteColor * alpha, alpha);
+  // flutter_scene expects linear color premultiplied by alpha. The exact sRGB
+  // decode is the inverse of the resolve pass encode, and with the normal
+  // alpha of 1.0 the palette RGB reaches the framebuffer bit-exact.
+  frag_color = vec4(SRGBToLinearExact(paletteColor) * alpha, alpha);
 }

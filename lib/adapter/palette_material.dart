@@ -1,21 +1,21 @@
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/graphics.dart';
-import 'package:flame_3d/resources.dart';
+import 'dart:typed_data';
 
 import 'palette_textures.dart';
 
-/// Binds Doompeller's indexed-palette shader: atlas index, COLORMAP, PLAYPAL.
+/// The state of Doompeller's indexed-palette shader: atlas index, COLORMAP,
+/// PLAYPAL.
 ///
 /// One material covers an entire atlas page. Per-texture data (the atlas
 /// sub-rectangle and the sampling mode) travels in the vertex record instead of
 /// in uniforms, so wall, flat and sprite geometry sharing a page collapse into
-/// a single draw. flame_3d 0.3.2 has no batching and insertion-sorts visible
-/// draws back-to-front, so keeping the material count near the page count is
-/// the main lever on frame cost.
+/// a single draw, and the material count stays near the page count.
+///
+/// This is plain state. The presenter mirrors it into a GPU material and
+/// re-uploads the uniform block only when [revision] changes.
 ///
 /// Screen flashes are [paletteIndex] changes. Nothing is redrawn and no
 /// full-screen quad is composited, exactly as the original did it.
-final class PaletteMaterial extends Material {
+final class PaletteMaterial {
   PaletteMaterial({
     required this.textures,
     int paletteIndex = DoomPaletteVariant.normal,
@@ -28,27 +28,9 @@ final class PaletteMaterial extends Material {
        // ignore: prefer_initializing_formals
        _lightScale = lightScale,
        // ignore: prefer_initializing_formals
-       _distanceScale = distanceScale,
-       super(
-         vertexShader: VertexShader.fromAsset(
-           shaderAsset,
-           slots: const ['VertexInfo'],
-         ),
-         fragmentShader: FragmentShader.fromAsset(
-           shaderAsset,
-           slots: const [
-             'indexAtlas',
-             'colorMapLut',
-             'paletteLut',
-             'DoomMaterial',
-           ],
-         ),
-       ) {
+       _distanceScale = distanceScale {
     _validatePaletteIndex(paletteIndex);
   }
-
-  /// The compiled bundle produced by tool/build_shaders.sh.
-  static const String shaderAsset = 'assets/shaders/doom_palette.shaderbundle';
 
   /// COLORMAP rows added per world unit of distance.
   ///
@@ -79,14 +61,18 @@ final class PaletteMaterial extends Material {
     if (value < -1 || value >= textures.data.colorMapRows) {
       throw RangeError.range(value, -1, textures.data.colorMapRows - 1);
     }
+    if (_fixedColorMap == value) return;
     _fixedColorMap = value;
+    _revision++;
   }
 
   /// The active PLAYPAL row. See [DoomPaletteVariant].
   int get paletteIndex => _paletteIndex;
   set paletteIndex(int value) {
     _validatePaletteIndex(value);
+    if (_paletteIndex == value) return;
     _paletteIndex = value;
+    _revision++;
   }
 
   /// Multiplier on sector light before the COLORMAP row is chosen.
@@ -95,7 +81,9 @@ final class PaletteMaterial extends Material {
     if (!value.isFinite || value < 0) {
       throw ArgumentError.value(value, 'lightScale', 'must be finite and >= 0');
     }
+    if (_lightScale == value) return;
     _lightScale = value;
+    _revision++;
   }
 
   /// COLORMAP rows added per world unit of distance.
@@ -108,7 +96,9 @@ final class PaletteMaterial extends Material {
         'must be finite and >= 0',
       );
     }
+    if (_distanceScale == value) return;
     _distanceScale = value;
+    _revision++;
   }
 
   /// Coverage below which a fragment is discarded.
@@ -117,45 +107,33 @@ final class PaletteMaterial extends Material {
   /// disables the test entirely.
   double get alphaThreshold => alphaCutout ? 0.5 : 0;
 
-  @override
-  void apply(covariant RenderContext3D context) {
-    vertexShader
-      ..setMatrix4('VertexInfo.model', context.model)
-      ..setMatrix4('VertexInfo.view', context.view)
-      ..setMatrix4('VertexInfo.projection', context.projection);
+  /// Changes whenever a uniform value changes.
+  int get revision => _revision;
+  int _revision = 0;
 
+  /// Number of floats in the std140 DoomMaterial uniform block.
+  static const int uniformFloats = 12;
+
+  /// Writes the DoomMaterial block, three vec4 rows matching
+  /// shaders/doom_palette.frag, into [target] and returns it.
+  Float32List writeUniforms([Float32List? target]) {
     final data = textures.data;
-    fragmentShader
-      ..setTexture('indexAtlas', textures.indexAtlas)
-      ..setTexture('colorMapLut', textures.colorMapLut)
-      ..setTexture('paletteLut', textures.paletteLut)
-      ..setVector4(
-        'DoomMaterial.atlasSize',
-        Vector4(
-          data.atlasWidth.toDouble(),
-          data.atlasHeight.toDouble(),
-          data.colorMapRows.toDouble(),
-          data.paletteRows.toDouble(),
-        ),
-      )
-      ..setVector4(
-        'DoomMaterial.palette',
-        Vector4(
-          _paletteIndex.toDouble(),
-          _lightScale,
-          _distanceScale,
-          alphaThreshold,
-        ),
-      )
-      ..setVector4(
-        'DoomMaterial.lighting',
-        Vector4(
-          data.maxLightRow.toDouble(),
-          data.invulnerabilityRow.toDouble(),
-          _fixedColorMap.toDouble(),
-          0,
-        ),
-      );
+    return (target ?? Float32List(uniformFloats))
+      // (atlasWidth, atlasHeight, colorMapRows, paletteRows)
+      ..[0] = data.atlasWidth.toDouble()
+      ..[1] = data.atlasHeight.toDouble()
+      ..[2] = data.colorMapRows.toDouble()
+      ..[3] = data.paletteRows.toDouble()
+      // (paletteIndex, lightScale, distanceScale, alphaThreshold)
+      ..[4] = _paletteIndex.toDouble()
+      ..[5] = _lightScale
+      ..[6] = _distanceScale
+      ..[7] = alphaThreshold
+      // (maxLightRow, invulnerabilityRow, fixedColorMap, unused)
+      ..[8] = data.maxLightRow.toDouble()
+      ..[9] = data.invulnerabilityRow.toDouble()
+      ..[10] = _fixedColorMap.toDouble()
+      ..[11] = 0;
   }
 
   void _validatePaletteIndex(int value) {
@@ -172,9 +150,9 @@ final class PaletteMaterial extends Material {
 
 /// Reuses one [PaletteMaterial] per (atlas page, cutout mode) pair.
 ///
-/// Each distinct material is a distinct GPU pipeline, and flame_3d has no
-/// disposal API, so creating them per surface would leak pipelines for the
-/// process lifetime. The cache also gives screen flashes a single place to
+/// Each distinct material is a distinct GPU material, and GPU memory is
+/// reclaimed only when the engine collects it, so creating them per surface
+/// would grow GPU state with the surface count. The cache also gives screen flashes a single place to
 /// update every live material at once.
 final class PaletteMaterialCache {
   PaletteMaterialCache();
@@ -226,7 +204,7 @@ final class PaletteMaterialCache {
     }
   }
 
-  /// Drops every cached material. The underlying GPU pipelines are not
-  /// reclaimed, because flame_3d 0.3.2 exposes no disposal API.
+  /// Drops every cached material. The GPU side is reclaimed when the engine
+  /// collects it.
   void clear() => _materials.clear();
 }

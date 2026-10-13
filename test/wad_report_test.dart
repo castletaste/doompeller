@@ -392,9 +392,11 @@ void main() {
   );
 }
 
+// The script is invoked directly rather than through `dart run`, which would
+// first run the app package's build hooks and report that on stderr.
 Future<ProcessResult> _run(List<String> args) => Process.run(
   _dart,
-  <String>['run', 'tool/wad_report.dart', ...args],
+  <String>['tool/wad_report.dart', ...args],
   workingDirectory: Directory.current.path,
   environment: <String, String>{'DOOM_WAD_PATH': ''},
 );

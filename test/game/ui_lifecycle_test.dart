@@ -62,7 +62,7 @@ void main() {
     final tic = runtime.gameState.tic;
     await tester.pumpWidget(const SizedBox.shrink());
     runtime.dispose();
-    runtime.onRemove();
+    runtime.dispose();
     runtime.update(1);
     runtime.restartLevel();
     expect(runtime.advanceMicrosForTest(30000), 0);

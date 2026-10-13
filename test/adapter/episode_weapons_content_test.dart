@@ -10,11 +10,10 @@ import 'package:doompeller/adapter/adapter.dart';
 import 'package:doompeller/game/content_source.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
-import 'package:flame_3d/camera.dart';
-import 'package:flame_3d/game.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
+import 'package:vector_math/vector_math.dart';
 
 import 'fake_gpu_backend.dart';
 
@@ -154,10 +153,8 @@ void main() {
       expect(weapon.surface.aabb.min.y, closeTo(-0.4975, 1e-6));
       expect(weapon.surface.aabb.max.y, closeTo(-0.1875, 1e-6));
 
-      final camera = DoomCameraComponent(
-        viewport: FixedResolutionViewport(resolution: Vector2(800, 600)),
-        target: Vector3(0, 0, -1),
-      );
+      final camera = DoomCamera(target: Vector3(0, 0, -1))
+        ..setViewportSize(800, 600);
       final weaponComponents = <ViewLockedWeaponSpriteComponent>[weapon];
       const prefixes = <String>{
         'PUNG',
@@ -188,15 +185,15 @@ void main() {
       runtime.scene.syncToCamera(camera);
       for (final component in weaponComponents) {
         expect(
-          component.aabb.frustumCullTest(camera.frustum),
-          isNot(CullResult.outside),
-          reason: '${component.lumpName} is rejected by Object3D.renderTree',
+          component.frustumCulled,
+          isFalse,
+          reason: '${component.lumpName} must never be bounds-culled',
         );
       }
 
       Vector4 projected(double x, double y) {
-        final world = weapon.worldTransformMatrix * Vector4(x, y, 0, 1);
-        final clip = camera.viewProjectionMatrix * world;
+        final world = weapon.transformMatrix() * Vector4(x, y, 0, 1);
+        final clip = camera.projectionMatrix * (camera.viewMatrix * world);
         return clip / clip.w;
       }
 

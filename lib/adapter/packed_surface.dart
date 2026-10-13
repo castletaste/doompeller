@@ -1,45 +1,42 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/graphics.dart';
-import 'package:flame_3d/resources.dart';
+import 'package:vector_math/vector_math.dart';
 
+import 'doom_gpu.dart';
+import 'palette_material.dart';
 import 'render_diagnostics.dart';
 import 'vertex_abi.dart';
 
-/// A [Surface] over buffers that were already packed in flame_3d's vertex ABI.
+/// One draw of geometry already packed in Doompeller's vertex ABI.
 ///
-/// flame_3d's own [Surface] constructor insists on a list of [Vertex] objects
-/// and re-packs them into a [Float32List]. Doom geometry is produced packed
-/// already, so this subclass hands the base class an empty vertex list and
-/// overrides every geometry-facing getter. Nothing is copied and nothing is
-/// allocated per frame.
+/// Doom geometry is produced packed by the geometry compiler, so this wraps
+/// the caller's buffers without copying them and allocates nothing per frame.
 ///
 /// The buffers stay owned by the caller. Passing the same [Float32List] to a
 /// surface and then mutating it elsewhere is supported and is exactly how
 /// moving floors work: mutate, mark the touched vertices dirty, and the next
-/// draw uploads only the touched byte range into the existing GPU buffer.
+/// frame uploads only the touched byte range into the existing GPU buffer.
 ///
 /// ## Why partial uploads matter
 ///
-/// flame_3d allocates one host-visible [GpuBuffer] per surface holding vertices
-/// followed by indices. Re-creating that buffer for a height change would
-/// orphan the old one, and flame_3d 0.3.2 exposes no per-resource disposal, so
-/// orphaned buffers cannot be reclaimed on demand. Writing in place keeps the
-/// buffer count flat. Writing only the dirty range keeps a door on a merged
-/// atlas page from re-uploading megabytes of untouched wall geometry.
-final class PackedFlameSurface extends Surface {
+/// Each surface owns one GPU buffer record holding vertices followed by
+/// indices. Re-creating it for a height change would orphan the old one, and
+/// GPU memory is reclaimed only when the browser or engine collects it, never
+/// on demand. Writing in place keeps the buffer count flat. Writing only the
+/// dirty range keeps a door on a merged atlas page from re-uploading megabytes
+/// of untouched wall geometry.
+final class PackedSurface extends DoomGpuResource<DoomGpuBuffer> {
   /// Wraps [vertices] and [indices] without copying them.
   ///
   /// [bounds] must enclose every position in [vertices]; it is used for frustum
   /// culling and is not derived from the buffer, because deriving it would cost
   /// a full scan the geometry compiler has already paid for.
-  PackedFlameSurface({
+  PackedSurface({
     required Float32List vertices,
     required Uint16List indices,
     required Aabb3 bounds,
-    required Material material,
+    required this.material,
     this.kind = DoomSurfaceKind.opaque,
     this.diagnostics,
     this.debugLabel,
@@ -49,22 +46,20 @@ final class PackedFlameSurface extends Surface {
        _vertices = vertices,
        // ignore: prefer_initializing_formals
        _indices = indices,
-       _aabb = Aabb3.copy(bounds),
-       super(
-         vertices: const [],
-         indices: const [],
-         material: material,
-         calculateNormals: false,
-       ) {
+       _aabb = Aabb3.copy(bounds) {
     DoomVertexAbi.validateVertexBuffer(_vertices);
     DoomVertexAbi.validateIndexBuffer(_indices, vertexCount);
     _validateBounds(bounds);
     diagnostics?.onSurfaceCreated(triangleCount: _indices.length ~/ 3);
   }
 
-  /// What this surface draws. Only used for diagnostics and scene grouping;
-  /// blend and depth state are per render pass in flame_3d 0.3.2, never per
-  /// material.
+  /// The palette material this surface draws with.
+  ///
+  /// Sprites switch it when a frame moves to another atlas page; the presenter
+  /// rebinds the draw on the next frame.
+  PaletteMaterial material;
+
+  /// What this surface draws: drives culling mode, grouping and diagnostics.
   final DoomSurfaceKind kind;
 
   /// Optional counters, shared with the rest of the renderer.
@@ -78,7 +73,6 @@ final class PackedFlameSurface extends Surface {
 
   Aabb3 _aabb;
   Float32List? _positionsCache;
-  GpuBuffer? _buffer;
 
   /// Sorted, non-overlapping inclusive dirty vertex ranges.
   final List<(int, int)> _dirtyRanges = <(int, int)>[];
@@ -90,7 +84,7 @@ final class PackedFlameSurface extends Surface {
   Float32List get packedVertices => _vertices;
 
   /// Whether a GPU buffer has been created for this surface yet.
-  bool get hasGpuBuffer => _buffer != null;
+  bool get hasGpuBuffer => hasResource;
 
   /// Whether there are CPU-side changes not yet uploaded.
   bool get hasPendingUpload => _dirtyRanges.isNotEmpty;
@@ -98,31 +92,25 @@ final class PackedFlameSurface extends Surface {
   /// Triangles in this surface.
   int get triangleCount => _indices.length ~/ 3;
 
-  @override
   int get vertexCount => DoomVertexAbi.vertexCountOf(_vertices);
 
-  @override
   int get verticesBytes => _vertices.lengthInBytes;
 
-  @override
   int get indexCount => _indices.length;
 
-  @override
   int get indicesBytes => _indices.lengthInBytes;
 
-  @override
   Uint16List get indices => _indices;
 
-  @override
+  /// Local-space bounds enclosing every position.
   Aabb3 get aabb => _aabb;
 
-  /// Positions as flame_3d exposes them, materialized on first read.
+  /// Positions as a plain xyz array, materialized on first read.
   ///
-  /// Doompeller's own render path never needs this: positions already live
-  /// interleaved in [packedVertices]. Keeping it lazy avoids paying 12 bytes
-  /// per vertex for a view most surfaces never use, and later dirty writes are
-  /// mirrored into the cache only once it exists.
-  @override
+  /// The render path never needs this: positions already live interleaved in
+  /// [packedVertices]. Keeping it lazy avoids paying 12 bytes per vertex for a
+  /// view most surfaces never use, and later dirty writes are mirrored into
+  /// the cache only once it exists.
   Float32List get positions {
     final cached = _positionsCache;
     if (cached != null) {
@@ -140,17 +128,13 @@ final class PackedFlameSurface extends Surface {
     return _positionsCache = result;
   }
 
-  @override
-  bool get recreateResource =>
-      _buffer == null || resourceSizeInByes != verticesBytes + indicesBytes;
-
   /// The GPU buffer, flushing any pending in-place writes first.
   ///
-  /// flame_3d reads this once per draw in [GraphicsDevice.bindGeometry], which
-  /// makes it the natural upload point: a dynamic surface can be mutated any
-  /// number of times per tick and still upload at most once per frame.
+  /// The presenter reads this once per frame before drawing, which makes it
+  /// the natural upload point: a dynamic surface can be mutated any number of
+  /// times per tick and still upload at most once per frame.
   @override
-  GpuBuffer get resource {
+  DoomGpuBuffer get resource {
     final buffer = super.resource;
     if (_dirtyRanges.isNotEmpty) {
       _uploadDirtyRanges(buffer);
@@ -159,17 +143,15 @@ final class PackedFlameSurface extends Surface {
   }
 
   @override
-  GpuBuffer createResource() {
+  DoomGpuBuffer createResource() {
     final totalBytes = verticesBytes + indicesBytes;
-    resourceSizeInByes = totalBytes;
     final buffer =
-        GpuBackend.instance.createBuffer(
-            storageMode: GpuStorageMode.hostVisible,
-            sizeInBytes: totalBytes,
+        DoomGpu.instance.createSurfaceBuffer(
+            vertexBytes: verticesBytes,
+            indexBytes: indicesBytes,
           )
           ..write(_byteView(_vertices))
           ..write(_byteView(_indices), destinationOffsetInBytes: verticesBytes);
-    _buffer = buffer;
     _dirtyRanges.clear();
     diagnostics?.onGpuBufferCreated(bytes: totalBytes);
     return buffer;
@@ -314,15 +296,14 @@ final class PackedFlameSurface extends Surface {
   /// Returns whether bytes were sent. Does nothing before the first draw, since
   /// the initial [createResource] upload will include the changes anyway.
   bool flushPendingUpload() {
-    final buffer = _buffer;
-    if (buffer == null || _dirtyRanges.isEmpty) {
+    if (!hasResource || _dirtyRanges.isEmpty) {
       return false;
     }
-    _uploadDirtyRanges(buffer);
+    _uploadDirtyRanges(super.resource);
     return true;
   }
 
-  void _uploadDirtyRanges(GpuBuffer buffer) {
+  void _uploadDirtyRanges(DoomGpuBuffer buffer) {
     // Dirty tracking is vertex-granular. Even if a caller changed only atlas
     // rect floats 12..15, each upload covers the complete 80-byte records for
     // the touched vertices; it does not issue strided 16-byte writes.
@@ -404,9 +385,9 @@ final class PackedFlameSurface extends Surface {
 
 /// What a surface represents in the Doom renderer.
 ///
-/// flame_3d 0.3.2 applies blend and depth state per render pass rather than per
-/// material, so this cannot switch GPU state. It drives scene grouping, draw
-/// ordering and diagnostics instead.
+/// It drives draw ordering, grouping and diagnostics, and selects face culling:
+/// masked midtextures cull back faces so each side of a two-sided line shows
+/// only its own texture, as the original renderer does.
 enum DoomSurfaceKind {
   /// Solid walls, floors and ceilings.
   opaque,

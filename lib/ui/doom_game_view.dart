@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:doom_core/doom_core.dart' as core;
-import 'package:flame/game.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../game/frame_probe.dart';
@@ -659,21 +658,10 @@ final class _DoomInputSurface extends StatelessWidget {
   Widget _gameWidget() {
     final game = runtime;
     if (game is! DoomRuntimeGame) return const DoomRuntimeConfigurationError();
-    return GameWidget<DoomRuntimeGame>(
+    return DoomSceneSurface(
       key: const Key('doom-game-widget'),
-      game: game,
+      host: game,
       focusNode: focusNode,
-      autofocus: true,
-      backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
-      loadingBuilder: (_) => const ColoredBox(
-        color: Colors.black,
-        child: Center(child: CircularProgressIndicator()),
-      ),
-      errorBuilder: (_, error) => DoomRuntimeConfigurationError(
-        message:
-            'Could not load the game graphics. Check your connection and try again.',
-        onRetry: onRetry,
-      ),
     );
   }
 }

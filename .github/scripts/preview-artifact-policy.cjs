@@ -91,9 +91,17 @@ const REQUIRED_ROOT_FILES = new Set([
 ]);
 const REQUIRED_FILES = new Set([
   ...REQUIRED_ROOT_FILES,
-  'assets/assets/shaders/doom_palette.wgslbundle',
   APPROVED_IWAD_PATH,
 ]);
+// The renderer's compiled shaders, in either accepted form: flame_3d's WGSL
+// bundle, or flutter_scene's bundles named by content hash. Previews read this
+// policy from main, so a renderer migration must be accepted here before its
+// pull request can publish a preview.
+const LEGACY_SHADER_BUNDLE = 'assets/assets/shaders/doom_palette.wgslbundle';
+const SCENE_SHADER_PATTERNS = [
+  /^assets\/flutter_scene_generated\/opengl_es\/shaderbundle\.doom_palette\.[0-9a-f]+\.shaderbundle$/,
+  /^assets\/packages\/flutter_scene\/flutter_scene_generated\/opengl_es\/shaderbundle\.base\.[0-9a-f]+\.shaderbundle$/,
+];
 const FORBIDDEN_NAMES = new Set([
   '_routes.json',
   '_worker.js',
@@ -112,6 +120,21 @@ const FORBIDDEN_NAMES = new Set([
 
 function fail(message) {
   throw new Error(message);
+}
+
+function requireShaderBundles(entries) {
+  const paths = entries.map((entry) => entry.relativePath);
+  const legacy = paths.includes(LEGACY_SHADER_BUNDLE);
+  const sceneCounts = SCENE_SHADER_PATTERNS.map(
+    (pattern) => paths.filter((candidate) => pattern.test(candidate)).length,
+  );
+  const anyScene = sceneCounts.some((count) => count > 0);
+  if (legacy && !anyScene) return;
+  if (!legacy && sceneCounts.every((count) => count === 1)) return;
+  fail(
+    'artifact must carry either the WGSL shader bundle or exactly one of each ' +
+      `flutter_scene shader bundle (wgsl=${legacy}, scene=${sceneCounts.join('/')})`,
+  );
 }
 
 function requirePositiveSafeInteger(value, label) {
@@ -495,6 +518,7 @@ function sanitizeArtifactArchive(
     const entry = byPath.get(required);
     if (entry === undefined) fail(`artifact is missing required file: ${required}`);
   }
+  requireShaderBundles(entries);
   const iwad = byPath.get(APPROVED_IWAD_PATH);
   if (iwad === undefined) fail(`artifact is missing approved IWAD: ${APPROVED_IWAD_PATH}`);
   const iwadSha256 = crypto.createHash('sha256').update(iwad.contents).digest('hex');

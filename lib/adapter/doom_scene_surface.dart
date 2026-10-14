@@ -8,7 +8,7 @@ import 'doom_scene_presenter.dart';
 
 /// Presents a [DoomSceneHost] with flutter_scene.
 ///
-/// Each displayed frame advances the host by the frame's wall time, mirrors
+/// Each displayed frame advances the host by the frame's vsync time, mirrors
 /// its scene into the GPU scene and draws it from the host's camera. Key
 /// events reach the host while this surface holds focus. The surface owns the
 /// GPU scene; the host stays owned by its creator.

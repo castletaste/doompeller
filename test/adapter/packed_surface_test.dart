@@ -1,28 +1,40 @@
 import 'dart:typed_data';
 
 import 'package:doompeller/adapter/adapter.dart';
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/resources.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math.dart';
 
 import 'fake_gpu_backend.dart';
+
+/// A one-texel palette material; surfaces only need a material reference.
+final PaletteMaterial testMaterial = PaletteMaterial(
+  textures: PaletteTextures(
+    PaletteTextureData.encode(
+      atlasWidth: 1,
+      atlasHeight: 1,
+      atlasIndices: Uint8List(1),
+      colorMaps: Uint8List(256),
+      palettes: Uint8List(768),
+    ),
+  ),
+);
 
 void main() {
   late FakeGpuBackend backend;
 
   setUp(() => backend = FakeGpuBackend());
 
-  PackedFlameSurface buildQuad({RenderDiagnostics? diagnostics, double y = 0}) {
+  PackedSurface buildQuad({RenderDiagnostics? diagnostics, double y = 0}) {
     final vertices = DoomVertexAbi.allocate(4);
     DoomVertexAbi.writeVertex(vertices, 0, x: 0, y: y, z: 0, u: 0, v: 0);
     DoomVertexAbi.writeVertex(vertices, 1, x: 8, y: y, z: 0, u: 1, v: 0);
     DoomVertexAbi.writeVertex(vertices, 2, x: 8, y: y, z: 8, u: 1, v: 1);
     DoomVertexAbi.writeVertex(vertices, 3, x: 0, y: y, z: 8, u: 0, v: 1);
-    return PackedFlameSurface(
+    return PackedSurface(
       vertices: vertices,
       indices: Uint16List.fromList(const [0, 1, 2, 0, 2, 3]),
       bounds: Aabb3.minMax(Vector3(0, y, 0), Vector3(8, y, 8)),
-      material: Material.defaultMaterial,
+      material: testMaterial,
       diagnostics: diagnostics,
     );
   }
@@ -52,29 +64,29 @@ void main() {
 
     test('rejects malformed buffers and bounds', () {
       expect(
-        () => PackedFlameSurface(
+        () => PackedSurface(
           vertices: Float32List(13),
           indices: Uint16List.fromList(const [0, 0, 0]),
           bounds: Aabb3(),
-          material: Material.defaultMaterial,
+          material: testMaterial,
         ),
         throwsArgumentError,
       );
       expect(
-        () => PackedFlameSurface(
+        () => PackedSurface(
           vertices: DoomVertexAbi.allocate(3),
           indices: Uint16List.fromList(const [0, 1, 9]),
           bounds: Aabb3(),
-          material: Material.defaultMaterial,
+          material: testMaterial,
         ),
         throwsRangeError,
       );
       expect(
-        () => PackedFlameSurface(
+        () => PackedSurface(
           vertices: DoomVertexAbi.allocate(3),
           indices: Uint16List.fromList(const [0, 1, 2]),
           bounds: Aabb3.minMax(Vector3.all(5), Vector3.all(1)),
-          material: Material.defaultMaterial,
+          material: testMaterial,
         ),
         throwsArgumentError,
       );
@@ -98,7 +110,7 @@ void main() {
       expect(
         backend.buffers,
         hasLength(1),
-        reason: 'flame_3d cannot free GPU buffers, so none may be orphaned',
+        reason: 'GPU buffers are never freed on demand, so none may be orphaned',
       );
       expect(identical(surface.resource, buffer), isTrue);
       expect(diagnostics.gpuBuffersCreated, 1);

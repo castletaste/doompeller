@@ -1,10 +1,10 @@
 import 'dart:typed_data';
-import 'dart:ui' show Color, PixelFormat;
+import 'dart:ui' show Color;
 
-import 'package:flame_3d/resources.dart';
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
 
+import 'doom_gpu.dart';
 import 'render_diagnostics.dart';
 
 /// CPU-side encoding of the three lookup textures the palette shader reads.
@@ -16,9 +16,9 @@ import 'render_diagnostics.dart';
 ///
 /// ## Why everything is RGBA8
 ///
-/// flame_3d 0.3.2 offers rgba8888, bgra8888 and rgbaFloat32 only. There is no
-/// R8 format, so single-channel data is stored in RGBA8 and the shader reads
-/// one channel. The atlas puts the palette index in red and mask coverage in
+/// RGBA8 is the one format every renderer backend uploads and samples the same
+/// way, so single-channel data is stored in RGBA8 and the shader reads one
+/// channel. The atlas puts the palette index in red and mask coverage in
 /// alpha, which costs 4x memory but needs no second texture binding and no
 /// second sample.
 ///
@@ -273,26 +273,25 @@ final class PaletteTextureData {
 
 /// The three GPU textures bound by [PaletteMaterial].
 ///
-/// Textures are created lazily by flame_3d on first use and there is no
-/// disposal API in 0.3.2, so one set should be built per level and shared by
-/// every material.
+/// Textures are created lazily on first draw. GPU memory is reclaimed only when
+/// the engine or browser collects it, never on demand, so one set should be
+/// built per level and shared by every material.
 final class PaletteTextures {
   PaletteTextures(this.data, {RenderDiagnostics? diagnostics})
-    : indexAtlas = Texture(
-        _byteView(data.atlasRgba),
+    : indexAtlas = DoomTexture(
+        data.atlasRgba,
         width: data.atlasWidth,
         height: data.atlasHeight,
       ),
-      colorMapLut = Texture(
-        _byteView(data.colorMapRgba),
+      colorMapLut = DoomTexture(
+        data.colorMapRgba,
         width: 256,
         height: data.colorMapRows,
       ),
-      paletteLut = Texture(
-        _byteView(data.paletteRgba),
+      paletteLut = DoomTexture(
+        data.paletteRgba,
         width: 256,
         height: data.paletteRows,
-        format: PixelFormat.rgba8888,
       ) {
     diagnostics
       ?..onTextureCreated()
@@ -304,13 +303,13 @@ final class PaletteTextures {
 
   /// Indexed art. Sampled with the backend's nearest filter, which is what
   /// keeps Doom's texels crisp instead of smeared.
-  final Texture indexAtlas;
+  final DoomTexture indexAtlas;
 
   /// Light-level remap table.
-  final Texture colorMapLut;
+  final DoomTexture colorMapLut;
 
   /// Final index-to-RGB table, one row per palette variant.
-  final Texture paletteLut;
+  final DoomTexture paletteLut;
 }
 
 /// The 14 PLAYPAL variants, named.
@@ -358,3 +357,28 @@ abstract final class DoomPaletteVariant {
 
 ByteData _byteView(Uint8List bytes) =>
     bytes.buffer.asByteData(bytes.offsetInBytes, bytes.lengthInBytes);
+
+/// Tightly packed RGBA8 pixels, uploaded to the GPU on first use.
+final class DoomTexture extends DoomGpuResource<DoomGpuTexture> {
+  DoomTexture(this.rgba, {required this.width, required this.height}) {
+    if (width <= 0 || height <= 0) {
+      throw ArgumentError('Texture dimensions must be positive');
+    }
+    if (rgba.length != width * height * 4) {
+      throw ArgumentError.value(
+        rgba.length,
+        'rgba',
+        'expected ${width * height * 4} bytes for ${width}x$height RGBA8',
+      );
+    }
+  }
+
+  final Uint8List rgba;
+  final int width;
+  final int height;
+
+  @override
+  DoomGpuTexture createResource() =>
+      DoomGpu.instance.createTexture(width: width, height: height)
+        ..write(_byteView(rgba));
+}

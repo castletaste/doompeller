@@ -108,15 +108,14 @@ test('the source workflow builds PRs and uploads the exact single-file archive',
   );
 });
 
-test('clean checkout generates declared shader assets before app validation', () => {
-  const dependencies = productionWorkflow.indexOf('run: flutter pub get --enforce-lockfile');
-  const generation = productionWorkflow.indexOf('flutter pub run flame_3d:build_shaders --with-web-gpu');
-  const verification = productionWorkflow.indexOf('dart run tool/verify_web_shader_bundle.dart');
-  const analysis = productionWorkflow.indexOf('run: flutter analyze');
-  assert.ok(dependencies >= 0);
-  assert.ok(generation > dependencies);
-  assert.ok(verification > generation);
-  assert.ok(analysis > verification);
+test('shader bundles come from the app build hook, not a separate toolchain', () => {
+  // hook/build.dart compiles shaders/ with the engine's own impellerc during
+  // every flutter build and test, so CI installs no shader compiler and runs
+  // no generation step of its own.
+  assert.doesNotMatch(productionWorkflow, /naga|cargo|flame_3d|wgsl/i);
+  const hook = fs.readFileSync(path.join(__dirname, '../../hook/build.dart'), 'utf8');
+  assert.match(hook, /buildTargetShaderBundleJson\(/);
+  assert.match(hook, /shaders\/doom_palette\.shaderbundle\.json/);
 });
 
 test('CI installs ripgrep and audits contracts before the expensive build', () => {

@@ -1,41 +1,34 @@
-/// The pinned flame_3d 0.3.2 interleaved vertex ABI, expressed once.
+/// Doompeller's interleaved 20-float vertex ABI, expressed once.
 ///
-/// flame_3d builds vertex buffers by concatenating [Vertex.storage], a fixed
-/// 20-float interleaved record. Every geometry producer in this project writes
-/// that record straight into a [Float32List]; building a list of [Vertex]
-/// objects and letting [Surface] re-pack it is roughly 40x slower per remesh
-/// and allocates one object per vertex.
+/// Every geometry producer in this project writes this record straight into
+/// a [Float32List]: the geometry compiler, sprites, the weapon and the sky.
+/// The renderer uploads those buffers unchanged and binds them through the
+/// caller-declared layout in scene_gpu.dart, so nothing is re-packed and
+/// nothing is allocated per vertex.
 ///
-/// The layout is asserted float-for-float against a real [Vertex] in
-/// test/adapter/vertex_abi_test.dart. That test is the pin tripwire: if a
-/// flame_3d bump reorders or resizes the record, it fails loudly instead of
+/// test/adapter/vertex_abi_test.dart is the tripwire: it checks these offsets
+/// against the declared GPU layout and against the attribute declarations in
+/// shaders/doom_palette.vert, so a change on any side fails loudly instead of
 /// silently rendering garbage.
 ///
-/// ## Doompeller's use of the skinning slots
+/// | floats | field                                       |
+/// |--------|---------------------------------------------|
+/// | 0..2   | position (x, y, z)                          |
+/// | 3..4   | texture coordinate (u, v)                   |
+/// | 5..8   | color: sector light, reserved, reserved, alpha |
+/// | 9..11  | normal                                      |
+/// | 12..15 | atlas rect (u0, v0, u1, v1)                 |
+/// | 16..19 | (fullBright, lightRow, uvMode, depthLayer)  |
 ///
-/// flame_3d reserves floats 12..19 for GPU skinning (joints and weights).
-/// Doompeller never skins anything, so those eight floats would stay zero
-/// forever. They are repurposed as per-vertex renderer parameters:
-///
-/// | floats | flame_3d meaning | Doompeller meaning                          |
-/// |--------|------------------|---------------------------------------------|
-/// | 12..15 | joints           | atlas rect (u0, v0, u1, v1)                 |
-/// | 16..19 | weights          | (fullBright, lightRow, uvMode, depthLayer)  |
-///
-/// This is what lets one [PackedFlameSurface] draw an entire atlas page: each
-/// vertex carries its own sub-rectangle and sampling mode, so wall, flat and
-/// sprite geometry sharing a page merge into a single draw instead of one draw
-/// per texture. flame_3d 0.3.2 has no batching and insertion-sorts visible
-/// draws back-to-front, so surface count is the cost that matters most.
-///
-/// The byte layout is unchanged, so the pipeline's vertex descriptor stays
-/// identical to flame_3d's own materials. The custom vertex shader must
-/// therefore still declare vertexJoints and vertexWeights, in the same order,
-/// to preserve the 80-byte stride.
+/// Carrying the atlas rect and sampling mode per vertex is what lets one
+/// [PackedSurface] draw an entire atlas page: wall, flat and sprite geometry
+/// sharing a page merge into a single draw instead of one draw per texture,
+/// and surface count is the per-frame cost that matters most.
 library;
 
 import 'dart:typed_data';
-import 'dart:ui' show Color;
+
+import 'packed_surface.dart';
 
 /// Static description of the 20-float vertex record.
 abstract final class DoomVertexAbi {
@@ -61,21 +54,14 @@ abstract final class DoomVertexAbi {
   /// Normal (x, y, z).
   static const int normalOffset = 9;
 
-  /// flame_3d's joints slot; Doompeller's atlas rect.
-  static const int jointsOffset = 12;
-
-  /// flame_3d's weights slot; Doompeller's per-vertex surface parameters.
-  static const int weightsOffset = 16;
-
   /// Normalized atlas rectangle (u0, v0, u1, v1) for this vertex's texture.
-  static const int atlasRectOffset = jointsOffset;
+  static const int atlasRectOffset = 12;
 
   /// (fullBright, lightRowOverride, uvMode, depthLayer).
   ///
-  /// The depth-layer clip-space convention is live-verified on the current
-  /// macOS Impeller Metal target. A non-Metal backend's post-main Z remap is a
-  /// separate QA item and is not claimed by this adapter verification.
-  static const int paramsOffset = weightsOffset;
+  /// The depth layer is written as clip depth by the vertex shader, which
+  /// relies on flutter_scene's 0..w clip range with reversed depth off.
+  static const int paramsOffset = 16;
 
   /// Sector light level, 0..1, stored in the color record's red channel.
   static const int lightOffset = colorOffset;
@@ -97,8 +83,8 @@ abstract final class DoomVertexAbi {
   /// Sentinel meaning 'derive the COLORMAP row from light and distance'.
   static const double lightRowAutomatic = -1;
 
-  /// flame_3d 0.3.2 binds index buffers as uint16 only, so one surface can
-  /// address at most 65536 vertices.
+  /// Surfaces bind uint16 index buffers, so one surface can address at most
+  /// 65536 vertices.
   static const int maxVerticesPerSurface = 65535;
 
   /// First float belonging to [vertexIndex].
@@ -166,54 +152,6 @@ abstract final class DoomVertexAbi {
     target[offset + 17] = lightRowOverride;
     target[offset + 18] = uvMode;
     target[offset + 19] = depthLayer;
-  }
-
-  /// Writes the exact float record flame_3d's [Vertex] would produce.
-  ///
-  /// Only the pin tripwire test needs this. Production geometry uses
-  /// [writeVertex], which gives the skinning slots their Doompeller meaning.
-  static void writeFlameVertex(
-    Float32List target,
-    int vertexIndex, {
-    required double x,
-    required double y,
-    required double z,
-    required double u,
-    required double v,
-    required Color color,
-    required double nx,
-    required double ny,
-    required double nz,
-    required double joint0,
-    required double joint1,
-    required double joint2,
-    required double joint3,
-    required double weight0,
-    required double weight1,
-    required double weight2,
-    required double weight3,
-  }) {
-    final offset = floatOffsetOf(vertexIndex);
-    target[offset] = x;
-    target[offset + 1] = y;
-    target[offset + 2] = z;
-    target[offset + 3] = u;
-    target[offset + 4] = v;
-    target[offset + 5] = color.r;
-    target[offset + 6] = color.g;
-    target[offset + 7] = color.b;
-    target[offset + 8] = color.a;
-    target[offset + 9] = nx;
-    target[offset + 10] = ny;
-    target[offset + 11] = nz;
-    target[offset + 12] = joint0;
-    target[offset + 13] = joint1;
-    target[offset + 14] = joint2;
-    target[offset + 15] = joint3;
-    target[offset + 16] = weight0;
-    target[offset + 17] = weight1;
-    target[offset + 18] = weight2;
-    target[offset + 19] = weight3;
   }
 
   /// Overwrites only the Y coordinate of [vertexIndex].

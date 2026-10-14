@@ -1,17 +1,14 @@
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' show Canvas;
-
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
-import 'package:flame/game.dart' as flame;
-import 'package:flame_3d/camera.dart';
-import 'package:flame_3d/components.dart';
 import 'package:vector_math/vector_math.dart';
 
+import 'doom_camera.dart';
 import 'doom_sprite_atlas.dart';
 import 'doom_sprite_catalog.dart';
 import 'packed_surface.dart';
 import 'palette_material.dart';
+import 'scene_object.dart';
 import 'vertex_abi.dart';
 
 /// A mesh that translates with the camera but does not rotate with it.
@@ -19,19 +16,19 @@ import 'vertex_abi.dart';
 /// The sky and the weapon both need this: the sky must stay infinitely far
 /// away, and the weapon must stay glued to the view. Following the camera's
 /// position while keeping world orientation gives the sky its parallax-free
-/// look without a separate render pass, which matters because flame_3d applies
-/// blend and depth state per pass, not per object.
-class CameraLockedMeshComponent extends MeshComponent {
+/// look without a separate render pass.
+class CameraLockedMeshComponent extends DoomObject3D {
   CameraLockedMeshComponent({required super.mesh});
 
-  void syncToCamera(CameraComponent3D camera) {
+  @override
+  void syncToCamera(DoomCamera camera) {
     position.setFrom(camera.position);
   }
 
   /// Always drawn: a camera-locked mesh surrounds the view, so frustum culling
   /// it is both wrong and wasted work.
   @override
-  bool isVisible(CameraComponent3D camera) => true;
+  bool get frustumCulled => false;
 }
 
 /// Camera-centred sky with world-fixed orientation.
@@ -46,26 +43,25 @@ final class SkyMeshComponent extends CameraLockedMeshComponent {
 
 /// Weapon geometry locked to the camera's actual look basis.
 ///
-/// CameraComponent3D renders from position/target/up; its `rotation` field is
-/// not authoritative. Deriving the quaternion from forward/right/up keeps the
-/// weapon stable through yaw and pitch even when `target` changes directly.
+/// The camera renders from position/target/up. Deriving the quaternion from
+/// forward/right/up keeps the weapon stable through yaw and pitch even when
+/// `target` changes directly.
 class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
   ViewLockedWeaponComponent({required super.mesh, this.weaponDistance = 2});
 
   final double weaponDistance;
 
   @override
-  void syncToCamera(CameraComponent3D camera) {
+  void syncToCamera(DoomCamera camera) {
     final forward = camera.forward.normalized();
     final right = forward.cross(camera.up)..normalize();
     final up = right.cross(forward)..normalize();
-    final verticalScale =
-        2 * weaponDistance * math.tan(camera.fovY * math.pi / 360);
-    final aspectRatio = _cameraAspectRatio(camera);
+    final verticalScale = camera.viewHeightAt(weaponDistance);
+    final aspectRatio = camera.aspectRatio;
     position.setFrom(camera.position + forward * weaponDistance);
     // Weapon vertices are normalized 320x200 psprite coordinates: one local
     // unit spans the full viewport on either axis. Place the physical quad
-    // beyond DoomCamera's near plane for Flame's pre-render AABB cull, then
+    // beyond DoomCamera's near plane for bounds-based culling, then
     // scale it to the view plane so its projected size remains unchanged.
     scale.setValues(verticalScale * aspectRatio, verticalScale, verticalScale);
     rotation.setFrom(
@@ -75,26 +71,12 @@ class ViewLockedWeaponComponent extends CameraLockedMeshComponent {
   }
 }
 
-double _cameraAspectRatio(CameraComponent3D camera) {
-  // The runtime performs an initial camera sync in its constructor, before
-  // Flame has received its first layout. MaxViewport tries to read the parent
-  // game's canvas size in that state, which is not available yet.
-  final parent = camera.parent;
-  if (parent is flame.FlameGame && !parent.hasLayout) {
-    return 4 / 3;
-  }
-  final size = camera.viewport.virtualSize;
-  if (!size.x.isFinite || !size.y.isFinite || size.x <= 0 || size.y <= 0) {
-    return 4 / 3;
-  }
-  return size.x / size.y;
-}
-
 /// Upright actor sprite that rotates only around world Y.
-class YawBillboardMeshComponent extends MeshComponent {
+class YawBillboardMeshComponent extends DoomObject3D {
   YawBillboardMeshComponent({required super.mesh, super.position});
 
-  void syncToCamera(CameraComponent3D camera) {
+  @override
+  void syncToCamera(DoomCamera camera) {
     final dx = camera.position.x - position.x;
     final dz = camera.position.z - position.z;
     if (dx == 0 && dz == 0) {
@@ -126,7 +108,7 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
     required this._mirrored,
   });
 
-  final PackedFlameSurface surface;
+  final PackedSurface surface;
   final DoomSpriteAtlas spriteAtlas;
   final Map<int, PaletteMaterial> materialsByPage;
   final String spritePrefix;
@@ -211,37 +193,16 @@ final class ActorSpriteComponent extends YawBillboardMeshComponent {
       quad: quad,
     );
     surface.setBounds(quad.bounds);
-    mesh.updateBounds();
-    markAabbDirty();
     _lumpName = selection.lumpName;
     _mirrored = selection.mirrored;
   }
 
+  /// Pooled actors stay mounted; an inactive one draws nothing.
   @override
-  void update(double dt) {
-    if (!_active) {
-      return;
-    }
-    super.update(dt);
-  }
+  bool get visible => _active;
 
   @override
-  void renderTree(Canvas canvas) {
-    // flame_3d 0.3.2 bypasses isVisible() when an AABB is fully inside the
-    // frustum. Retained pooled actors therefore need a gate before Object3D's
-    // culling fast path or their last PUFF/BEXP frame remains in the draw list.
-    if (!_active) {
-      return;
-    }
-    super.renderTree(canvas);
-  }
-
-  @override
-  bool isVisible(CameraComponent3D camera) =>
-      _active && super.isVisible(camera);
-
-  @override
-  void syncToCamera(CameraComponent3D camera) {
+  void syncToCamera(DoomCamera camera) {
     if (!_active) {
       return;
     }
@@ -280,7 +241,7 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
     required this.pixelScaleY,
   });
 
-  final PackedFlameSurface surface;
+  final PackedSurface surface;
   final DoomSpriteAtlas spriteAtlas;
   final Map<int, PaletteMaterial> materialsByPage;
   String _lumpName;
@@ -291,23 +252,11 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
   bool _visible = true;
 
   String get lumpName => _lumpName;
+
+  @override
   bool get visible => _visible;
 
   void setVisible(bool value) => _visible = value;
-
-  @override
-  void renderTree(Canvas canvas) {
-    // See ActorSpriteComponent.renderTree: isVisible() is not a reliable
-    // dynamic visibility gate in the pinned flame_3d release.
-    if (!_visible) {
-      return;
-    }
-    super.renderTree(canvas);
-  }
-
-  @override
-  bool isVisible(CameraComponent3D camera) =>
-      _visible && super.isVisible(camera);
 
   bool setFrame(String lumpName, {double? viewAnchorX, double? viewAnchorY}) {
     final selection = spriteAtlas.catalog.exact(lumpName);
@@ -338,8 +287,6 @@ final class ViewLockedWeaponSpriteComponent extends ViewLockedWeaponComponent {
       quad: quad,
     );
     surface.setBounds(quad.bounds);
-    mesh.updateBounds();
-    markAabbDirty();
     _lumpName = selection.lumpName;
     this.viewAnchorX = nextX;
     this.viewAnchorY = nextY;
@@ -445,7 +392,7 @@ Float32List buildSpriteVertices({
 }
 
 void _setSpriteSelection(
-  PackedFlameSurface surface,
+  PackedSurface surface,
   geometry.AtlasEntry entry,
   int pageSize, {
   required bool mirrored,

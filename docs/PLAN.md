@@ -1,8 +1,8 @@
 # Doompeller production plan
 
-Goal: Doom running natively on Dart + Flutter + Flame 3D. Real GPU geometry
-compiled from WAD data through Flutter GPU / Impeller on macOS and flame_3d
-WebGPU in a Flutter Wasm browser build. No FFI, WebView, emulator, wrapping an
+Goal: Doom running natively on Dart + Flutter + flutter_scene. Real GPU geometry
+compiled from WAD data through Flutter GPU / Impeller on macOS and flutter_scene's
+WebGL2 backend in a Flutter Wasm browser build. No FFI, WebView, emulator, wrapping an
 existing Doom engine, or reuse of Doom's software renderer.
 
 First target level: original **E1M1** only.
@@ -26,7 +26,7 @@ render sweeps are diagnostics, not completed-level evidence.
 | M4 | `doom_core`: 35 Hz sim, movement, collision, doors/lifts, triggers | Deterministic replay hash stable; E1M1 traversable |
 | M5 | Things: sprites, pickups, enemies, AI, combat, weapons | E1M1 playable start to exit |
 | M6 | HUD, automap, sound, level exit, polish | Full E1M1 loop at 60 FPS |
-| M7 | Flutter Wasm + flame_3d WebGPU | Bundled E1M1 auto-starts at 60 FPS; local picker exists only in pause |
+| M7 | Flutter Wasm browser build (WebGPU at the time; WebGL2 since the flutter_scene migration) | Bundled E1M1 auto-starts at 60 FPS; local picker exists only in pause |
 
 ## The one big open technical risk
 
@@ -64,14 +64,18 @@ Mitigation, built into M2 rather than bolted on later:
 
 ## Renderer pin policy
 
-Flutter 3.47.7 / Dart 3.13.5, Flame 1.38.0, flame_3d 0.3.2, vector_math 2.4.0 —
-all exact. flame_3d is experimental with no semver guarantee, so all unstable
-surface area lives in `lib/adapter`. **Forking flame_3d is forbidden.** On an
-unfixable upstream or adapter blocker: stop and revisit the plan with the user.
+Flutter 3.47.7 / Dart 3.13.5, flutter_scene 0.24.3, flutter_gpu_shaders 0.5.2,
+hooks 2.0.2, vector_math 2.4.0 — all exact. flutter_scene is pre-1.0 and its
+minor releases may break, so all unstable surface area lives in `lib/adapter`,
+and its internal `src/` imports in `lib/adapter/scene_gpu.dart` alone.
+**Forking flutter_scene is forbidden.** On an unfixable upstream or adapter
+blocker: stop and revisit the plan with the user.
 
-A pinned-ABI tripwire test asserts our packed 20-float vertex layout still
-matches flame_3d's own `Vertex.storage`. Bumping any pin requires rerunning the
-shader, packed-buffer, dynamic-upload, visual, reload and performance probes.
+A pinned-ABI tripwire test asserts that our packed 20-float vertex record, the
+declared GPU vertex layout and the palette shader's attribute declarations
+agree. Bumping any pin requires rerunning the shader, packed-buffer,
+dynamic-upload, visual (including the exhaustive palette pattern), reload and
+performance probes.
 
 ## Out of scope for now
 

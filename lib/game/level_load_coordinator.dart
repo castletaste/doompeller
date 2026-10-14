@@ -66,7 +66,8 @@ final class LevelLoadFailed<T> extends LevelLoadOutcome<T> {
 /// Stale prepared data is handed to [discardPrepared].
 ///
 /// This cannot prove deterministic GPU reclamation when a published level is
-/// replaced: flame_3d 0.3.2 exposes no resource disposal API. The app therefore
+/// replaced: GPU memory is reclaimed only when the engine or browser collects
+/// it, never on demand. The app therefore
 /// keeps replacement rare and measures settled RSS across reload soaks.
 final class LevelLoadCoordinator<T> {
   // Owns CPU preparation publication. The controller's request generation is

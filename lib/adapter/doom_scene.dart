@@ -4,13 +4,11 @@ import 'dart:typed_data';
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
-import 'package:flame_3d/camera.dart';
-import 'package:flame_3d/components.dart';
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/resources.dart';
+import 'package:vector_math/vector_math.dart';
 
 import 'doom_scene_input.dart';
 import 'doom_actor_pool.dart';
+import 'doom_camera.dart';
 import 'doom_dynamic_geometry.dart';
 import 'doom_sky.dart';
 import 'doom_sprite_components.dart';
@@ -19,6 +17,7 @@ import 'palette_material.dart';
 import 'palette_textures.dart';
 import 'render_diagnostics.dart';
 import 'doom_sprite_atlas.dart';
+import 'scene_object.dart';
 import 'vertex_abi.dart';
 
 export 'doom_scene_input.dart';
@@ -33,15 +32,13 @@ export 'doom_sprite_components.dart'
         ActorSpriteInstance,
         WeaponSpriteInstance;
 
-/// Builds and owns the Flame objects for one level.
+/// Builds and owns the renderable objects for one level.
 ///
 /// ## Merging strategy
 ///
-/// flame_3d 0.3.2 has no batching. Every visible object is inserted into a
-/// draw list that is insertion-sorted back-to-front each frame, so the cost is
-/// quadratic in visible object count. Meshes are therefore merged by (atlas
-/// page, surface kind) into as few surfaces as uint16 indices allow, giving one
-/// draw per page per kind instead of one per texture.
+/// Every surface is one GPU draw with its own state changes, so meshes are
+/// merged by (atlas page, surface kind) into as few surfaces as uint16 indices
+/// allow, giving one draw per page per kind instead of one per texture.
 ///
 /// Merging stops at 65536 vertices per surface because that is the uint16
 /// index ceiling; an oversized page simply continues into another surface.
@@ -55,7 +52,7 @@ final class DoomScene {
   DoomScene._({
     required this.root,
     required this.diagnostics,
-    required Map<String, List<PackedFlameSurface>> surfacesByPage,
+    required Map<String, List<PackedSurface>> surfacesByPage,
     required List<SectorPlaneRef> floorPlanes,
     required List<SectorPlaneRef> ceilingPlanes,
     required List<WallBandRef> wallBands,
@@ -95,7 +92,7 @@ final class DoomScene {
     final materialCache = materials ?? PaletteMaterialCache();
     materialCache.beginScene();
     final root = DoomSceneRoot();
-    final surfacesByPage = <String, List<PackedFlameSurface>>{};
+    final surfacesByPage = <String, List<PackedSurface>>{};
 
     // Group first so the merge sees every mesh for a page at once.
     final groups = <(String, DoomSurfaceKind), List<SceneMeshInput>>{};
@@ -120,7 +117,7 @@ final class DoomScene {
       );
 
       for (final batch in _mergeBatches(groups[key]!)) {
-        final surface = PackedFlameSurface(
+        final surface = PackedSurface(
           vertices: batch.vertices,
           indices: batch.indices,
           bounds: batch.bounds.toAabb3(),
@@ -131,7 +128,7 @@ final class DoomScene {
         );
         surfacesByPage.putIfAbsent(page, () => []).add(surface);
 
-        final mesh = Mesh()..addSurface(surface);
+        final mesh = DoomMesh([surface]);
         counters.onMeshBuilt();
         final component = _componentFor(kind, mesh);
         counters.onComponentBuilt();
@@ -153,7 +150,7 @@ final class DoomScene {
   /// Builds directly from the pure-Dart compiler's production objects.
   ///
   /// Geometry already batches by atlas page and kind. Each [PackedMesh] stays
-  /// one [PackedFlameSurface], retaining the compiler's vertex buffer by
+  /// one [PackedSurface], retaining the compiler's vertex buffer by
   /// identity so its mesh-indexed dynamic references remain exact.
   factory DoomScene.fromCompiledLevel(
     geometry.CompiledLevel level,
@@ -170,7 +167,7 @@ final class DoomScene {
     final materialCache = materials ?? PaletteMaterialCache();
     materialCache.beginScene();
     final root = DoomSceneRoot();
-    final surfacesByPage = <String, List<PackedFlameSurface>>{};
+    final surfacesByPage = <String, List<PackedSurface>>{};
     final bindings = <int, DoomGeometryBinding>{};
     final pageTextures = <int, PaletteTextures>{};
     final spriteMaterials = <int, PaletteMaterial>{};
@@ -225,7 +222,7 @@ final class DoomScene {
         textures: textures,
         alphaCutout: _needsCutout(kind),
       );
-      final surface = PackedFlameSurface(
+      final surface = PackedSurface(
         vertices: source.vertices,
         indices: source.indices,
         bounds: _boundsOf(source.vertices),
@@ -234,15 +231,15 @@ final class DoomScene {
         diagnostics: counters,
         debugLabel: 'mesh:$meshIndex/page:${source.atlasPage}/${kind.name}',
       );
-      final flameMesh = Mesh()..addSurface(surface);
-      final component = _componentFor(kind, flameMesh);
+      final doomMesh = DoomMesh([surface]);
+      final component = _componentFor(kind, doomMesh);
       counters
         ..onMeshBuilt()
         ..onComponentBuilt();
       root.add(component);
       bindings[meshIndex] = DoomGeometryBinding(
         surface: surface,
-        mesh: flameMesh,
+        mesh: doomMesh,
         component: component,
       );
       surfacesByPage
@@ -267,7 +264,7 @@ final class DoomScene {
         material: material,
         diagnostics: counters,
       );
-      final skyMesh = Mesh()..addSurface(surface);
+      final skyMesh = DoomMesh([surface]);
       root.add(SkyMeshComponent(mesh: skyMesh));
       counters
         ..onMeshBuilt()
@@ -293,7 +290,7 @@ final class DoomScene {
     );
   }
 
-  /// Mount this under a World3D to render the level.
+  /// Every renderable object, in draw-submission order.
   final DoomSceneRoot root;
 
   final RenderDiagnostics diagnostics;
@@ -301,7 +298,7 @@ final class DoomScene {
   /// Shared materials, also the entry point for palette flashes.
   final PaletteMaterialCache materials;
 
-  final Map<String, List<PackedFlameSurface>> _surfacesByPage;
+  final Map<String, List<PackedSurface>> _surfacesByPage;
   final List<SectorPlaneRef> _floorPlanes;
   final List<SectorPlaneRef> _ceilingPlanes;
   final List<WallBandRef> _wallBands;
@@ -323,22 +320,16 @@ final class DoomScene {
 
   /// Applies the authoritative camera pose to view-dependent scene objects.
   ///
-  /// Flame exposes `currentCamera` only while traversing the render tree, not
-  /// during component updates. Keeping this explicit lets the normal runtime
-  /// update billboards, sky, and weapon immediately before rendering without
-  /// relying on that transient static.
-  void syncToCamera(CameraComponent3D camera) {
-    for (final Component3D child in root.children.whereType<Component3D>()) {
-      if (child is CameraLockedMeshComponent) {
-        child.syncToCamera(camera);
-      } else if (child is YawBillboardMeshComponent) {
-        child.syncToCamera(camera);
-      }
+  /// The runtime calls this after each simulation step so billboards, sky and
+  /// weapon match the camera the frame is drawn from.
+  void syncToCamera(DoomCamera camera) {
+    for (final child in root.children) {
+      child.syncToCamera(camera);
     }
   }
 
   /// Exact source mesh identity used by the compiler's dynamic references.
-  PackedFlameSurface surfaceForMesh(int meshIndex) {
+  PackedSurface surfaceForMesh(int meshIndex) {
     final binding = _geometryBindings[meshIndex];
     if (binding == null) {
       throw RangeError.index(meshIndex, _geometryBindings, 'meshIndex');
@@ -350,10 +341,10 @@ final class DoomScene {
   int get surfaceCount => surfaces.length;
 
   /// Every surface, in creation order.
-  Iterable<PackedFlameSurface> get surfaces =>
+  Iterable<PackedSurface> get surfaces =>
       _surfacesByPage.values.expand((list) => list).where(_surfaceIsActive);
 
-  bool _surfaceIsActive(PackedFlameSurface surface) =>
+  bool _surfaceIsActive(PackedSurface surface) =>
       _actors.surfaceIsActive(surface);
   int get actorSurfaceRegistryCount => _actors.actorSurfaceRegistryCount;
   int get activeActorSurfaceCount => _actors.activeActorSurfaceCount;
@@ -361,10 +352,8 @@ final class DoomScene {
   bool isActorSpriteActive(ActorSpriteComponent actor) => actor.active;
 
   /// Surfaces drawing [page].
-  List<PackedFlameSurface> surfacesForPage(String page) => List.unmodifiable(
-    (_surfacesByPage[page] ?? const <PackedFlameSurface>[]).where(
-      _surfaceIsActive,
-    ),
+  List<PackedSurface> surfacesForPage(String page) => List.unmodifiable(
+    (_surfacesByPage[page] ?? const <PackedSurface>[]).where(_surfaceIsActive),
   );
 
   /// Moves a floor or ceiling to [height].
@@ -493,7 +482,7 @@ final class DoomScene {
       fullBright: weapon.fullBright,
       depthLayer: weapon.depthLayer,
     );
-    final surface = PackedFlameSurface(
+    final surface = PackedSurface(
       vertices: vertices,
       indices: Uint16List.fromList(const [0, 1, 2, 0, 2, 3]),
       bounds: quad.bounds,
@@ -502,7 +491,7 @@ final class DoomScene {
       diagnostics: diagnostics,
       debugLabel: 'weapon:${weapon.lumpName}',
     );
-    final mesh = Mesh()..addSurface(surface);
+    final mesh = DoomMesh([surface]);
     final component = ViewLockedWeaponSpriteComponent(
       mesh: mesh,
       surface: surface,
@@ -578,7 +567,7 @@ final class DoomScene {
 
   static bool _writeBand(
     Float32List vertices,
-    PackedFlameSurface surface,
+    PackedSurface surface,
     WallBandRef band,
     double topHeight,
     double bottomHeight,
@@ -647,12 +636,12 @@ final class DoomScene {
     DoomSurfaceKind.weapon => 4,
   };
 
-  static Component3D _componentFor(DoomSurfaceKind kind, Mesh mesh) =>
+  static DoomObject3D _componentFor(DoomSurfaceKind kind, DoomMesh mesh) =>
       switch (kind) {
         DoomSurfaceKind.sky => SkyMeshComponent(mesh: mesh),
         DoomSurfaceKind.weapon => ViewLockedWeaponComponent(mesh: mesh),
         DoomSurfaceKind.sprite => YawBillboardMeshComponent(mesh: mesh),
-        _ => MeshComponent(mesh: mesh),
+        _ => DoomObject3D(mesh: mesh),
       };
 
   /// Splits meshes into surfaces that respect the uint16 vertex ceiling.
@@ -769,13 +758,4 @@ Aabb3 _boundsOf(Float32List vertices) {
     maxZ = math.max(maxZ, z);
   }
   return Aabb3.minMax(Vector3(minX, minY, minZ), Vector3(maxX, maxY, maxZ));
-}
-
-/// Concrete parent for a level's renderable components.
-///
-/// [Component3D] is abstract and [Object3D] would add draw and culling work for
-/// a node that has no geometry of its own, so the scene root is a plain
-/// container whose only job is to group and transform its children.
-final class DoomSceneRoot extends Component3D {
-  DoomSceneRoot({super.position, super.children});
 }

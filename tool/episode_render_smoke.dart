@@ -8,7 +8,6 @@ import 'package:doompeller/ui/doom_app.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flame/game.dart';
 
 Future<void> main() async {
   if (!const bool.fromEnvironment('DOOM_EPISODE_RENDER_SMOKE')) {
@@ -36,7 +35,7 @@ Future<void> main() async {
       gameHost: DoomGameHost(
         runtimeFactory: (level) => runtime = DoomRuntimeGame(level),
         surfaceBuilder: (_, game) =>
-            GameWidget<DoomRuntimeGame>(game: game as DoomRuntimeGame),
+            DoomSceneSurface(host: game as DoomRuntimeGame),
       ),
     ),
   );

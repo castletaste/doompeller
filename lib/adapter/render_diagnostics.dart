@@ -1,8 +1,8 @@
 /// Mutable renderer counters.
 ///
 /// Every number here is a lifetime total of things Doompeller itself did. None
-/// of them is a GPU measurement: flame_3d 0.3.2 exposes no per-resource
-/// disposal and no live-resource counter, so [gpuBuffersCreated] is a count of
+/// of them is a GPU measurement: the renderer has no per-resource disposal and
+/// no live-resource counter, so [gpuBuffersCreated] is a count of
 /// buffers this process asked for, not a count of buffers currently alive on
 /// the GPU. A number that only ever grows is the honest thing to report.
 final class RenderDiagnostics {

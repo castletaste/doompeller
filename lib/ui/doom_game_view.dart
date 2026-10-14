@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:doom_core/doom_core.dart' as core;
-import 'package:flame/game.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../game/frame_probe.dart';
@@ -30,7 +29,7 @@ typedef DoomGameSurfaceBuilder =
 ///
 /// Keeping creation and presentation together prevents a runtime from being
 /// configured without a surface that can render it. Production uses `null`
-/// here and creates the built-in Flame surface.
+/// here and creates the built-in flutter_scene surface.
 final class DoomGameHost {
   const DoomGameHost({
     required this.runtimeFactory,
@@ -659,21 +658,10 @@ final class _DoomInputSurface extends StatelessWidget {
   Widget _gameWidget() {
     final game = runtime;
     if (game is! DoomRuntimeGame) return const DoomRuntimeConfigurationError();
-    return GameWidget<DoomRuntimeGame>(
+    return DoomSceneSurface(
       key: const Key('doom-game-widget'),
-      game: game,
+      host: game,
       focusNode: focusNode,
-      autofocus: true,
-      backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
-      loadingBuilder: (_) => const ColoredBox(
-        color: Colors.black,
-        child: Center(child: CircularProgressIndicator()),
-      ),
-      errorBuilder: (_, error) => DoomRuntimeConfigurationError(
-        message:
-            'Could not load the game graphics. Check your connection and try again.',
-        onRetry: onRetry,
-      ),
     );
   }
 }

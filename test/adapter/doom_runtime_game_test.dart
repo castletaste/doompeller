@@ -11,8 +11,7 @@ import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/doom_input.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/game/sound_playback.dart';
-import 'package:flame/components.dart' show Component;
-import 'package:flame_3d/game.dart';
+import 'package:vector_math/vector_math.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
@@ -61,16 +60,6 @@ final class _FailFirstRuntimeAudioBackend extends FakeAudioBackend {
       throw StateError('synthetic runtime audio failure');
     }
     await super.play(request, onComplete: onComplete);
-  }
-}
-
-final class _UpdateDeltaProbe extends Component {
-  final List<double> deltas = <double>[];
-
-  @override
-  void update(double dt) {
-    deltas.add(dt);
-    super.update(dt);
   }
 }
 
@@ -886,7 +875,7 @@ void main() {
       await runtime.soundPlaybackIdleForTest;
       expect(backend.stopCalls, isNotEmpty);
 
-      runtime.onRemove();
+      runtime.dispose();
       await runtime.soundPlaybackIdleForTest;
       expect(backend.disposed, isTrue);
     },
@@ -1869,29 +1858,25 @@ void main() {
   );
 
   test(
-    'first render delta establishes whole Flame tree clock origin',
+    'first positive render delta establishes the clock origin',
     () async {
       final PreparedDoomLevel prepared = await fixtureExitLevel();
       final DoomRuntimeGame runtime = DoomRuntimeGame(prepared);
-      final _UpdateDeltaProbe probe = _UpdateDeltaProbe();
-      await runtime.add(probe);
 
-      // GameWidget performs a zero-delta load update; Flame may deliver
-      // another zero before the ticker's first positive elapsed interval.
+      // A surface may deliver zero deltas before its ticker reports the first
+      // positive elapsed interval, and that first interval can include
+      // mounting work. None of them may advance the simulation.
       runtime
         ..update(0)
         ..update(0)
         ..update(48);
 
-      expect(probe.deltas, isNotEmpty);
-      expect(probe.deltas, everyElement(0));
       expect(runtime.gameState.tic, 0);
       expect(runtime.tickDriver.executedTics, 0);
       expect(runtime.tickDriver.droppedTics, 0);
 
       runtime.update(0.03);
 
-      expect(probe.deltas.last, closeTo(0.03, 1e-12));
       expect(runtime.gameState.tic, 1);
       expect(runtime.tickDriver.executedTics, 1);
       expect(runtime.tickDriver.droppedTics, 0);

@@ -10,8 +10,9 @@ import 'wad_types.dart';
 ///
 /// Doom textures are palette indices, not colours: the shader has to look each
 /// index up through COLORMAP and then PLAYPAL to get lighting right. That wants
-/// a single-channel integer texture, but flame_3d 0.3.2 exposes no R8 format,
-/// so each texel is stored as RGBA8 with
+/// a single-channel integer texture, but RGBA8 is the one format every
+/// renderer backend uploads and samples the same way, so each texel is stored
+/// as RGBA8 with
 ///
 ///     R = palette index (0..255)
 ///     G = coverage      (0 transparent, 255 opaque)

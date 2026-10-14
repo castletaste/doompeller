@@ -1,17 +1,17 @@
 import 'dart:typed_data';
 
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
-import 'package:flame_3d/resources.dart';
 import 'package:vector_math/vector_math.dart';
 
 import 'packed_surface.dart';
+import 'palette_material.dart';
 import 'render_diagnostics.dart';
 import 'vertex_abi.dart';
 
-PackedFlameSurface buildSkySurface({
+PackedSurface buildSkySurface({
   required geometry.AtlasEntry entry,
   required int pageSize,
-  required Material material,
+  required PaletteMaterial material,
   required RenderDiagnostics diagnostics,
 }) {
   const extent = 500.0;
@@ -141,7 +141,7 @@ PackedFlameSurface buildSkySurface({
     1,
   );
 
-  return PackedFlameSurface(
+  return PackedSurface(
     vertices: vertices,
     indices: indices,
     bounds: Aabb3.minMax(Vector3.all(-extent), Vector3.all(extent)),

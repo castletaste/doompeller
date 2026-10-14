@@ -9,8 +9,6 @@ import 'package:doompeller/game/doom_automap.dart';
 import 'package:doompeller/game/level_preparer.dart';
 import 'package:doompeller/ui/doom_app.dart';
 import 'package:doompeller/ui/doom_automap.dart';
-import 'package:flame/events.dart';
-import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -267,19 +265,19 @@ Future<PreparedDoomLevel> _fixtureLevel() async {
   );
 }
 
-/// A render-free GameWidget surface that exercises Flame's real keyboard focus
-/// path while delegating input to the production runtime.
-final class _AutomapKeyGame extends FlameGame with KeyboardEvents {
-  _AutomapKeyGame(this.runtime);
-
-  final DoomRuntimeGame runtime;
-
-  @override
-  KeyEventResult onKeyEvent(
-    KeyEvent event,
-    Set<LogicalKeyboardKey> keysPressed,
-  ) => runtime.onKeyEvent(event, keysPressed);
-}
+/// A render-free surface with DoomSceneSurface's focus path: a [Focus] that
+/// hands every key to the production runtime. The real surface also needs a
+/// GPU, which widget tests do not have.
+Widget _automapKeySurface(DoomRuntimeGame runtime, FocusNode focusNode) =>
+    Focus(
+      key: const Key('doom-game-widget'),
+      focusNode: focusNode,
+      onKeyEvent: (_, KeyEvent event) => runtime.onKeyEvent(
+        event,
+        HardwareKeyboard.instance.logicalKeysPressed,
+      ),
+      child: const ColoredBox(color: Colors.black),
+    );
 
 void main() {
   test('one tic publishes player and multiple sector heights atomically', () {
@@ -578,14 +576,13 @@ void main() {
     );
   });
 
-  testWidgets('Tab reaches the focused live GameWidget and keeps game focus', (
+  testWidgets('Tab reaches the focused live game surface and keeps game focus', (
     tester,
   ) async {
     FakeGpuBackend();
     final level = await _fixtureLevel();
     final runtime = DoomRuntimeGame(level);
     final surfaceFocusNode = FocusNode(debugLabel: 'Automap test surface');
-    final keyGame = _AutomapKeyGame(runtime);
     final controller = DoomAppController(
       initialState: DoomAppState.ready(level),
     );
@@ -600,21 +597,17 @@ void main() {
         autoStart: false,
         gameHost: DoomGameHost(
           runtimeFactory: (_) => runtime,
-          surfaceBuilder: (_, _) => GameWidget<_AutomapKeyGame>(
-            key: const Key('doom-game-widget'),
-            game: keyGame,
-            focusNode: surfaceFocusNode,
-            backgroundBuilder: (_) => const ColoredBox(color: Colors.black),
-          ),
+          surfaceBuilder: (_, _) =>
+              _automapKeySurface(runtime, surfaceFocusNode),
         ),
       ),
     );
     await tester.pump();
 
-    final gameWidget = tester.widget<GameWidget<_AutomapKeyGame>>(
+    final surface = tester.widget<Focus>(
       find.byKey(const Key('doom-game-widget')),
     );
-    final focusNode = gameWidget.focusNode!;
+    final focusNode = surface.focusNode!;
     focusNode.requestFocus();
     await tester.pump();
     expect(focusNode.hasPrimaryFocus, isTrue);

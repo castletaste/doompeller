@@ -31,7 +31,10 @@ class CiWebArtifactTest(unittest.TestCase):
             "doom_music_worker.mjs": "export {};",
             "doom_music_worker_loader.mjs": "export {};",
             "doom_music_worklet.js": "registerProcessor('fixture', class {});",
-            "assets/assets/shaders/doom_palette.wgslbundle": "shader",
+            "assets/flutter_scene_generated/opengl_es/"
+            "shaderbundle.doom_palette.0123abcd.shaderbundle": "shader",
+            "assets/packages/flutter_scene/flutter_scene_generated/opengl_es/"
+            "shaderbundle.base.89abcdef.shaderbundle": "shader",
         }
         for relative, contents in files.items():
             path = bundle / relative
@@ -78,6 +81,22 @@ class CiWebArtifactTest(unittest.TestCase):
                 with self.assertRaisesRegex(ArtifactError, "missing required files"):
                     pack(bundle, self.root / "bundle.tar.gz")
                 path.write_bytes(contents)
+
+    def test_pack_requires_exactly_one_of_each_shader_bundle(self) -> None:
+        bundle = self._bundle()
+        palette = bundle / (
+            "assets/flutter_scene_generated/opengl_es/"
+            "shaderbundle.doom_palette.0123abcd.shaderbundle"
+        )
+        stale = palette.with_name("shaderbundle.doom_palette.feedface.shaderbundle")
+        stale.write_text("stale shader", encoding="utf-8")
+        with self.assertRaisesRegex(ArtifactError, "found 2"):
+            pack(bundle, self.root / "bundle.tar.gz")
+
+        stale.unlink()
+        palette.unlink()
+        with self.assertRaisesRegex(ArtifactError, "found 0"):
+            pack(bundle, self.root / "bundle.tar.gz")
 
     def test_extract_rejects_path_traversal(self) -> None:
         archive = self.root / "malicious.tar.gz"

@@ -150,7 +150,7 @@ Future<void> main(List<String> arguments) async {
 
 void _printUsage() {
   stdout.writeln(
-    'Usage: dart run tool/wad_report.dart [--scale-fixture] [--map E1M1] [--json] '
+    'Usage: dart tool/wad_report.dart [--scale-fixture] [--map E1M1] [--json] '
     '<path-to-wad>',
   );
   stdout.writeln(

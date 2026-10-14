@@ -5,8 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// A Dart mirror of the fragment shader's UV resolution.
 ///
-/// The shader itself cannot be executed in a widget test: flame_3d needs a real
-/// GPU to compile a pipeline. This oracle reproduces the exact arithmetic in
+/// The shader itself cannot be executed in a widget test: flutter_scene needs a
+/// real GPU to compile a pipeline. This oracle reproduces the exact arithmetic in
 /// shaders/doom_palette.frag so the seam and bleed rules can be verified on
 /// CPU. It must be updated in lockstep with the shader.
 ({double u, double v}) resolveAtlasUv({

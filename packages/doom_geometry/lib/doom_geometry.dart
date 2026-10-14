@@ -1,6 +1,6 @@
 /// Pure Dart Doom level geometry compiler.
 ///
-/// Turns parsed map lumps into packed, GPU-ready meshes with no Flutter, Flame
+/// Turns parsed map lumps into packed, GPU-ready meshes with no Flutter, renderer
 /// or dart:ui dependency. The entry point is [DoomGeometryCompiler.compile];
 /// everything else here exists so the result can be inspected, validated and
 /// updated in place at runtime.

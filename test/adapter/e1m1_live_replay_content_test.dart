@@ -49,7 +49,7 @@ void main() {
           onFinished: (DoomReplayResult result) => callbackResult = result,
         ),
       );
-      for (final PackedFlameSurface surface in runtime.scene.surfaces) {
+      for (final PackedSurface surface in runtime.scene.surfaces) {
         surface.resource;
       }
 

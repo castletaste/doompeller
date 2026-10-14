@@ -35,18 +35,19 @@ git check-ignore -q .local/doom/DOOM.WAD ||
 git check-ignore -q sample.wad || fail "lowercase WAD extension is not ignored"
 git check-ignore -q sample.WAD || fail "uppercase WAD extension is not ignored"
 
-if git ls-files --error-unmatch assets/shaders/doom_palette.shaderbundle >/dev/null 2>&1
-then
+# Shader bundles are compiled by hook/build.dart for the engine that runs
+# them, so only the generated directories' own .gitignore files are tracked.
+tracked_generated=$(git ls-files flutter_scene_generated | rg -v "(^|/)\.gitignore$" || true)
+if [ -n "$tracked_generated" ]; then
+  printf '%s\n' "$tracked_generated" >&2
   fail "compiled shader bundle is tracked instead of reproducibly built"
 fi
-git check-ignore -q assets/shaders/doom_palette.shaderbundle ||
-  fail "compiled shader bundle is not ignored"
-if git ls-files --error-unmatch assets/shaders/doom_palette.wgslbundle >/dev/null 2>&1
-then
-  fail "compiled WebGPU shader bundle is tracked instead of reproducibly built"
-fi
-git check-ignore -q assets/shaders/doom_palette.wgslbundle ||
-  fail "compiled WebGPU shader bundle is not ignored"
+git check-ignore -q \
+  flutter_scene_generated/opengl_es/shaderbundle.doom_palette.0.shaderbundle ||
+  fail "compiled web shader bundle is not ignored"
+git check-ignore -q \
+  flutter_scene_generated/metal_desktop/shaderbundle.doom_palette.0.shaderbundle ||
+  fail "compiled macOS shader bundle is not ignored"
 
 need_line "Cross-Origin-Opener-Policy: same-origin" web/_headers
 need_line "Cross-Origin-Embedder-Policy: credentialless" web/_headers

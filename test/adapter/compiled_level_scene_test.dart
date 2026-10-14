@@ -5,10 +5,8 @@ import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_wad/doom_wad.dart' as wad;
 import 'package:doompeller/adapter/adapter.dart';
-import 'package:flame_3d/camera.dart';
-import 'package:flame_3d/game.dart';
-import 'package:flame_3d/resources.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vector_math/vector_math.dart';
 
 import 'fake_gpu_backend.dart';
 
@@ -505,7 +503,7 @@ void main() {
       );
       final scene = DoomScene.fromCompiledLevel(skyLevel, resources);
       final sky = scene.root.children.whereType<SkyMeshComponent>().single;
-      final camera = CameraComponent3D(
+      final camera = DoomCamera(
         position: Vector3(4, 5, 6),
         target: Vector3(5, 5, 6),
       );
@@ -515,7 +513,7 @@ void main() {
       camera.target.setValues(4, 5, 5);
       sky.syncToCamera(camera);
       expect(sky.rotation, before, reason: 'sky orientation stays world-fixed');
-      final surface = sky.mesh.surfaces.single as PackedFlameSurface;
+      final surface = sky.mesh.surfaces.single;
       expect(surface.kind, DoomSurfaceKind.sky);
       expect(surface.vertexCount, 24);
       expect(surface.packedVertices[DoomVertexAbi.paramsOffset], 1);
@@ -545,13 +543,12 @@ void main() {
   );
 
   test('weapon follows target-derived yaw and pitch', () {
-    final mesh = Mesh();
+    final mesh = DoomMesh();
     final weapon = ViewLockedWeaponComponent(mesh: mesh);
-    final camera = CameraComponent3D(
-      viewport: FixedResolutionViewport(resolution: Vector2(800, 600)),
+    final camera = DoomCamera(
       position: Vector3.zero(),
       target: Vector3(0, 0, -1),
-    );
+    )..setViewportSize(800, 600);
     weapon.syncToCamera(camera);
     final forward = camera.forward.normalized();
     expect(weapon.position.dot(forward), closeTo(weapon.weaponDistance, 1e-6));
@@ -573,10 +570,10 @@ void main() {
 
   test('billboard stays upright around four camera headings', () {
     final billboard = YawBillboardMeshComponent(
-      mesh: Mesh(),
+      mesh: DoomMesh(),
       position: Vector3.zero(),
     );
-    final camera = CameraComponent3D();
+    final camera = DoomCamera();
     for (final point in <Vector3>[
       Vector3(10, 7, 0),
       Vector3(0, -3, 10),
@@ -610,9 +607,9 @@ void main() {
       ),
     );
     expect(scene.surfaceCount, before + 1);
-    expect(actor.mesh.surfaces.single, isA<PackedFlameSurface>());
+    expect(actor.mesh.surfaces.single, isA<PackedSurface>());
     expect(
-      (actor.mesh.surfaces.single as PackedFlameSurface).kind,
+      actor.mesh.surfaces.single.kind,
       DoomSurfaceKind.sprite,
     );
     final vertices = actor.surface.packedVertices;
@@ -640,7 +637,7 @@ void main() {
       light: 0.4,
       fullBright: true,
     );
-    final camera = CameraComponent3D(position: Vector3(20, 3, 24));
+    final camera = DoomCamera(position: Vector3(20, 3, 24));
     native.syncToCamera(camera);
     native.surface.resource;
     expect(native.position, Vector3(20, 3, -8));
@@ -699,7 +696,7 @@ void main() {
       );
       actor.surface.resource;
       final bufferCount = backend.buffers.length;
-      final camera = CameraComponent3D(target: Vector3(0, 0, -1));
+      final camera = DoomCamera(target: Vector3(0, 0, -1));
       final seen = <String>{};
       var sawMirror = false;
       for (var i = 0; i < 8; i++) {
@@ -817,7 +814,7 @@ void main() {
       resources,
       materials: cache,
     );
-    final firstMaterial = first.surfaces.first.material as PaletteMaterial;
+    final firstMaterial = first.surfaces.first.material;
 
     final secondSet = wad.DoomFixtures.wadSet();
     final secondResources = wad.WadResources.load(secondSet);
@@ -831,7 +828,7 @@ void main() {
       secondResources,
       materials: cache,
     );
-    final secondMaterial = second.surfaces.first.material as PaletteMaterial;
+    final secondMaterial = second.surfaces.first.material;
     expect(identical(firstMaterial, secondMaterial), isFalse);
     expect(identical(firstMaterial.textures, secondMaterial.textures), isFalse);
   });

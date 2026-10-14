@@ -1,5 +1,5 @@
 name: doompeller
-description: "Doom, rewritten natively on Dart + Flutter + Flame 3D."
+description: "Doom, rewritten natively on Dart + Flutter + flutter_scene."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -7,13 +7,15 @@ environment:
   sdk: ^3.12.2
   flutter: 3.47.7
 
-# Versions are pinned exactly. flame_3d is experimental and has no semver
-# guarantees; every bump requires rerunning the renderer probe suite.
+# Versions are pinned exactly. flutter_scene is pre-1.0 and its minor releases
+# may break; every bump requires rerunning the renderer probe suite.
 dependencies:
   flutter:
     sdk: flutter
-  flame: 1.38.0
-  flame_3d: 0.3.2
+  flutter_scene: 0.24.3
+  # Build-hook inputs for the palette shader bundle (hook/build.dart).
+  flutter_gpu_shaders: 0.5.2
+  hooks: 2.0.2
   vector_math: 2.4.0
   web: 1.1.1
   doom_wad:
@@ -33,5 +35,16 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/shaders/
     - .local/doom/DOOM1.WAD
+    # Shader bundles compiled by hook/build.dart for the running engine. Each
+    # target's bundles sit in their own directory so a platform ships only
+    # the ones it loads.
+    - flutter_scene_generated/
+    - path: flutter_scene_generated/metal_ios/
+      platforms: [ios]
+    - path: flutter_scene_generated/metal_desktop/
+      platforms: [macos]
+    - path: flutter_scene_generated/opengl_es_vulkan/
+      platforms: [android, linux, windows]
+    - path: flutter_scene_generated/opengl_es/
+      platforms: [web]

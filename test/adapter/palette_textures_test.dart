@@ -206,7 +206,7 @@ void main() {
       final data = encode(width: 8, height: 4);
       final textures = PaletteTextures(data, diagnostics: diagnostics);
 
-      // flame_3d creates resources lazily.
+      // GPU textures are created lazily, on first use.
       textures.indexAtlas.resource;
       textures.colorMapLut.resource;
       textures.paletteLut.resource;
@@ -216,7 +216,7 @@ void main() {
       expect(
         backend.textures.every((t) => t.format.name == 'rgba8888'),
         isTrue,
-        reason: 'flame_3d 0.3.2 has no R8 format',
+        reason: 'every lookup is uploaded as RGBA8',
       );
       expect((backend.textures[0].width, backend.textures[0].height), (8, 4));
       expect(

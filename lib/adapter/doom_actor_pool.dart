@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flame_3d/resources.dart';
 import 'package:vector_math/vector_math.dart';
 
 import 'doom_sprite_atlas.dart';
@@ -8,6 +7,7 @@ import 'doom_sprite_components.dart';
 import 'packed_surface.dart';
 import 'palette_material.dart';
 import 'render_diagnostics.dart';
+import 'scene_object.dart';
 
 /// Owns actor membership and reuse. The scene registers a surface only once,
 /// when the pool allocates it; inactive components retain their GPU resources.
@@ -29,10 +29,10 @@ final class DoomActorPool {
       <ActorSpriteComponent>{};
   final Map<String, List<ActorSpriteComponent>> _actorPool =
       <String, List<ActorSpriteComponent>>{};
-  final Map<PackedFlameSurface, ActorSpriteComponent> _actorBySurface =
-      <PackedFlameSurface, ActorSpriteComponent>{};
+  final Map<PackedSurface, ActorSpriteComponent> _actorBySurface =
+      <PackedSurface, ActorSpriteComponent>{};
 
-  bool surfaceIsActive(PackedFlameSurface surface) =>
+  bool surfaceIsActive(PackedSurface surface) =>
       _actorBySurface[surface]?.active ?? true;
 
   /// Actor surfaces retained for reuse, active plus pooled.
@@ -102,7 +102,7 @@ final class DoomActorPool {
       fullBright: actor.fullBright,
       alpha: actor.fuzz ? 0.5 : 1,
     );
-    final surface = PackedFlameSurface(
+    final surface = PackedSurface(
       vertices: vertices,
       indices: Uint16List.fromList(const [0, 1, 2, 0, 2, 3]),
       bounds: quad.bounds,
@@ -111,7 +111,7 @@ final class DoomActorPool {
       diagnostics: diagnostics,
       debugLabel: 'actor:$prefix',
     );
-    final mesh = Mesh()..addSurface(surface);
+    final mesh = DoomMesh([surface]);
     final component = ActorSpriteComponent(
       mesh: mesh,
       position: Vector3(actor.x, actor.y, actor.z),

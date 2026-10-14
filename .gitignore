@@ -60,6 +60,4 @@ app.*.map.json
 *.PWAD
 *.deh
 *.DEH
-/assets/shaders/*.shaderbundle
-/assets/shaders/*.wgslbundle
 /artifacts/

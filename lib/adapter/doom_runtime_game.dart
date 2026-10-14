@@ -2,12 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:doom_core/doom_core.dart';
-import 'package:flame/events.dart';
-import 'package:flame_3d/camera.dart';
-import 'package:flame_3d/game.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
+import 'package:vector_math/vector_math.dart';
 
 import '../game/doom_hud.dart';
 import '../game/doom_automap.dart';
@@ -22,6 +20,7 @@ import '../game/audio_session.dart';
 import 'doom_scene.dart';
 import 'doom_sprite_catalog.dart';
 import 'doom_camera.dart';
+import 'doom_scene_host.dart';
 import 'palette_textures.dart';
 
 export '../game/doom_replay_input.dart';
@@ -61,10 +60,12 @@ const Set<String> _completionTransientSprites = <String>{
   'TFOG',
 };
 
-/// Production 35 Hz simulation and retained Flame 3D scene boundary.
-final class DoomRuntimeGame extends FlameGame3D
-    with KeyboardEvents
-    implements DoomRuntimeView {
+/// Production 35 Hz simulation and the retained scene it presents.
+///
+/// The runtime owns simulation, input, audio and HUD publication. It draws
+/// nothing itself: a scene surface calls [update] once per displayed frame and
+/// presents [scene] from [camera].
+final class DoomRuntimeGame implements DoomRuntimeView, DoomSceneHost {
   @override
   LevelExit? get levelExit => gameState.levelExit;
 
@@ -146,7 +147,7 @@ final class DoomRuntimeGame extends FlameGame3D
     this._onLevelComplete,
     this._audioBackend,
     this._soundPlayback, {
-    required CameraComponent3D camera,
+    required this.camera,
     required Set<String> packedSpritePrefixes,
   }) : tickDriver = FixedTickDriver(
          maxTicsPerFrame: gameState.config.maxCatchUpTics,
@@ -162,8 +163,7 @@ final class DoomRuntimeGame extends FlameGame3D
        _sectorCeilings = <double>[
          for (final sector in gameState.sectors)
            fixedToDouble(sector.ceilingHeight),
-       ],
-       super(camera: camera) {
+       ] {
     _level = level;
     _scene = scene;
     _automap.updatePlayer(
@@ -179,10 +179,14 @@ final class DoomRuntimeGame extends FlameGame3D
 
   late final PreparedDoomLevel _level;
   late final DoomScene _scene;
+
+  @override
+  final DoomCamera camera;
   bool _disposed = false;
   PreparedDoomLevel get level => _level;
   late final Set<String> _availableSpriteNames = level.resources.spriteNames
       .toSet();
+  @override
   DoomScene get scene => _scene;
   GameState gameState;
   FixedTickDriver tickDriver;
@@ -274,21 +278,14 @@ final class DoomRuntimeGame extends FlameGame3D
   Color backgroundColor() => const Color(0xFF000000);
 
   @override
-  Future<void> onLoad() async {
-    await super.onLoad();
-    if (!_disposed) world.add(scene.root);
-  }
-
-  @override
   void update(double dt) {
     if (_disposed) return;
-    // GameWidget can issue zero-delta lifecycle updates before Flame's ticker
-    // reports its first positive interval. Those zeroes do not establish a
-    // render-clock origin. The first positive interval can include mounting
-    // and first-render work, so let the Flame tree process lifecycle events at
-    // zero delta without fast-forwarding either it or the Doom simulation.
+    // A surface can issue zero-delta updates before its ticker reports the
+    // first positive interval. Those zeroes do not establish a render-clock
+    // origin. The first positive interval can include mounting and
+    // first-render work, so it is consumed without fast-forwarding the Doom
+    // simulation.
     final bool establishingRenderClock = !_renderClockPrimed && dt > 0;
-    super.update(establishingRenderClock ? 0 : dt);
     _processPauseToggle();
     if (establishingRenderClock) {
       _renderClockPrimed = true;
@@ -589,12 +586,6 @@ final class DoomRuntimeGame extends FlameGame3D
   }
 
   @override
-  void onRemove() {
-    dispose();
-    super.onRemove();
-  }
-
-  @override
   KeyEventResult onKeyEvent(
     KeyEvent event,
     Set<LogicalKeyboardKey> keysPressed,
@@ -628,11 +619,11 @@ final class DoomRuntimeGame extends FlameGame3D
     return KeyEventResult.handled;
   }
 
-  static CameraComponent3D _cameraFor(PlayerView player) {
+  static DoomCamera _cameraFor(PlayerView player) {
     final double x = fixedToDouble(player.x);
     final double y = fixedToDouble(player.viewZ);
     final double z = -fixedToDouble(player.y);
-    return DoomCameraComponent(
+    return DoomCamera(
       position: Vector3(x, y, z),
       target: Vector3(x + 64, y, z),
     );
@@ -644,7 +635,7 @@ final class DoomRuntimeGame extends FlameGame3D
   static double _bamRadians(int angle) =>
       normalizeAngle(angle) * (math.pi * 2 / kAngMax);
 
-  /// flame_3d/catalog yaw uses zero at world +Z; Doom BAM zero faces +X.
+  /// The sprite catalog measures yaw from world +Z; Doom BAM zero faces +X.
   static double worldActorYawForBam(int angle) =>
       _bamRadians(angle) + math.pi / 2;
 }

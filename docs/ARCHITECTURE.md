@@ -1,7 +1,7 @@
 # Runtime boundaries
 
 Doompeller keeps WAD decoding, geometry compilation, deterministic gameplay and
-MUS/GENMIDI sequencing in four pure-Dart packages. Flutter, Flame 3D, browser
+MUS/GENMIDI sequencing in four pure-Dart packages. Flutter, flutter_scene, browser
 APIs and native audio stay in the app adapters. Rendering and audio consume
 simulation output; they do not decide gameplay state or replay hashes.
 
@@ -41,7 +41,27 @@ The game view owns the runtime, focus, lifecycle observer and optional frame
 probe. `DoomRuntimeView` is a complete host contract covering observables,
 input, pause, audio focus and disposal. `DoomGameHost` keeps custom runtime
 creation paired with its surface builder so a mounted runtime cannot lack a
-renderer. Production uses the built-in Flame surface.
+renderer. Production uses the built-in `DoomSceneSurface`.
+
+## Rendering
+
+The renderer core in `lib/adapter` is plain data: packed surfaces with their
+dirty vertex ranges, sprite, weapon and sky objects with their transforms,
+palette materials with their uniform state, and `DoomCamera`. GPU objects are
+created only through `DoomGpu`, which production installs in
+`initializeDoomRenderer` and tests replace with a recording fake, so every
+geometry, animation and upload rule runs under `flutter test`.
+
+`DoomSceneSurface` owns the frame clock and focus. Each displayed frame it
+advances the host (`DoomSceneHost`: the runtime or the renderer smoke
+harness), then `DoomScenePresenter` mirrors the scene into a flutter_scene
+`Scene`: one node per object, one shader material per palette material and
+culling mode, and geometries that read the surfaces' own buffers. Only changed
+vertex ranges and uniform blocks are uploaded. The palette shader draws with
+`DoomCamera`'s own view and projection, so the image does not depend on
+flutter_scene's camera conventions; flutter_scene's camera is used only to cull.
+Scene settings make the resolve pass an exact sRGB re-encode, so PLAYPAL bytes
+reach the screen unchanged.
 
 The game surface keeps stable widget identity while HUD, overlays and automap
 listen in their own subtrees. Loading, failure and ready are sealed app states;
@@ -82,7 +102,7 @@ the previous owner's cleanup before the new owner can send commands.
 
 Commercial WAD files stay developer-local and ignored. Synthetic fixtures are
 source-generated. The app does not embed, wrap, download or extract another
-Doom engine, and direct Flame 3D usage remains confined to `lib/adapter`.
+Doom engine, and direct flutter_scene usage remains confined to `lib/adapter`.
 
 The 20-float vertex ABI, dependency versions and replay/geometry hashes are
 explicit contracts. Run the project and content audits through
@@ -91,6 +111,7 @@ Use `dart run tool/test.dart` for synthetic app tests and add
 `--include-content` with a local `DOOM_WAD_PATH` for original-content
 acceptance. The local IWAD is never committed.
 
-The macOS and web targets retain their existing Impeller/WebGPU requirements.
-Flame 3D does not expose per-resource GPU disposal, so stable resource counts
-are regression evidence rather than proof of native reclamation.
+macOS renders through Flutter GPU on Impeller Metal; the web renders through
+flutter_scene's WebGL2 backend under Wasm. GPU objects are reclaimed when the
+engine or browser collects them, never on demand, so stable resource counts are
+regression evidence rather than proof of reclamation.

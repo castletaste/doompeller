@@ -3,11 +3,10 @@ import 'dart:typed_data';
 import 'package:doom_core/doom_core.dart' as core;
 import 'package:doom_geometry/doom_geometry.dart' as geometry;
 import 'package:doom_wad/doom_wad.dart' as wad;
-import 'package:flame_3d/components.dart';
-import 'package:flame_3d/resources.dart';
 
 import 'packed_surface.dart';
 import 'render_diagnostics.dart';
+import 'scene_object.dart';
 
 /// Applies simulation journals to retained world buffers and their GPU bindings.
 /// Sprite lifecycle and scene assembly do not participate in these mutations.
@@ -117,7 +116,6 @@ final class DoomDynamicGeometry {
       binding.surface
         ..markVertexRangeDirty(range.firstVertex, range.vertexCount)
         ..expandBoundsY(height);
-      binding.markBoundsDirty();
     }
     diagnostics.onDynamicUpdate();
     return true;
@@ -273,7 +271,6 @@ final class DoomDynamicGeometry {
         )
         ..expandBoundsY(band.bottom)
         ..expandBoundsY(band.top);
-      binding.markBoundsDirty();
     }
     diagnostics.onDynamicUpdate();
     return affected.length;
@@ -445,14 +442,9 @@ final class DoomGeometryBinding {
     required this.component,
   });
 
-  final PackedFlameSurface surface;
-  final Mesh mesh;
-  final Component3D component;
-
-  void markBoundsDirty() {
-    mesh.updateBounds();
-    component.markAabbDirty();
-  }
+  final PackedSurface surface;
+  final DoomMesh mesh;
+  final DoomObject3D component;
 }
 
 void _writeAtlasRect(
